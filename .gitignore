@@ -1,0 +1,28 @@
+# Secrets
+.env
+
+# Data — FinAccess .dta is licensed, never commit
+data/raw/*
+!data/raw/.gitkeep
+
+# Virtual environment
+.venv/
+
+# Experiment results (regenerable; keep the folder, not the outputs)
+experiments/**/results/*
+!experiments/**/results/.gitkeep
+
+# Model / dataset caches
+.hf_cache/
+
+# Python
+__pycache__/
+*.pyc
+*.egg-info/
+.pytest_cache/
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
