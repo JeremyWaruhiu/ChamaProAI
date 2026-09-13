@@ -10,6 +10,7 @@ Usage:
     python run_bakeoff.py --systems nllb       # one system only
     python run_bakeoff.py --n 20 --delay 8     # smoke test with slower pacing
     python run_bakeoff.py --score-only         # re-score existing results
+    python run_bakeoff.py --systems khaya --yes  # skip Khaya's quota confirmation
 """
 from __future__ import annotations
 
@@ -145,22 +146,64 @@ class NLLBTranslator(Translator):
         return out
 
 
-class KhayaTranslator(Translator):
-    """GhanaNLP Khaya API. Placeholder until Kikuyu support is confirmed.
+class AbortRun(Exception):
+    """Stop this system's run entirely (don't move on to the next sentence).
 
-    To enable: confirm the endpoint + language code in the Khaya studio, fill in
-    translate(), and run with --systems gemini,nllb,khaya.
+    Raised when continuing would spend more calls on a request that is broken
+    the same way every time: auth/quota rejections, or a response we can't parse.
+    """
+
+
+class KhayaTranslator(Translator):
+    """GhanaNLP Khaya Translation API v2 (ISO 639-3 pair codes).
+
+    QUOTA: free tier is 100 calls/month across the whole product. So:
+      - exactly one HTTP attempt per sentence, never _retry()
+      - auth/quota errors and unparseable responses abort the whole run
+      - the main loop asks for confirmation before the first call
     """
 
     name = "khaya"
+    BASE_URL = "https://translation-api.ghananlp.org/v2"
+    LANG_PAIR = "kik-eng"
+    MAX_CHARS = 1000
+    confirm_before_run = True
 
-    def __init__(self, delay: float):
+    def __init__(self, delay: float = 1.0):
         self.key = config.require("KHAYA_API_KEY")
-        self.delay = delay
-        raise NotImplementedError("Khaya: confirm Kikuyu support and endpoint, then implement translate()")
+        self.delay = delay  # >0 puts us on the one-at-a-time, save-after-each path
 
-    def translate(self, text: str) -> str:  # pragma: no cover
-        raise NotImplementedError
+    def translate(self, text: str) -> str:
+        import requests
+
+        assert len(text) <= self.MAX_CHARS, f"Khaya limit is {self.MAX_CHARS} chars; got {len(text)}"
+        r = requests.post(
+            f"{self.BASE_URL}/translate",
+            headers={"Ocp-Apim-Subscription-Key": self.key, "Content-Type": "application/json"},
+            json={"in": text, "lang": self.LANG_PAIR},
+            timeout=60,
+        )
+        if r.status_code in (401, 403, 429):
+            raise AbortRun(f"HTTP {r.status_code} (auth/quota) - raw response:\n{r.text[:1000]}")
+        if r.status_code != 200:
+            # Other server errors: this sentence is lost, but the next may work.
+            raise RuntimeError(f"HTTP {r.status_code}: {r.text[:200]}")
+        return self._parse(r)
+
+    @staticmethod
+    def _parse(r) -> str:
+        """Accept only shapes we recognise; anything else aborts with the raw body."""
+        try:
+            body = r.json()
+        except ValueError:
+            raise AbortRun(f"non-JSON response - raw:\n{r.text[:1000]}")
+        if isinstance(body, str) and body.strip():
+            return body.strip()
+        if isinstance(body, dict):
+            str_vals = [v for v in body.values() if isinstance(v, str) and v.strip()]
+            if len(str_vals) == 1:
+                return str_vals[0].strip()
+        raise AbortRun(f"unexpected response shape - raw:\n{json.dumps(body, ensure_ascii=False)[:1000]}")
 
 
 def build_systems(names: list[str], args) -> list[Translator]:
@@ -171,7 +214,7 @@ def build_systems(names: list[str], args) -> list[Translator]:
         elif n == "nllb":
             systems.append(NLLBTranslator())
         elif n == "khaya":
-            systems.append(KhayaTranslator(args.delay))
+            systems.append(KhayaTranslator())
         else:
             sys.exit(f"unknown system {n!r}; choose from gemini, nllb, khaya")
     return systems
@@ -230,7 +273,15 @@ def save_results(data: dict) -> None:
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
     tmp = RESULTS_PATH.with_suffix(".json.tmp")
     tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
-    tmp.replace(RESULTS_PATH)  # atomic on the same filesystem
+    # Atomic on the same filesystem. On Windows the rename can be denied for a
+    # moment if an editor/indexer has the target open, so retry briefly.
+    for attempt in range(10):
+        try:
+            tmp.replace(RESULTS_PATH)
+            return
+        except PermissionError:
+            time.sleep(0.5 * (attempt + 1))
+    tmp.replace(RESULTS_PATH)  # final attempt: let the error surface
 
 
 # ---------------------------------------------------------------------------
@@ -306,9 +357,10 @@ def main() -> None:
     ap.add_argument("--n", type=int, default=100, help="number of sentence pairs (default 100)")
     ap.add_argument("--systems", default="gemini,nllb", help="comma-separated: gemini,nllb,khaya")
     ap.add_argument("--delay", type=float, default=7.0, help="seconds between API calls (free tier ~10 RPM)")
-    ap.add_argument("--gemini-model", default="gemini-2.5-flash")
+    ap.add_argument("--gemini-model", default="gemini-3.8-flash", help="2.5-flash is retired for new API users; 3.8 accepts thinking_budget=0")
     ap.add_argument("--examples", type=int, default=5)
     ap.add_argument("--score-only", action="store_true", help="skip translation; re-score existing results")
+    ap.add_argument("--yes", action="store_true", help="skip the confirmation prompt for metered APIs (Khaya)")
     args = ap.parse_args()
     sys_names = [s.strip() for s in args.systems.split(",") if s.strip()]
 
@@ -330,13 +382,27 @@ def main() -> None:
             print(f"\n  {system.name}: {len(todo)} to do, {len(data['sentences']) - len(todo)} cached")
             if not todo:
                 continue
+            if getattr(system, "confirm_before_run", False) and not args.yes:
+                print(f"  >> {system.name} will make {len(todo)} API call(s) against a metered quota.")
+                try:
+                    ok = input("  >> Proceed? [y/N] ").strip().lower() == "y"
+                except EOFError:  # non-interactive shell: never proceed silently
+                    ok = False
+                if not ok:
+                    print(f"  {system.name}: skipped (re-run with --yes to skip this prompt)")
+                    continue
             t0 = time.time()
             if system.delay:  # API: one at a time, save after each, sleep between
                 for k, s in enumerate(todo, 1):
                     try:
                         s["outputs"][system.name] = system.translate(s["src"])
+                    except AbortRun as e:
+                        save_results(data)
+                        print(f"\n    STOP [{s['id']}] {system.name}: {e}\n")
+                        print(f"  {system.name}: aborted after {k - 1} successful call(s); results saved.")
+                        sys.exit(2)
                     except Exception as e:  # noqa: BLE001
-                        print(f"    x [{s['id']}] FAILED permanently: {e}")
+                        print(f"    x [{s['id']}] FAILED: {e}")
                         s["outputs"][system.name] = None
                     save_results(data)
                     print(f"    {k}/{len(todo)} [{s['id']}] {str(s['outputs'][system.name])[:70]}")
