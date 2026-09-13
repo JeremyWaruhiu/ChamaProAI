@@ -1,0 +1,12 @@
+# CPU-only torch. The --index-url line makes the intent explicit: no CUDA build.
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch>=2.3,<3
+
+transformers>=4.44,<5
+datasets>=2.20
+sentencepiece            # NLLB tokenizer backend
+sacrebleu>=2.4
+python-dotenv>=1.0
+google-genai>=1.0
+pandas>=2.2
+pyreadstat>=1.2
