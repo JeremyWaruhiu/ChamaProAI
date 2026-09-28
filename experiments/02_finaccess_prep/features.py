@@ -32,7 +32,11 @@ DEMOGRAPHIC = ["A18", "Sex", "A20", "A21", "NHM", "A22i", "A22ii", "A22iii"]
 # B3A is a multi-select income-source battery. 1-10 are sources, 11 is
 # "None of these" (informative: no income source at all). 98/99 are
 # don't-know / refused and are dropped.
-INCOME = [f"B3A__{i}" for i in range(1, 12)] + ["Q1"]
+INCOME = [f"B3A__{i}" for i in range(1, 12)] + ["Q1", "B3Ii"]
+# B3Ii is total money received from all sources in the past month (KSh,
+# 88.6% coverage, median 5,000). The single most important capacity
+# variable in a credit scorecard, and the denominator the rule-based
+# comparator needs.
 
 ASSETS = [f"B1L__{i}" for i in range(1, 7)]
 

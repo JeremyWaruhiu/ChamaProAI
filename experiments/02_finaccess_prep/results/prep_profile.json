@@ -1,7 +1,7 @@
 {
   "source_file": "2024_Finaccess_Publicdata.dta",
   "include_suspect": false,
-  "n_features": 35,
+  "n_features": 36,
   "labelled_rows": 13111,
   "train_rows_non_central": 11426,
   "eval_rows_central": 1685,
