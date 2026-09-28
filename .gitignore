@@ -4,6 +4,8 @@
 # Data — FinAccess .dta is licensed, never commit
 data/raw/*
 !data/raw/.gitkeep
+# Codebook and slices are derived from the licensed microdata
+data/explore/
 
 # Virtual environment
 .venv/
