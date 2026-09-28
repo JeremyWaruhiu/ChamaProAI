@@ -10,3 +10,10 @@ python-dotenv>=1.0
 google-genai>=1.0
 pandas>=2.2
 pyreadstat>=1.2
+
+# --- Credit scoring core (experiment 02/03) ---
+scikit-learn>=1.5
+imbalanced-learn>=0.12   # SMOTE; light correction, classes are near-balanced
+shap>=0.46
+matplotlib>=3.8
+joblib>=1.4
