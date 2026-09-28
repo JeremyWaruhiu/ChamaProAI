@@ -11,6 +11,8 @@ data/raw/*
 # Experiment results (regenerable; keep the folder, not the outputs)
 experiments/**/results/*
 !experiments/**/results/.gitkeep
+# Exception: benchmark outputs are dissertation evidence, not scratch
+!experiments/**/results/bakeoff.json
 
 # Model / dataset caches
 .hf_cache/

@@ -1,0 +1,1125 @@
+{
+  "meta": {
+    "dataset": "openlanguagedata/flores_plus",
+    "split": "dev",
+    "src": "kik_Latn",
+    "tgt": "eng_Latn",
+    "n": 5,
+    "systems": {
+      "khaya": {
+        "model_id": "https://translation-api.ghananlp.org/v2/translate lang=kik-eng",
+        "last_run": "2026-09-13T11:11:25+00:00",
+        "n_requested": 50
+      },
+      "gemini:gemini-3.8-flash": {
+        "model_id": "gemini-3.8-flash",
+        "last_run": "2026-09-13T11:14:39+00:00",
+        "n_requested": 100
+      },
+      "nllb": {
+        "model_id": "nickdee96/nllb-200-600m-kikuyu-english",
+        "last_run": "2026-09-13T11:27:25+00:00",
+        "n_requested": 100
+      }
+    },
+    "scored_at": "2026-09-13T11:37:09+00:00"
+  },
+  "sentences": [
+    {
+      "id": 0, 
+      "src": "Mũthenya wa mwambĩrĩrio, atalamu a sayansi kuma cukuru mũnene wa Stanford School of Medicine makĩanĩrĩra uhumbũro wa ithimi njerũ iria ciagayũkanagia cells kũringana na mĩthemba yacio: printable chip nini ingĩthodeko kũringana na mũtaratara wa inkjet printers na kĩndũ thendi ĩmwe ya Amerika.",
+      "ref": "On Monday, scientists from the Stanford University School of Medicine announced the invention of a new diagnostic tool that can sort cells by type: a tiny printable chip that can be manufactured using standard inkjet printers for possibly about one U.S. cent each.",
+      "outputs": {
+        "gemini:gemini-3.8-flash": "On Monday, scientists from Stanford School of Medicine announced the development of a new diagnostic system that sorts cells according to their type: a small printable chip that can be produced based on the mechanism of inkjet printers for about one US cent.",
+        "nllb": "On the day of the launch, scientists from the prestigious Stanford School of Medicine announced the discovery of new standards that divide the cells according to their types: a small printable chip can cost in the order of inkjet printers at about one US cent.",
+        "khaya": "On the eve of the pandemic, scientists from the Stanford School of Medicine have announced a new set of tests for new cells based on these variants: a printable little chip that can be made from the ingetjes"
+      }
+    },
+    {
+      "id": 1,
+      "src": "Athuthuria matongoretie makiuga ũndũ ũyũ no ũteithie kũonekana mĩrĩ-inĩ tene kwa mĩrimũ ta cancer, tuberculosis, mũkingo na marĩria kurĩ arwaru kuma mabũrũri mathĩni, kũrĩa ũhoni kuma mĩrimũ ta cancer ya nyondo ĩrĩ mĩnini ĩngĩringithanio na mabũrũri matongu.",
+      "ref": "Lead researchers say this may bring early detection of cancer, tuberculosis, HIV and malaria to patients in low-income countries, where the survival rates for illnesses such as breast cancer can be half those of richer countries.",
+      "outputs": {
+        "gemini:gemini-3.8-flash": "The researchers led the way by stating that this could aid in the early detection in the body of diseases such as cancer, tuberculosis, HIV/AIDS, and malaria in patients from poor countries, where recovery from diseases such as breast cancer is low compared to wealthy nations.",
+        "nllb": "Researchers have led them to say that this can help in the early detection of diseases like cancer, tuberculosis, and arrowroots, and it is desirable to have patients from poor countries, where the number of diseases like fall army cancer is small compared to the developed countries.",
+        "khaya": "Many leading researchers say this can help evidence early in the humanities for diseases such as cancer, tuberculosis, HIV/AIDS and the likes of people living in poor countries, where recovery from diseases like breast cancer is lower than in rich countries"
+      }
+    },
+    {
+      "id": 2,
+      "src": "Nayo JAS 39C Gripen ĩgĩtuthuka ĩ kabara-ini kayo kĩroko mathaa ma thaa ithatũ (0230 UTC) na ĩkiuma mwaki, ũndũ watũmire airport kũhingo na kũrũgamia ũthii wa ndege cia biashara.",
+      "ref": "The JAS 39C Gripen crashed onto a runway at around 9:30 am local time (0230 UTC) and exploded, closing the airport to commercial flights.",
+      "outputs": {
+        "gemini:gemini-3.8-flash": "And the JAS 39C Gripen crashed on its runway in the morning around 9:00 a.m. (0230 UTC) and caught fire, which caused the airport to close and suspended commercial flights.",
+        "nllb": "As for JAS 39C Gripen, it burst at its cabin around three o'clock (0230 UTC) and caught fire, which caused the airport to close and stop the flow of commercial flights.",
+        "khaya": "With the JAS 39C Gripen further down the road in the morning at 9 o’clock local time (0230 UTC) and off the fire, it has forced the plane to shut down and stop flying to commercial flights."
+      }
+    },
+    {
+      "id": 3,
+      "src": "Mũtwari wa ndege ĩyo nĩamenyekanire ta mũtongoria Dilokrit Pattavee",
+      "ref": "The pilot was identified as Squadron Leader Dilokrit Pattavee.",
+      "outputs": {
+        "gemini:gemini-3.8-flash": "The pilot of that plane was identified as Squadron Leader Dilokrit Pattavee",
+        "nllb": "The pilot of the aircraft was known as the leader Dilokrit Pattavee",
+        "khaya": "The pilot was identified as Dilokrit Pattavee."
+      }
+    },
+    {
+      "id": 4,
+      "src": "Nyũmba cia mohoro cia matũra-inĩ macio ĩkĩanĩrĩra atĩ ngaari ĩmwe ya kũhoria mwaki kĩharoinĩ kĩa ndege nĩ yagaragarire ĩkĩhũrana na mũtino ũcio.",
+      "ref": "Local media reports an airport fire vehicle rolled over while responding.",
+      "outputs": {
+        "gemini:gemini-3.8-flash": "Local news outlets reported that one airport fire engine overturned while responding to the accident.",
+        "nllb": "Local media outlets claimed that a fire extinguisher at the airport showed up and attacked the child.",
+        "khaya": "Local media reported one of the fire brigade at a busy airport was splattering from the scene"
+      }
+    },
+    {
+      "id": 5,
+      "src": "Vidal, ũrĩa nĩ wa mĩaka mĩrongo ĩrĩ na inyanya nĩathire Barca mĩthimu ĩtatũ mĩthiru kuma Sevilla.",
+      "ref": "28-year-old Vidal had joined Barça three seasons ago, from Sevilla.",
+      "outputs": {
+        "khaya": "Vidal, now 28, moved to Baracka three rounds from Sevilla",
+        "gemini:gemini-3.8-flash": "Vidal, who is twenty-eight years old, went to Barca three seasons ago from Sevilla.",
+        "nllb": "Vidal, who is in his eighties, had joined Barca three seasons ago from Sevilla."
+      }
+    },
+    {
+      "id": 6,
+      "src": "Kuma athiĩ Catalan capital, Vidal athakire mĩthako mĩrongo ĩna na kenda ya kĩrabu kĩu.",
+      "ref": "Since moving to the Catalan-capital, Vidal had played 49 games for the club.",
+      "outputs": {
+        "khaya": "Since he left for the Katalan Capital, Vidal has played for the forty-nine of the club",
+        "gemini:gemini-3.8-flash": "Since he went to the Catalan capital, Vidal has played 49 matches for that club.",
+        "nllb": "Since moving to the Catalan capital, Vidal has attended forty-nine matches for the club."
+      }
+    },
+    {
+      "id": 7,
+      "src": "Mandamano macio mambĩrĩirie thaa ithano (UTC+1) hau Whitewall kũng'ethanĩra na rĩingĩrĩro-inĩ rĩrĩa rĩgitĩirwo nĩ thigari nginya Downing street, gĩikaro kĩrũmu kĩa mũnene wa Ministers.",
+      "ref": "The protest started around 11:00 local time (UTC+1) on Whitehall opposite the police-guarded entrance to Downing Street, the Prime Minister's official residence.",
+      "outputs": {
+        "khaya": "The protest started at 11 o'clock (UTC+1) in the Whitewall area against a police officer armed with batons and batons all the way from Downing Street to the Prime Minister's home",
+        "gemini:gemini-3.8-flash": "Those protests began at 11:00 (UTC+1) there at Whitehall, facing the guarded entrance leading to Downing Street, the official residence of the Prime Minister.",
+        "nllb": "The demonstrations started at five o'clock (UTC+1) near Whitewall, and the result was that it was guarded by the police to Downing street, the official residence of the Ministers."
+      }
+    },
+    {
+      "id": 8,
+      "src": "Orio thutha wa thaa ithano, andũ acio mandamanĩte makĩhingĩrĩria ngaari hau barabara ya igũrũ rĩa Whitehall.",
+      "ref": "Just after 11:00, protesters blocked traffic on the northbound carriage in Whitehall.",
+      "outputs": {
+        "khaya": "Around 11 hours later, the guys were stranded in a car on the north side of the Whitehall",
+        "gemini:gemini-3.8-flash": "Just after eleven o'clock, those protesters blocked vehicles on that upper road of Whitehall.",
+        "nllb": "So after five hours, the people who had stopped stopped the cars on the upper road at Whitehall."
+      }
+    },
+    {
+      "id": 9,
+      "src": "Kũrĩ thaa ithano na ndagĩka mĩrongo ĩrĩ, thigari makĩĩra arĩa mandamanĩte machoke thutha gacĩra-ini kanini, makiugaga nĩharĩ bata kũiganania kĩhoto kĩa acio mandamanĩte na athii a bara bara arĩa mathiaga o makĩongererekaga.",
+      "ref": "At 11:20, the police asked the protesters to move back on to the pavement, stating that they needed to balance the right to protest with the traffic building up.",
+      "outputs": {
+        "khaya": "For about five and 20 minutes, the police told protesters to go back to the small operation, claiming that it was needed to balance the rights of those protestors with street vendors who usually went on high road",
+        "gemini:gemini-3.8-flash": "At 5:20, the police told the protesters to move back into a small alley, saying it was necessary to balance the rights of the protesters with those of the pedestrians, whose numbers were steadily increasing.",
+        "nllb": "At five o'clock and twenty minutes, the officers told those who had stayed behind to take a small step, saying it was important to balance the wages of those who had stayed behind with the fertilizer farmers who were going to the beach."
+      }
+    },
+    {
+      "id": 10,
+      "src": "Kĩndũ thaa ithano na ndagĩka mĩrongo ĩrĩ na kenda, maandamano macio magĩkinya Whitehall, kũhetũka Trafalgar Square, makabĩte Strand na kũhetũka Aldwych marorete Kingsway na merekeire Kingsway kũrĩa kĩama gĩa conservative kĩarĩ na mũchemanio wao wa Spring mũkawa inĩ wa Grand Connaught Rooms.",
+      "ref": "Around 11:29, the protest moved up Whitehall, past Trafalgar Square, along the Strand, passing by Aldwych and up Kingsway towards Holborn where the Conservative Party were holding their Spring Forum in the Grand Connaught Rooms hotel.",
+      "outputs": {
+        "khaya": "At about 11 and 24 minutes, the protests reach Whitehall, passing by the Trafalgar Square, capsized the Strand and cordoned off at Aldwych heading to Kingsway, where the Conservative party had a meeting with Spring Hotel in Grand Connaught",
+        "gemini:gemini-3.8-flash": "At around 5:29, the demonstration reached Whitehall, passed Trafalgar Square, went down the Strand and past Aldwych towards Kingsway, heading to where the Conservative party was holding their Spring meeting at the Grand Connaught Rooms hotel.",
+        "nllb": "At about five and twenty-nine minutes, the rallies reached Whitehall, passed Trafalgar Square, they attacked the Strand and passed Aldwych over to Kingsway and they headed for Kingsway where the conservative group had their Spring meeting at the Grand Connaught Rooms."
+      }
+    },
+    {
+      "id": 11,
+      "src": "Record ĩrĩa yaigĩtwo nĩ Nadal kũrĩ mũthaki wa Canada yarĩ mũgwanja kwa igĩrĩ.",
+      "ref": "Nadal's head to head record against the Canadian is 7–2.",
+      "outputs": {
+        "khaya": "Nadal's record with the Canadian actor was 7",
+        "gemini:gemini-3.8-flash": "The record set by Nadal against the Canadian player was seven to two.",
+        "nllb": "The record that Nadal had kept for a Canadian player was seven out of two."
+      }
+    },
+    {
+      "id": 12,
+      "src": "Ni erĩgĩte kũhotwo nĩ Raonic magĩthaka macindano-inĩ ma Brisbane Open.",
+      "ref": "He recently lost against Raonic in the Brisbane Open.",
+      "outputs": {
+        "khaya": "He hopes to win by raonics playing for the tug-of-war at the brisbane open tournament",
+        "gemini:gemini-3.8-flash": "He had previously been defeated by Raonic while playing in the Brisbane Open tournament.",
+        "nllb": "He/she has promised to be able to get Raonic to play at the Brisbane Open."
+      }
+    },
+    {
+      "id": 13,
+      "src": "Nadal aakĩhota point mĩrongo ĩnana na inyanya harĩ igana mĩthako inĩ ĩyo, na akĩhota point mĩrongo mũgwanja na ithathatũ serve inĩ ya mbere.",
+      "ref": "Nadal bagged 88% net points in the match winning 76 points in the first serve.",
+      "outputs": {
+        "khaya": "Nadal won eighty-eight percent of the season, and in the first round of the games, he won 176 points in the first round of the season",
+        "gemini:gemini-3.8-flash": "Nadal won 88 out of 100 points in that match, and he won 76 points on his first serve.",
+        "nllb": "Nadal scored eighty-eight percent in those two games, and he scored seventy-six points in the first serve."
+      }
+    },
+    {
+      "id": 14,
+      "src": "Thutha wa mũthako, mũthamaki wa Clay akiuga, \"Nĩndakena mũno nĩgocekereria mũthiũrũko wa mũico wa mathako maya ma bata. Njũkĩte gũkũ kũgeria kũhotana mũthako ĩnĩ ũyũ.\"",
+      "ref": "After the match, King of Clay said, \"I am just excited about being back in the final rounds of the most important events. I am here to try to win this.\"",
+      "outputs": {
+        "khaya": "After the game, I have come here to try to win this game",
+        "gemini:gemini-3.8-flash": "After the game, the king of Clay said, \"I am very pleased to reach the final round of these important games. I came here to try to win this game.",
+        "nllb": "After the game, the king of Clay said, \"I am very happy that they will be reviewing the last round of these important games. I have come here to try to be successful in this game\"."
+      }
+    },
+    {
+      "id": 15,
+      "src": "\"Maratathi ma Panama\" nĩ iburi rĩa ciugo itũmĩkaga kũonania documents million iria ciarutĩtwo  kambũni ya kĩ watho ya Panama yetago Mossack Fonseca, iria ciagũire kĩmahĩtia moko-inĩ ma kambũni cia mohoro na ũkinyanĩria mwaka-inĩ wa ngiri igĩrĩ na ikũmi na ithathatũ.",
+      "ref": "\"Panama Papers\" is an umbrella term for roughly ten million documents from Panamanian law firm Mossack Fonseca, leaked to the press in spring 2016.",
+      "outputs": {
+        "khaya": "\"Panama News\" is an article used to illustrate millions of documents produced by Panamanian law firm mossack Fonseca, which went missing in the hands of media companies in 2016",
+        "gemini:gemini-3.8-flash": "The Panama Papers\" is a term used to refer to millions of documents that were leaked from the Panamanian law firm called Mossack Fonseca, which accidentally fell into the hands of news and media companies in the year 2016.",
+        "nllb": "\"Panama documents\" is a group of terms that are used to describe the million documents that were produced by the Panamanian law firm Mossack Fonseca, which were bought by mistake from media companies and completed in the year two thousand six hundred and twenty-six."
+      }
+    },
+    {
+      "id": 16,
+      "src": "Documents icio nĩcionanagia ũrĩa bengi ikũmi na inya ciateithĩrĩirie agũri acio arĩa atongũ kũhitha billion cia mbeca cia America nĩgetha matikarĩhe igoti na matikarũmĩrĩre mawatho macio mangĩ.",
+      "ref": "The documents showed fourteen banks helped wealthy clients hide billions of US dollars of wealth to avoid taxes and other regulations.",
+      "outputs": {
+        "khaya": "The documents show how 14 banks have helped wealthy clients hide billions of dollars in the US so that they don't pay tax or follow other laws",
+        "gemini:gemini-3.8-flash": "Those documents show how 14 banks helped those wealthy clients hide billions of US dollars so that they would not pay taxes and would not comply with those other laws.",
+        "nllb": "Those documents show how fourteen banks have helped those wealthy buyers to hide billions of dollars so that they do not pay taxes and follow those other laws."
+      }
+    },
+    {
+      "id": 17,
+      "src": "Ngatheti ĩmwe ya Uingeretha, The Guardian, ĩroigire  bengi ya Deutsche nĩyo yatũmĩkaga gũtigĩrĩra gacunjĩ ga ithatũ ga kambũni ngiri ĩmwe na magana merĩ cia Shell nĩ ciahotekithia wendi ũcio.",
+      "ref": "British newspaper The Guardian suggested Deutsche Bank controlled roughly a third of the 1200 shell companies used to accomplish this.",
+      "outputs": {
+        "khaya": "The British newspaper, The Guardian, reported that the Dutch bank was being used to enforce a third of its",
+        "gemini:gemini-3.8-flash": "A British newspaper, The Guardian, reported that Deutsche Bank was used to ensure that a third of the 1,200 Shell companies enabled that objective.",
+        "nllb": "A newspaper in the UK, The Guardian, said Deutsche Bank was the one used to ensure that one-third of the 1,200 companies in Shell would satisfy that need."
+      }
+    },
+    {
+      "id": 18,
+      "src": "Nĩ kwagĩire na maandamano maingĩ thĩ yothe, na aganu aingĩ magĩcirithio, na atongoria a thirikari cia Iceland na pakistan maratiga wĩra.",
+      "ref": "There were protests worldwide, several criminal prosecutions, and the leaders of the governments of Iceland and Pakistan both resigned.",
+      "outputs": {
+        "khaya": "There have been numerous protests around the world, with many victims taken to the streets, with leaders of governments of",
+        "gemini:gemini-3.8-flash": "There were many protests worldwide, many wrongdoers were brought to justice, and the government leaders of Iceland and Pakistan resigned.",
+        "nllb": "There have been many demonstrations all over the world, and many criminals have been arrested, and the government officers of Iceland and Pakistan are resigning."
+      }
+    },
+    {
+      "id": 19,
+      "src": "Ma ũrĩa waciarĩirwo Hong Kong, athomeire New York University na Harvard Law School na gwĩ kahinda ahetwo \"Green Card\" ĩrĩa yamũhotithagia gũtuĩka mũraiya mũikari wa America.",
+      "ref": "Born in Hong Kong, Ma studied at New York University and Harvard Law School and once held an American permanent resident \"green card\".",
+      "outputs": {
+        "khaya": "Born in Hong Kong, he studied in New York University and Harvard Law School and was recently employed as the \"green card\" that would enable him to become an American citizen",
+        "gemini:gemini-3.8-flash": null,
+        "nllb": "Ma was born in Hong Kong, studied at New York University and Harvard Law School and at one point was given a \"Green Card\" that enabled him to become an American citizen."
+      }
+    },
+    {
+      "id": 20,
+      "src": "Hsieh nĩtaonanirie atĩ hĩndĩ ya ithurano Ma no ore bũrũri ihinda ria ngahĩha icio.",
+      "ref": "Hsieh implied during the election that Ma might flee the country during a time of crisis.",
+      "outputs": {
+        "khaya": "Hsieh pointed out that during the election the country could get away with the violence",
+        "nllb": "Hsieh has shown that during the elections, Ma can tell the country the time of the upheavals."
+      }
+    },
+    {
+      "id": 21,
+      "src": "Hsieh noonanirie atĩ photogenic Ma nĩ mũndũ mũno wa style kũrĩ substance.",
+      "ref": "Hsieh also argued that the photogenic Ma was more style than substance.",
+      "outputs": {
+        "khaya": "Hsieh pointed out that the photogenema ma is the most.",
+        "nllb": "[Agreeing] I have shown that photogenic Ma is a person of style rather than substance."
+      }
+    },
+    {
+      "id": 22,
+      "src": "Ona thengia wa maũndũ macio ma kũigĩrĩrwo, Ma nĩacindire nĩũndũ wakũonania ũnyitanĩri mũnene na Chinese Mainland.",
+      "ref": "Despite these accusations, Ma won handily on a platform advocating closer ties with the Chinese mainland.",
+      "outputs": {
+        "khaya": "Despite these worrying allegations, Ma was also winning because of strong ties with the Chinese Mainland",
+        "nllb": "Even at the price of those savings, Ma won because it showed a strong connection to the Chinese mainland."
+      }
+    },
+    {
+      "id": 23,
+      "src": "Mũthaki wa mũthenya wa ũmũthĩ nĩ Alex Ovechkin wa Washington Capitals.",
+      "ref": "Today's Player of the Day is Alex Ovechkin of the Washington Capitals.",
+      "outputs": {
+        "khaya": "Today's actor is Alex Ovechkin of the washington Capitals",
+        "nllb": "Today's player is Alex Ovechkin of the Washington Capitals."
+      }
+    },
+    {
+      "id": 24,
+      "src": "Arĩ na mbao igĩrĩ na agĩteithĩrĩria kũingĩria ingĩ igĩrĩ rĩrĩa team ya Washington yahotanire na mbao ithano gwa ithatũ magĩthaka na Atlanta Thrashers.",
+      "ref": "He had 2 goals and 2 assists in Washington's 5-3 win over the Atlanta Thrashers.",
+      "outputs": {
+        "khaya": "She got two shots and two points in time, and the Washington team won with five-thirds of the results while playing with the atlanta thrashers",
+        "nllb": "He had two logs and helped add two more when the Washington team lost five logs in the third and played with the Atlanta Thrashers."
+      }
+    },
+    {
+      "id": 25,
+      "src": "Ovechkin ateithĩrĩirie team yake kũfunga mbao riita rĩa mbere ũtukũ ũcio hĩndĩ ĩrĩa mbao ya Rookie Nicklas Backstrom yamaheire ũhotani.",
+      "ref": "Ovechkin's first assist of the night was on the game-winning goal by rookie Nicklas Backstrom;",
+      "outputs": {
+        "khaya": "Ovechkin helped his team scored the first night of the year when the Rookey Nicklas Backstrom gave them a victory",
+        "nllb": "Ovechkin helped his team close the logs for the first time that night when Rookie Nicklas Backstrom's log gave them the benefit."
+      }
+    },
+    {
+      "id": 26,
+      "src": "Mbao yake ya keerĩ ya ũtukũ ĩrarĩ ya mĩrongo ĩtandatũ ya mũthimu ũcio, na agĩtuĩka mũthaki wa mbere kũingĩria mbao mĩrongo ĩtandatũ kana makĩria mũthimu ũmwe kuma 1995-1966, rĩrĩa Jaromir Lemieux na Mario Lemieux marakinyirie ũhotani ta ũcio.",
+      "ref": "his second goal of the night was his 60th of the season, becoming the first player to score 60 or more goals in a season since 1995-96, when Jaromir Jagr and Mario Lemieux each reached that milestone.",
+      "outputs": {
+        "khaya": "His second master's goal was the 60th of the season, and he became the first player to score 60 or more goals from 1995-66, when.Jaromir Lemieux and Mario Lemieux won a similar victory",
+        "nllb": "His second log for the night was in the sixties for that phone, and he became the first player to log in at sixty logs or more on one phone since 1995-1966, when Jaromir Lemieux and Mario Lemieux reached that level of success."
+      }
+    },
+    {
+      "id": 27,
+      "src": "Batten nĩatarĩtwo arĩ wa igana rĩmwe rĩa mĩrongo kenda harĩ andũ magana mana arĩa atongu mũno Amerika mwaka wa ngiri igĩrĩ na inyanya, akĩrĩkana arĩ na ũtonga wa dora billion igĩrĩ gaturumo ithatũ.",
+      "ref": "Batten was ranked 190th on the 2008 400 Richest Americans list with an estimated fortune of $2.3 billion.",
+      "outputs": {
+        "khaya": "Batten was selected to be the first among four hundred richest people in the U.S. in 2018, considering it to be worth more than $2 billion at a time",
+        "nllb": "Batten is said to be the one hundred and ninety-third of the four hundred richest people in the United States in the year two thousand eight hundred, ending with a fortune of two billion three hundred and twenty shillings."
+      }
+    },
+    {
+      "id": 28,
+      "src": "Aigĩrĩirwo thũmbĩ ya mathomo kuma college ya Arts na Science thukuru mũnene wa Virginia mwaka-inĩ wa ngiri ĩmwe na magana kenda ma mĩrongo ĩtano na nĩarĩ mũheani wa ũteithio mũnene thukuru ũcio.",
+      "ref": "He graduated from the College of Arts & Sciences of the University of Virginia in 1950 and was a significant donor to that institution.",
+      "outputs": {
+        "khaya": "He graduated from a college in Arts and Science at the University of Virginia in the late 1950s and was a postgraduate lecturer in the field",
+        "nllb": "He was given a scholarship from the College of Arts and Science at the University of Virginia in the year one thousand nine hundred and fifty and was a major benefactor to that institution."
+      }
+    },
+    {
+      "id": 29,
+      "src": "Njera ya Iraq, Ghraib prison, nĩ yacinirwo hĩndĩ ya maandamano.",
+      "ref": "Iraq's Abu Ghraib prison has been set alight during a riot.",
+      "outputs": {
+        "khaya": "The Iraqi prison, the Ghraib prison, was remanded during a protest",
+        "nllb": "The prison in Iraq, Ghraib prison, was burnt during the protests."
+      }
+    },
+    {
+      "id": 30,
+      "src": "Njera ya Iraq, Ghraib prison, nĩ  'ĩracinirwo' hĩndĩ ya maandamano.",
+      "ref": "The jail became notorious after prisoner abuse was discovered there after US forces took over.",
+      "outputs": {
+        "khaya": "The Iraqi prison, the Ghraib prison, was \"defeated\" during a protest",
+        "nllb": "The prison in Iraq, Ghraib prison, was 'burnt' during the protests."
+      }
+    },
+    {
+      "id": 31,
+      "src": "Piquet Jr ahotire gĩcindano-inĩ kĩa Singapore Grand Prix kĩa mwaka wa ngiri igĩrĩ na inyanya thuutha wa kũrũgama kwa Fernando Alonso, urĩa warehaga ngaari ya kũĩgitĩra ũgwati.",
+      "ref": "Piquet Jr. crashed in the 2008 Singapore Grand Prix just after an early pit stop for Fernando Alonso, bringing out the safety car.",
+      "outputs": {
+        "khaya": "Piquet Jr. won a major Singapore Grand Prix match in 2018 following the resignation of Fernando Alonso, which left a suicide car unattended",
+        "nllb": "Piquet Jr won the Singapore Grand Prix of the year two thousand eight after stopping Fernando Alonso, who had brought a safety car."
+      }
+    },
+    {
+      "id": 32,
+      "src": "Na rĩrĩa ngaari cia macindano iria ciarĩ mbere ya Alonso ciathire kũnyua maguta harĩ ũmenyereri-inĩ, agĩthiĩ mbele na akĩoya ũhotani.",
+      "ref": "As the cars ahead of Alonso went in for fuel under the safety car, he moved up the pack to take victory.",
+      "outputs": {
+        "khaya": "And while the vehicles ahead of Alonso went on to use fuel for security purposes, he continued to win.",
+        "nllb": "And when the racing cars that were ahead of Alonso went to get the fuel from the training, he went to the platform and took the challenge."
+      }
+    },
+    {
+      "id": 33,
+      "src": "Piquet Jr. nĩabutiro thutha wa macindano ma mwaka wa ngiri igĩrĩ na kenda ma Grand Prix Hungary.",
+      "ref": "Piquet Jr. was sacked after the 2009 Hungarian Grand Prix.",
+      "outputs": {
+        "khaya": "Piquet Jr. He was baffled after the 2009 Grand Prix Hungarian contest",
+        "nllb": "Piquet Jr. is retired after the two thousand nine Hungarian Grand Prix races."
+      }
+    },
+    {
+      "id": 34,
+      "src": "Thaa ithatũ itigĩtie dagĩka ikũmi na inya orĩo, taũni ng'ima kũrakira, kũonania kahinda karĩa jeti ya bere ĩraringire itanya rĩayo.",
+      "ref": "At exactly 8:46 a.m. a hush fell across the city, marking the exact moment the first jet struck its target.",
+      "outputs": {
+        "khaya": "At three and a half minutes before the start of the day, the entire city got up, to show the time the first set to do so",
+        "nllb": "Less than three hours and fourteen minutes, the whole town is falling asleep, indicating the time that the jet of the bear had reached its limit."
+      }
+    },
+    {
+      "id": 35,
+      "src": "Mĩrũri ĩrĩ ya ũtheri yamũrĩkithĩtio ĩroretio na igũrũ ũtũkũ ũcio.",
+      "ref": "Two beams of light have been rigged up to point skywards overnight.",
+      "outputs": {
+        "khaya": "Two light-skinned walls facing him were at the top of the night",
+        "nllb": "Two lines of light have been brought down from the top of the screen."
+      }
+    },
+    {
+      "id": 36,
+      "src": "Waki no ũrathiĩ na mbere wa skyscrapers ithano njerũ mwako-inĩ, na handũ ha ũkui na Memorial park gatagati-inĩ.",
+      "ref": "Construction is ongoing for five new skyscrapers at the site, with a transportation center and memorial park in the middle.",
+      "outputs": {
+        "khaya": "The construction is still going on with five new skyscrapers in the building, near the historic park in the middle",
+        "nllb": "Construction is still ongoing of five new skyscrapers in the building, and instead of a parking lot and a Memorial park in the middle."
+      }
+    },
+    {
+      "id": 37,
+      "src": "Kĩbindi kĩa PBS kĩna ngerenwa cia Emmy itanyihĩire mirongo ĩrĩ na inya, na nĩ gĩkuhĩ kurĩ Saseme Street na Mister Roger's Neighborhood.",
+      "ref": "The PBS show has more than two-dozen Emmy awards, and its run is shorter only than Sesame Street and Mister Rogers' Neighborhood.",
+      "outputs": {
+        "khaya": "The PBS have got at least 24 awards for Emmy at least, and it's close to the Sasame Street and Mister Rogers' Seagboroad.",
+        "nllb": "PBS has at least twenty four Emmy awards, and it is near Saseme Street and Mister Roger's Neighborhood."
+      }
+    },
+    {
+      "id": 38,
+      "src": "O kihingo gia kĩbindi kĩu nĩkĩahinyagĩrĩria ũndũ ũmwe ibukuinĩ rĩmwe na gĩkatabania ũhoro ũcio na ng'ano nyingĩ.",
+      "ref": "Each episode of the show would focus on a theme in a specific book and then explore that theme through multiple stories.",
+      "outputs": {
+        "khaya": "Each chapter of the show resonates with one developing story in a book and one telling it a lot of stories.",
+        "nllb": "Just at the entrance of that office, it oppresses the same thing in one book and it spreads that information with many stories."
+      }
+    },
+    {
+      "id": 39,
+      "src": "Kĩbindi nokiaheaga ciana mwerekera wa mabuku marĩa cigwetha na cithome rĩrĩa ciathiĩ library.",
+      "ref": "Each show would also provide recommendations for books that children should look for when they went to their library.",
+      "outputs": {
+        "khaya": "The show also gives children a chance to learn how to read and read books as they go to their library",
+        "nllb": "I usually give the children an opinion about the books they will buy and learn when they go to the library."
+      }
+    },
+    {
+      "id": 40,
+      "src": "John Grant, kuuma WNED Buffalo (kĩhumo kĩa Reading Rainbow) augire \"Reading Rainbow yathomithagia ciana gĩtumi gĩa gũthoma,... wendo wa gũthoma -[kĩbindi kĩu] kĩendithagĩrĩa ciana kuoya ibuku na kũrĩthoma.",
+      "ref": "John Grant, from WNED Buffalo (Reading Rainbow's home station) said \"Reading Rainbow taught kids why to read,... the love of reading — [the show] encouraged kids to pick up a book and to read.\"",
+      "outputs": {
+        "khaya": "John Grant, of the WNED Buffalo (",
+        "nllb": "John Grant, from WNED Buffalo (source of Reading Rainbow) said that \"Reading Rainbow taught children the importance of learning,... the love of learning - [this program] encouraged children to pick up a book and read it."
+      }
+    },
+    {
+      "id": 41,
+      "src": "Hamwe na John Grant, amwe metĩkĩtie atĩ ũnyihu wa mĩcara na ũgarũrũku wa mwĩcirĩrie wa gĩthomo kĩa tafaarĩra nĩgĩcangĩire gũthira kwa kĩbindi kĩu.",
+      "ref": "It is believed by some, including John Grant, that both the funding crunch and a shift in the philosophy of educational television programming contributed to ending the series.",
+      "outputs": {
+        "khaya": "Among them were John Grants, some of whom believe that the reduction of earnings and that the psychological impact of climate change contributed to the success of the show",
+        "nllb": "Along with John Grant, some have believed that the decline in wages and change in the way of thinking about secondary education has led to the end of the industry."
+      }
+    },
+    {
+      "id": 42,
+      "src": "Nakĩo kihuhũkanio kĩu kĩa rũhuho kĩrĩa kĩarĩ mairo magana matandatũ ma mĩrongo ĩna na ithano mwena wa ithuiro wa Cape Verde islands, kĩerĩkanaga gĩgũthira mbere ya gũkinyĩra na kwananga thĩ nyũmũ, atalaamu a rĩera kuga.",
+      "ref": "The storm, situated about 645 miles (1040 km) west of the Cape Verde islands, is likely to dissipate before threatening any land areas, forecasters say.",
+      "outputs": {
+        "khaya": "And that's when the windshield, which was 65 miles north of the Cape Verde islands, is announced to be breakout before it hits, the weatherman says",
+        "nllb": "And that six hundred and forty-five-kilometre winds that affected the southern part of the Cape Verde islands, it is predicted to end before it reaches the dry land and destroys, according to weather forecasts."
+      }
+    },
+    {
+      "id": 43,
+      "src": "Fred kahinda gaka ĩna huho irathiĩ na ihenya rĩa mairo igana rĩa ithano harĩ ithaa na rĩerekeire mwena wa ithũĩro rĩa rũgongo.",
+      "ref": "Fred currently has winds of 105 miles per hour (165 km/h) and is moving towards the northwest.",
+      "outputs": {
+        "khaya": "Fred's net worth about five hundred miles per hour and it went uphill to the west",
+        "nllb": "Fred this time, the winds are moving at a speed of one hundred and five kilometers per hour and it is moving towards the northwest."
+      }
+    },
+    {
+      "id": 44,
+      "src": "Fred nĩkĩo kĩhuhũkanio kĩrĩa kĩa hinya mũno gĩa tropical cyclone kĩrĩa kĩanandĩkwo mwena wa rũgũrũ na irathĩro wa Atlantic kuuma rĩrĩa mbica cia satelite cĩathodekirwo, na no gachunjĩ ga ithatũ gia huhũkanio nene kanandĩko mwena wa irathĩro rĩa 35°W.",
+      "ref": "Fred is the strongest tropical cyclone ever recorded so far south and east in the Atlantic since the advent of satellite imagery, and only the third major hurricane on record east of 35°W.",
+      "outputs": {
+        "khaya": "Fred is the most powerful epidemiologist in the world's south and east atlantic counties since the creation of satellites, only about a third of the world's largest",
+        "nllb": "Fred is the strongest tropical cyclone that has been recorded in the northern and eastern parts of the Atlantic since satellite imagery was taken, and only the third major hurricane has been recorded east of 35°W."
+      }
+    },
+    {
+      "id": 45,
+      "src": "Kurĩ mweri mĩrongo ĩrĩ na inya mwaka wa ngiri ĩmwe na magana mũgwanja ma mĩrongo ĩtano na kenda, Arthur Guiness agĩkĩra kĩrore ũiguithanio wa ũkobori wa St James' Gate Brewery kuria Dublin, Ireland.",
+      "ref": "On September 24, 1759, Arthur Guinness signed a 9,000 year lease for the St James' Gate Brewery in Dublin, Ireland.",
+      "outputs": {
+        "khaya": "On april 28, 1750, Charles Guinness signed a contract with the St James' Gate Brewery in dublin, ireland",
+        "nllb": "In the twenty-fourth month of the year one thousand seven hundred and fifty-nine, Arthur Guiness examines the corruption at St James' Gate Brewery in Dublin, Ireland."
+      }
+    },
+    {
+      "id": 46,
+      "src": "Mĩaka magana merĩ ma mĩrongo ĩtano mĩhetũku, Guiness nĩ yakũrĩte ta biashara nene thĩ yothe, na wendia wakinyĩte billion ikũmi cia Europe kana billion ikũmi na inya cia Amerika o mwaka.",
+      "ref": "250 years later, Guinness has grown to a global business that turns over 10 billion euros (US$14.7 billion) every year.",
+      "outputs": {
+        "khaya": "Over the past two hundred and fifty years, Guinness has grown to a sizeable industry in the world, with sales totaling about 10 billion euros and 10 billion Americans a year.",
+        "nllb": "In the last two hundred and fifty years, Guinness has grown into a major business around the world, with sales reaching ten billion euros or fourteen billion US dollars a year."
+      }
+    },
+    {
+      "id": 47,
+      "src": "John Reid, mũteithania wa ũtwari wa A1GP timu ya New Zealand, ũmũthĩ nĩ aigire rũgano nĩũndũ wa gũtwarithia ihenya inene mũno harĩ miaka mirongo ĩna na inyanya Auckland Harbour Bridge, New Zealand, gũtarĩ kuna watho.",
+      "ref": "Jonny Reid, co-driver for the A1GP New Zealand team, today made history by driving the fastest over the 48-year-old Auckland Harbour Bridge, New Zealand, legally.",
+      "outputs": {
+        "khaya": "John Reid, a New Zealand team's A1",
+        "nllb": "John Reid, the transport assistant for the A1GP team in New Zealand, today made history because of the fastest transportation in forty-eight years, without any legislation."
+      }
+    },
+    {
+      "id": 48,
+      "src": "Mr Reid nĩ ahotire gũtwarithia AIGP ya New Zealand, Black Beauty harĩ ihenya rĩa kilometer igana rĩmwe rĩa mĩrongo ĩtandatũ o harĩ ithaa maita mũgwanja igũrũ rĩa ndaraca.",
+      "ref": "Mr Reid managed to drive the New Zealand's A1GP car, Black Beauty at speeds over 160km/h seven times over the bridge.",
+      "outputs": {
+        "khaya": "Mr Reid was able to drive the AIGP in New Zealand, Black Beaty, 100kms a day, seven times over the bridge",
+        "nllb": "Mr Reid was able to take AIGP from New Zealand, Black Beauty at a speed of one hundred and sixty kilometers per hour just seven times the speed of the road."
+      }
+    },
+    {
+      "id": 49,
+      "src": "Nacio thigari cia New Zealand ciarĩ na thĩna gũtũmĩra speed radar guns ĩria yonanagia ihenya rĩrĩa rĩathiagwo nĩ Mr Reid nĩ ũndũ wa ũrĩa Black Beauty ĩrĩ thĩ, na kahinda karĩa Mr Reid athire kahora thĩ wa ihenya rĩa kilometer igana rĩmwe rĩa mĩrongo ĩtandatũ harĩ ithaa norĩo mahotire kũmũtarĩra dagĩka.",
+      "ref": "The New Zealand police had trouble using their speed radar guns to see how fast Mr Reid was going because of how low Black Beauty is, and the only time the police managed to clock Mr Reid was when he slowed down to 160km/h.",
+      "outputs": {
+        "khaya": "While New Zealand's soldiers had trouble making use of speed radar, which Mr Reid shot as it was slow-moving because of the pandemic, and when Mr Reid fell short at the speed of one hundred miles per hour, they were able to pick him up in the morning",
+        "nllb": "And the New Zealand army had a problem in using speed radar guns that showed the speed that was being used by Mr Reid because of how low Black Beauty was, and the time that Mr Reid was slowly descending at a speed of one hundred and sixty kilometers per hour was the only time they were able to tell him."
+      }
+    },
+    {
+      "id": 50,
+      "src": "Harĩ mĩeri ĩtatũ mĩhetũku, makĩria ma anyitwo mĩrongo ĩnana nĩmarekereirio kuma Central Booking facility gũtarĩ gũcirithio.",
+      "ref": "In the last 3 months, over 80 arrestees were released from the Central Booking facility without being formally charged.",
+      "outputs": {
+        "nllb": "In the last three months, more than eighty people have been released from the Central Booking facility without being trained."
+      }
+    },
+    {
+      "id": 51,
+      "src": "Mweri wa kana mwaka ũyũ, watho nĩ waheanirwo nĩ mũcirithania Glynn wa kũgiria jera ĩyo kũrekereria arĩa manyitĩtwo makĩria ya mathaa mĩrongo ĩrĩ  na ĩna kuuma manyitwo na arĩa matathikĩrĩirio nĩ wakiri mũthuure nĩ igoti.",
+      "ref": "In April this year, a temporary restaining order was issued by Judge Glynn against the facility to enforce the release of those held more than 24 hours after their intake who did not receive a hearing by a court commissioner.",
+      "outputs": {
+        "nllb": "In the fourth month of this year, a law was passed by Judge Glynn to prevent the jail from allowing those who have been arrested for more than twenty-four hours since they were arrested and those who have not been listened to have been selected by the courts."
+      }
+    },
+    {
+      "id": 52,
+      "src": "Commissioner aheanaga bail, ĩrĩa ĩngĩaheanirwo yatũmĩkaga kwandĩkithia ciira ũrĩa wandĩkĩtwo nĩ mũthirikari ũrĩa wanyitanĩte. Ciira ũcio nĩwekĩragwo mĩtambo-inĩ ya computer kũrĩa yateithagĩrĩria kũrũmĩrĩra ũrĩa ũrathiĩ na mbere.",
+      "ref": "The commissioner sets bail, if granted, and formalizes the charges filed by the arresting officer. The charges are then entered into the state's computer system where the case is tracked.",
+      "outputs": {
+        "nllb": "The Commissioner gives bail, the one that would be given would be used to record the case as written by the government that has joined. The case would be posted on the computer platforms where it helps to keep track of progress."
+      }
+    },
+    {
+      "id": 53,
+      "src": "Mũthenya wa gũthikĩrĩria ciira no wonanagia wendi wa kũhe mwĩkũĩro kĩhoto kĩa igeria rĩa naĩhenya.",
+      "ref": "The hearing also marks the date for the suspect’s right to a speedy trial.",
+      "outputs": {
+        "nllb": "On the day of the hearing, you can also show a desire to give the employee the opportunity to try and benefit from it."
+      }
+    },
+    {
+      "id": 54,
+      "src": "Peter Costello, mũigi kĩgĩna wa Australia na mũndũ ũrĩa warĩ na kanya kanene kũoya ũtongoria kuma kũrĩ mũnene wa ministers John Howard eta mũtongoria wa kĩama kĩa Liberal nĩaheanire ũnyitĩrĩri wake harĩ itua rĩa gũthondeka kĩganda kĩa hinya wa nuclear Australia.",
+      "ref": "Peter Costello, Australian treasurer and the man most likely to succeed Prime Minister John Howard as Liberal party leader has thrown his support behind a nuclear power industry in Australia.",
+      "outputs": {
+        "nllb": "Peter Costello, an Australian politician and the person who had the opportunity to take the lead from the prime minister, John Howard, the leader of the Liberal Party, gave his support to the decision to build a nuclear power plant in Australia."
+      }
+    },
+    {
+      "id": 55,
+      "src": "Mr Costello nĩ augire atĩ rĩrĩa ũthondeki wa hinya wa nuclear ũgatuĩka mwega wonjoria-inĩ, Australia nĩyagĩrĩirwo ĩthiĩ na mbere na kũũtũmĩra.",
+      "ref": "Mr Costello said that when nuclear power generation becomes economically viable, Australia should pursue its use.",
+      "outputs": {
+        "nllb": "Mr Costello said that when the development of nuclear power becomes good in the economy, Australia should continue to use it."
+      }
+    },
+    {
+      "id": 56,
+      "src": "\"ũngĩgatuika wa ũhũri wa biacara, nĩtwagĩrĩirwo nĩ gũkorwo naguo. ũguo nĩ kuuga, hatirĩ gĩtũmi kĩa kĩgirĩrĩria kĩa hinya ũcio wa nuclear\" Mr Costello akiuga.",
+      "ref": "\"If it becomes commercial, we should have it. That is, there's no in-principle objection to nuclear energy\" Mr Costello said.",
+      "outputs": {
+        "nllb": "\"When it comes to commercial innovation, we are supposed to have it. That is to say, there is no reason to restrict that kind of nuclear power\", Mr Costello said."
+      }
+    },
+    {
+      "id": 57,
+      "src": "Kũringana na Ansa, \" bolithi nĩ cieciragia na makamakio nĩ njũragano nyingĩ iria metigagĩra no itumũre haro nene ya ũtongoria.",
+      "ref": "According to Ansa, \"police were concerned by a couple of top-level hits they feared might spark a full-blown war of succession.",
+      "outputs": {
+        "nllb": "According to Ansa, \"the politicians are thinking and they are being attacked by the many pesticides they are attacking that can lead to a major change in management."
+      }
+    },
+    {
+      "id": 58,
+      "src": "Thigari makiuga Lo Piccolo nĩarĩ na guoko kwa igũrũ tondũ nĩarĩ mũruti wa wĩra wa guoko kwa ũrĩo wa Provenzano kũrĩa Palermo, na experience nĩyamũheithĩtĩe gĩtĩo kĩa arĩa akũrũ na anene arĩa meĩtanagia na mũtaratara wa Provenzano, wa kwĩhĩtha thĩ o ũrĩa kungĩhoteteka nginya network yao ĩgĩe hinya.",
+      "ref": "Police said Lo Piccolo had the upper hand because he had been Provenzano's right-hand man in Palermo and his greater experience won him the respect of the older generation of bosses as they pursued Provenzano's policy of keeping as low as possible while strengthening their power network.",
+      "outputs": {
+        "nllb": "The police say Lo Piccolo had the upper hand because he was a right-handed worker from Provenzano in Palermo, and the experience has helped him gain the respect of the older men and officers who call themselves Provenzano, to step down as much as possible until their network becomes stronger."
+      }
+    },
+    {
+      "id": 59,
+      "src": "Anene acio matongoretio nĩ Provenzano kuma o rĩrĩa aninire haaro ĩrĩa yatongoretio nĩ Riina ĩkĩng'ethanĩra na thirikari ĩrĩa yoragire augĩrĩria a mafia Giovanni Falcone na Paolo Borsellino mwaka-inĩ wa 1992.",
+      "ref": "These bosses had been reined in by Provenzano when he put an end to the Riina-driven war against the state that claimed the lives of Mafia crusaders Giovanni Falcone and Paolo Borsellino in 1992.\"",
+      "outputs": {
+        "nllb": "Those officers have been led by Provenzano since the end of the crisis that Riina was leading, when it merged with the government that attacked the mafia, Giovanni Falcone and Paolo Borsellino in 1992."
+      }
+    },
+    {
+      "id": 60,
+      "src": "CEO wa Apple Steve Jobs akĩrugũria mũtabo rĩrĩa aumĩrire stage na akĩruta thimũ ya iPhone kuma mũhuko wake wa jeans.",
+      "ref": "Apple CEO Steve Jobs unveiled the device by walking onto the stage and taking the iPhone out of his jeans pocket.",
+      "outputs": {
+        "nllb": "Apple CEO Steve Jobs opened the phone when he emerged from the stage and got an iPhone from his jeans pocket."
+      }
+    },
+    {
+      "id": 61,
+      "src": "Kahinda-inĩ ga mĩario yake ya mathaa merĩ nĩaugire atĩ, \" ũmũthi Apple nĩ ĩgũthiĩ na mbere na gũthondeka thiimũ werũ, nĩ tũgũthodeka rũgano ũmũthĩ\".",
+      "ref": "During his 2 hour speech he stated that \"Today Apple is going to reinvent the phone, We are going to make history today\".",
+      "outputs": {
+        "nllb": "During his two-hour talk, he said, \"Maybe Apple will continue to make free phones, we will be telling the story today\"."
+      }
+    },
+    {
+      "id": 62,
+      "src": "Brazil nĩguo bũrũri ũrĩa mũnene ũrũmagĩrĩra Roman Catholic thĩ yothe, na Kanitha wa Roman Catholic nĩ ũkoretwo ũgĩkinyĩrĩria ũregani harĩ gwĩtĩkĩrio gwa kĩ watho kũhikania andu aa muhiriga umwe",
+      "ref": "Brazil is the largest Roman Catholic country on Earth, and the Roman Catholic Church has consistently opposed the legalization of same-sex marriage in the country.",
+      "outputs": {
+        "nllb": "Brazil is the largest country that follows the Roman Catholics around the world, and the Roman Catholic Church has been attaining a certain level of legitimacy in allowing people to marry on the same day"
+      }
+    },
+    {
+      "id": 63,
+      "src": "Nayo National Congress ya Brazil nĩ ũcirĩire gwĩtĩkĩrio gwa kĩ watho mĩaka ikũmi, na ihiko icio cia mũingĩ ciĩtikĩrĩtio kĩwatho o Rio Grande do Sul.",
+      "ref": "The National Congress of Brazil has debated legalization for 10 years, and such civil marriages are currently only legal in Rio Grande do Sul.",
+      "outputs": {
+        "nllb": "And the Brazilian National Congress has been seeking legal approval for ten years, and those social media platforms have been banned by the government in Rio Grande do Sul."
+      }
+    },
+    {
+      "id": 64,
+      "src": "Watho mwerũ ũtahetũkĩtio wathodekirwo nĩ Mayor wa tene wa Sao Paulo, Marta Suplicy. Watho ũcio wendĩkithĩtio, thutha wa gũthodekwo, rĩu wĩ moko-inĩ ma Roberto Jefferson.",
+      "ref": "The original bill was drafted by former mayor of São Paulo, Marta Suplicy. The proposed legislation, after being amended, is now in the hands of Roberto Jefferson.",
+      "outputs": {
+        "nllb": "The new legislation that has not been amended was introduced by the former Mayor of Sao Paulo, Marta Suplicy. The proposed legislation, after being amended, is now in the hands of Roberto Jefferson."
+      }
+    },
+    {
+      "id": 65,
+      "src": "Arũrũngani mehokete kũngania irore million ĩmwe gaturumo igĩrĩ  matware National Congress mweri wa ikũmi na ũmwe.",
+      "ref": "Protesters hope to collect a petition of 1.2 million signatures to present to the National Congress in November.",
+      "outputs": {
+        "nllb": "The organizers hope to raise one million Kenya shillings for the National Congress in November."
+      }
+    },
+    {
+      "id": 66,
+      "src": "Thuutha wa kũmenyeka atĨ bamiri nyingĨ nĨciacaragia ũteithio wa kĨ-watho kũgirĨrĨria kũingatwo, nĨkwarĨ na mũcemanio ũrĨa warĨ mweri 20 wa gatatũ kũrĨa East Bay Community Center nĨundũ wa arĨa mahutĨtio nĨ wĨici wa nyũmba.",
+      "ref": "After it became apparent that many families were seeking legal help to fight the evictions, a meeting was held on March 20 at the East Bay Community Law Center for the victims of the housing scam.",
+      "outputs": {
+        "nllb": "After it became known that the government was seeking legal help to prevent them from being expelled, there was a meeting that was held on March 20 at the East Bay Community Center for those affected by home theft."
+      }
+    },
+    {
+      "id": 67,
+      "src": "HĨndĨ ĨrĨa akombori maambirĨirie kwĨrana marĨa mamakorete, bamirĨ nyingĨ iria ciahutĨtio o-rĨmwe ikĨmeya atĨ Carolyn Wilson nĨaiyĨte mbeca ciao irĨa maigithĨtie na akĨũra taũni.",
+      "ref": "When the tenants started sharing what had occurred to them, most of the families involved suddenly realized that Carolyn Wilson of the OHA had stolen their security deposits, and skipped out of town.",
+      "outputs": {
+        "nllb": "WHEN the farmers started buying from each other, the new farmers who were forced to farm each other, like Carolyn Wilson, took their money and bought the town."
+      }
+    },
+    {
+      "id": 68,
+      "src": "Akombori a Lockwood Gardens meetĨkĨtie atĨ nĨ kwarĨ na bamĨrĨ ingĨ 40 kana makĨria iria ciarĨ ũgwati-inĨ wa kũingatwo, ũũ nĨ kumania na kumenya atĨ borithi a OHA nĨmekaga ũthuthuria wa wũici wa nyũmba ingĨ cia mũingĨ kũrĨa Oakland.",
+      "ref": "Tenants at Lockwood Gardens believe that there may be another 40 families or more to face eviction, since they learned that OHA police are also investigating other public housing properties in Oakland that may be caught up in the housing scam.",
+      "outputs": {
+        "nllb": "The farmers at Lockwood Gardens have said that there are 40 other farms that are at risk of being evicted, and that the OHA police are doing research on the farming of other farmhouses in Oakland."
+      }
+    },
+    {
+      "id": 69,
+      "src": "Bendi nĨyakanjire rwĨmbo kũrĨa War Memorial Stadium ya Maui, rũrĨa rwerĨgĨrĨirwo gukorwo na andũ ta 9000, na makihoya ũkirĨrĨria kuuma kũrĨ arũmĨrĨri ao.",
+      "ref": "The band canceled the show at Maui's War Memorial Stadium, which was set to be attended by 9,000 people, and apologized to fans.",
+      "outputs": {
+        "nllb": "The band played the song at War Memorial Stadium in Maui, which was supposed to be attended by about 9,000 people, and they urged you to respond from their supporters."
+      }
+    },
+    {
+      "id": 70,
+      "src": "Kambuni ĨrĨa ĨrũgamagĨrĨra bandi ya HK management inc. ndĨaheanire gĨtũmi ona kĨrĨkũ hindĨ irĨa yakanjire kũri mweri 20 wa Kenda no makĨgwatia itũmi cihutanĨtie na mĨbango mũthenya ũyũ ũngĨ.",
+      "ref": "The band's management company, HK Management Inc., gave no initial reason when they canceled on September 20, but blamed logistical reasons by the next day.",
+      "outputs": {
+        "nllb": "The company that manages HK management inc. did not give a reason even for the KIRIKU INDIA that started on 20th of Kenda but they find reasons related to schemes on the same day."
+      }
+    },
+    {
+      "id": 71,
+      "src": "Wakiri me ngumo kuuma Giriki arĨa nĨo Sakis Kechagioglou na George Nikolakopoulos nĨmohetwo njera-inĨ ya Athens tondũ nĨmanyitĨkire na mahĨtia ma wĨici na ungumania.",
+      "ref": "The famous Greek lawyers, Sakis Kechagioglou and George Nikolakopoulos have been imprisoned in the Athens' jail of Korydallus, as they were found guilty of graft and corruption.",
+      "outputs": {
+        "nllb": "The most famous ones from Greece are Sakis Kechagioglou and George Nikolakopoulos, who were sent to the Athens prison because they were accused of theft and corruption."
+      }
+    },
+    {
+      "id": 72,
+      "src": "Nĩũndũ wa gĩtũmi gĩkĩ, ihĩtia inene thĩ-inĩ wa rũhonge rwa ũcirithania Giriki nĩrĩyumĩrĩtie kuumana na ciĩko mũgarũ wa watho cia aciri, njaji na mawakiri mĩaka ĩigana ũna mĩthiru kũmenyekana.",
+      "ref": "As a result of this, a big scandal within the Greek legal community has been raised through the exposure of illegal actions that judges, lawyers, solicitors and attorneys have done during the previous years.",
+      "outputs": {
+        "nllb": "Because of this reason, major failures in the Greek judiciary have arisen because of the changes in the laws of aciri, jaji and kawakiri that have been known for several years."
+      }
+    },
+    {
+      "id": 73,
+      "src": "Ciumia cigana-ũna ciarĨkĨtie gũthira, thutha wa uhoro kwandĨkwo nĨ mũmemerekia Makis Triantafylopoulo thĨiniĨ wa gĨbindi gĨake kĨ ngumo gĨa TV kĨa \"Zoungla\" thĨiniĨ wa TV ya Alpha, mũbunge na wakili Petros Mantouvalos niatĨgithirio wĨra nĨũndũ wa andũ a wabici yake kunyĨtikana na uungumania ugarũ na watho.",
+      "ref": "A few weeks ago, after the information published by the journalist Makis Triantafylopoulos in his popular Television show \"Zoungla\" in Alpha TV, the member of Parliament and lawyer, Petros Mantouvalos was abdicated as members of his office had been involved in illegal graft and corruption.",
+      "outputs": {
+        "nllb": "A few weeks have come to an end, after the news that you are presenting Makis Triantafylopoulo on the Kibindi TV channel known as \"Zoungla\" on the Alpha TV channel, MP and lawyer Petros Mantouvalos has been asked to do so because of the people in his office disagreeing with the corruption and the law."
+      }
+    },
+    {
+      "id": 74,
+      "src": "Kuongerera harĨ macio, mũcĨrĨthania Evangeros Kalousis nĨohirwo nĨ kũnyitĨkana na mahĨtia ma ungumania na mĨtugo mĨũrũ.",
+      "ref": "Moreover, top judge Evangelos Kalousis is imprisoned as he found guilty of corruption and degenerate behaviour.",
+      "outputs": {
+        "nllb": "In addition to those, you have been accused of committing corruption and other activities."
+      }
+    },
+    {
+      "id": 75,
+      "src": "Roberts nĨaregire uraithi biũ kuuga rĨrĨa etikitie muoyo wambagia, kĨũria kĨrĨa gĨ bata mũno hĨndĨ ĨrĨa tũrarĨrĨria maundũ megainie na uruti wa ihu, akiuga atĨ nĨ kwaga ũigĨrĨrĨki kũarĨrĨria maundũ makuruhanĨte na ndeto ici.",
+      "ref": "Roberts flatly refused to say about when he believes life begins, an important question when considering the ethics of abortion, saying that it would be unethical to comment on the specifics of likely cases.",
+      "outputs": {
+        "nllb": "Roberts completely denied the government saying that it should put life first, the question that is most important is where we are discussing the benefits of using fertilizer, he said it is because of lack of understanding about the benefits associated with these terms."
+      }
+    },
+    {
+      "id": 76,
+      "src": "ohindi o Ĩyo niacokirie murugamo wake wa hau kabere atĨ Roe V.Wade warĨ \" settled law of land\" agĨtĨtĨrithia fata wa igoti rĨrĨa Ĩnene kuruta mawatho rĨrumĨrĨire",
+      "ref": "He did, however, reiterate his earlier statement that Roe v. Wade was the \"settled law of the land\", emphasizing the importance of consistent Supreme Court rulings.",
+      "outputs": {
+        "nllb": "Yes, I responded to his previous program, Roe V. Wade, who had \"settled law of land\" and was satisfied with the decision of the Supreme Court over the laws that had been passed."
+      }
+    },
+    {
+      "id": 77,
+      "src": "O rĨngĨ nĨakinyĨrĨirie atĨ nietĨkanĨtie na kĨhooto kĨa kũgĨa na thiri kĨrĨa gĨatongoririe itua rĨa Roe.",
+      "ref": "He also confirmed that he believed in the implied right to privacy which the Roe decision depended upon.",
+      "outputs": {
+        "nllb": "The only thing that I have reached is that I agree with the right to take loans, which led to Roe's decision."
+      }
+    },
+    {
+      "id": 78,
+      "src": "Maroochydore nĨarĨkirie e wa mbere pointi ithathatũ igũrũ wa Noosa ũrĨa waarĨ wa keerĨ.",
+      "ref": "Maroochydore had finished on top of the ladder, six points clear of Noosa in second.",
+      "outputs": {
+        "nllb": "Maroochydore has finished six points ahead of Noosa in the second place."
+      }
+    },
+    {
+      "id": 79,
+      "src": "MĨena yeerĨ nĨyacemanirie thĨiniĨ wa nuthu final kũrĨa Noosa arũmĨrĨire ahotani na pointi 11.",
+      "ref": "The two sides would meet in the major semi final where Noosa ran out winners by 11 points.",
+      "outputs": {
+        "nllb": "The two sides met in the second half of the final at Noosa, where they followed the winners by 11 points."
+      }
+    },
+    {
+      "id": 80,
+      "src": "Maroochydore nake akĨhoota Caboolture thĨiniĨ wa final.",
+      "ref": "Maroochydore then defeated Caboolture in the Preliminary Final.",
+      "outputs": {
+        "nllb": "Maroochydore also won Caboolture in the final."
+      }
+    },
+    {
+      "id": 81,
+      "src": "Hesperonychus elizabethae nĨ species ya bamĨrĨ ya Dromaeosaurida na nĨ cousin ya Velociraptor.",
+      "ref": "Hesperonychus elizabethae is a species of the family Dromaeosauridae and is a cousin of Velociraptor .",
+      "outputs": {
+        "nllb": "Hesperonychus elizabethae is a type of dromaeosaurida and a cousin of Velociraptor."
+      }
+    },
+    {
+      "id": 82,
+      "src": "Nyoni Ĩno ya kũhĨta Ĩria Ĩihũire njoya na nĨ ya thakame hiũ yetĨkĨtio atĨ yathiaga Ĩrũgamite na magũrũ meerĨ na ndwara ta Velociraptor.",
+      "ref": "This fully feathered, warm blooded bird of prey was believed to have walked upright on two legs with claws like the Velociraptor.",
+      "outputs": {
+        "nllb": "This type of flying bird that has sprayed the maize and the blood, it is said that it used to go standing on its feet with diseases like Velociraptor."
+      }
+    },
+    {
+      "id": 83,
+      "src": "Rwara rwayo rwa keerĨ rwarĨ rũnene na nĨkĨo yetirwo Hesperonychus ĨrĨa yugĨte atĨ \"rwara rwa ithũĨrwo.\"",
+      "ref": "Its second claw was larger, giving rise to the name Hesperonychus which means \"western claw.\"",
+      "outputs": {
+        "nllb": "Its second disease was a major one, and it was called Hesperonychus, which it called the \"disease of fall armyworm\"."
+      }
+    },
+    {
+      "id": 84,
+      "src": "Hamwe na mbarabu ĨrĨa yagũaga, gũthũka kwa rĨera nĨkwahotomagia mĨhango ya kũhonokia.",
+      "ref": "In addition to the crushing ice, extreme weather conditions have been hampering rescue efforts.",
+      "outputs": {
+        "nllb": "With the falling rainfall, the deteriorating weather will make it easier for rescue schemes."
+      }
+    },
+    {
+      "id": 85,
+      "src": "Pitman augire atĨ rĨera rĨtingĨagĨra nginya kiumia kĨu kĨngĨ.",
+      "ref": "Pittman suggested that conditions wouldn't improve until sometime next week.",
+      "outputs": {
+        "nllb": "Pitman said that the weather will not change until this week."
+      }
+    },
+    {
+      "id": 86,
+      "src": "Mũigana na ũtungu wa mbarabu ĨrĨa yaitĨkĨte, kũringana na Pitman, yaarĨ ĨrĨa nyingĨ mũno harĨ mĨaka 15 ĨrĨa yarĨkĨtie gũthira.",
+      "ref": "The amount and thickness of the pack ice, according to Pittman, is the worst it has been for sealers in the past 15 years.",
+      "outputs": {
+        "nllb": "The size and severity of the snow that has affected it, according to Pitman, has affected it a lot in the last 15 years."
+      }
+    },
+    {
+      "id": 87,
+      "src": "Habari nĩitabĩtio cia kunyitwo kwa mũrutwo ũngĩ kuumana na jũragano thukuruinĩ mweri wa March 21, gũkũ mathiko ma Jeff Weise na atatũ a arĩa kenda moragirwo megwĩkĩkaga.",
+      "ref": "News spread in the Red Lake community today as funerals for Jeff Weise and three of the nine victims were held that another student was arrested in connection with the school shootings of March 21.",
+      "outputs": {
+        "nllb": "It has been reported that the arrest of another student due to a riot at the school on March 21, here the funeral of Jeff Weise and three of the nine who were killed will be held."
+      }
+    },
+    {
+      "id": 88,
+      "src": "Thigari itiheanĩte riboti makĩria ma kũrũgama na kũnyitanwo kwa ũmũthĩ.",
+      "ref": "Authorities said little officially beyond confirming today's arrest.",
+      "outputs": {
+        "nllb": "The army has not given any more information about standing up and joining today."
+      }
+    },
+    {
+      "id": 89,
+      "src": "No riboti kuuma kwĩ mundũ ũĩ thitango ĩno nicikinyĩire Minneapolis Star-Tribune cikiuga atĩ kimwana kĩu ni Louis Jourdain, kĩrĩa kĩna mĩaka 16 na nĩ mwana wa chairman wa Red Lake Tribal, Floyd Jourdain",
+      "ref": "However, a source with knowledge of the investigation told the Minneapolis Star-Tribune that it was Louis Jourdain, 16-year old son of Red Lake Tribal Chairman Floyd Jourdain.",
+      "outputs": {
+        "nllb": "But a report from the community that reached the Minneapolis Star-Tribune said that the boy is Louis Jourdain, who is 16 years old and is the son of the chairman of Red Lake Tribal, Floyd Jourdain"
+      }
+    },
+    {
+      "id": 90,
+      "src": "Gũtiũĩkaine nginyagia rĩũ thitango iria cigũtabanio kana nĩkĩĩ gĩtũmĩ kia kũnyitwo gwa kimwana kĩu no thitango cia andũ anini nĩciajĩtie igot-inĩ rĩa federal.",
+      "ref": "It is not known at this time what charges will be laid or what led authorities to the boy but juvenile proceedings have begun in federal court.",
+      "outputs": {
+        "nllb": "It is not known to this day which issues will be addressed or what is the reason for the kid's arrest, but a small group of people have brought them to the federal level."
+      }
+    },
+    {
+      "id": 91,
+      "src": "Lodin nĨongereire kuuga atĨ atongoria moire ikinya rĨa kũrũgamia ithurano cia gũcokera nĨguo marigĨrĨrie mahũthĨrwo na uhotekeku wa ũgitĨri gũthũka kuumana na gĨthurano kĨngĨ.",
+      "ref": "Lodin also said officials decided to cancel the runoff in order to save Afghans the expense and security risk of another election.",
+      "outputs": {
+        "nllb": "Lodin went on to say that the leaders came to the stage of holding the upcoming elections so that they could be relieved of the risk of security being affected by the next election."
+      }
+    },
+    {
+      "id": 92,
+      "src": "Diplomats maugire atĨ nĨmonire gatiba ya Afghan Ĩna tutithio tũingĨ turĨa twatũmire mauge Ĩthurano cia gũcokera ti cia bata",
+      "ref": "Diplomats said that they had found enough ambiguity in the Afghan constitution to determine the runoff as unnecessary.",
+      "outputs": {
+        "nllb": "Diplomats said they saw that the Afghan newspaper had some help that made them say that the return elections were not important"
+      }
+    },
+    {
+      "id": 93,
+      "src": "Maũndũ maya nĩ mararegana na riboti cia hau kabere iria ciaugaga atĩ gũkanja ithurano cia gũcokera nĩ mũgare wa gatiba.",
+      "ref": "This contradicts earlier reports, which said that cancelling the runoff would have been against the constitution.",
+      "outputs": {
+        "nllb": "These things are contrary to the previous reports that said that holding re-election is a must."
+      }
+    },
+    {
+      "id": 94,
+      "src": "Ndege Ĩyo yathiaga Irkutsk na yatwarithagio ni birarũ ciĨ thĨiniĨ.",
+      "ref": "The aircraft had been headed to Irkutsk and was being operated by interior troops.",
+      "outputs": {
+        "nllb": "The plane used to fly to Irkutsk and it was carried by trained trainers."
+      }
+    },
+    {
+      "id": 95,
+      "src": "KamĨtĨ nĨyathondekirwo gũthuthuria.",
+      "ref": "An inquiry was established to investigate.",
+      "outputs": {
+        "nllb": "Kamiti is designed for research."
+      }
+    },
+    {
+      "id": 96,
+      "src": "KIl- 76 Ĩkoretwo Ĩ gicunjĨ kĨnene kĨa birarũ cia Russia na cia Soviet kũũma mĨaka-inĨ ya 1970s, no nĨ irarĨ na mũtino mũnene Russia mweri-inĨ ũcio ũrathirire.",
+      "ref": "The Il-76 has been a major component of both the Russian and Soviet military since the 1970s, and had already seen a serious accident in Russia last month.",
+      "outputs": {
+        "nllb": "KIL- 76 It has been a big part of the drying of Russian and Soviet fertilizer since the 1970s, but it has been growing at a very high level in Russia in the last month."
+      }
+    },
+    {
+      "id": 97,
+      "src": "KũrĨ Oktomba 7, injini nĨyagũire ndege Ĩkienda kũmbũka. Russia nĨyambire kũrũgamia Il- 76s thuutha wa mũtino ũcio.",
+      "ref": "On October 7 an engine separated on takeoff, without injuries. Russia briefly grounded Il-76s after that accident.",
+      "outputs": {
+        "nllb": "On Oct. 7, the engine crashed the plane and it was about to go off. Russia started stopping the Il- 76s after that attack."
+      }
+    },
+    {
+      "id": 98,
+      "src": "Mũigana wa mairũ 800 cia mĨberethi ya Trans-Alaska Pipeline nĨyahingirwo kũrũmĨrĨra gũitĨka kwa makiri ma barrels cia maguta mũhuro wa Fairbanks, Alaska.",
+      "ref": "800 miles of the Trans-Alaska Pipeline System were closed down following a spill of thousands of barrels of crude oil south of Fairbanks, Alaska.",
+      "outputs": {
+        "nllb": "A total of 800 acres of the Trans-Alaska Pipeline have been closed to meet the demand for oil from the southern portion of Fairbanks, Alaska."
+      }
+    },
+    {
+      "id": 99,
+      "src": "Gũthũka gwa thitima thuutha wa mageria ma mĨtambo ya mwaki nĨkuo gwacũngĨrĨirie relief valves kũhingũka na maguta magĨitika hakuhĨ na gĨtuo kĨa maguta gĨa Fort Greely mbombo namba 9.",
+      "ref": "A power failure following a routine fire-command system test caused relief valves to open and crude oil overflowed near the Fort Greely pump station 9.",
+      "outputs": {
+        "nllb": "The decline in electricity after the tests on the fire platforms was the one that caused the relief valves to open and the oil to be brought near the Fort Greely oil plant number 9."
+      }
+    }
+  ],
+  "scores": {
+    "common_set": {
+      "n": 19,
+      "systems": [
+        "gemini:gemini-3.8-flash",
+        "khaya",
+        "nllb"
+      ],
+      "ids": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15,
+        16,
+        17,
+        18
+      ]
+    },
+    "by_system": {
+      "gemini:gemini-3.8-flash": {
+        "common": {
+          "n": 19,
+          "chrf++": 54.39,
+          "bleu": 22.46,
+          "sentences_with_numbers": 11,
+          "number_mismatches": 8,
+          "number_mismatch_ids": [
+            2,
+            5,
+            8,
+            9,
+            10,
+            11,
+            13,
+            16
+          ]
+        },
+        "all": {
+          "n": 19,
+          "chrf++": 54.39,
+          "bleu": 22.46,
+          "sentences_with_numbers": 11,
+          "number_mismatches": 8,
+          "number_mismatch_ids": [
+            2,
+            5,
+            8,
+            9,
+            10,
+            11,
+            13,
+            16
+          ]
+        }
+      },
+      "khaya": {
+        "common": {
+          "n": 19,
+          "chrf++": 42.29,
+          "bleu": 15.2,
+          "sentences_with_numbers": 11,
+          "number_mismatches": 10,
+          "number_mismatch_ids": [
+            2,
+            6,
+            7,
+            8,
+            9,
+            10,
+            11,
+            13,
+            16,
+            17
+          ]
+        },
+        "all": {
+          "n": 50,
+          "chrf++": 39.33,
+          "bleu": 15.18,
+          "sentences_with_numbers": 26,
+          "number_mismatches": 24,
+          "number_mismatch_ids": [
+            2,
+            6,
+            7,
+            8,
+            9,
+            10,
+            11,
+            13,
+            16,
+            17,
+            24,
+            26,
+            27,
+            31,
+            34,
+            37,
+            42,
+            43,
+            44,
+            45,
+            46,
+            47,
+            48,
+            49
+          ]
+        }
+      },
+      "nllb": {
+        "common": {
+          "n": 19,
+          "chrf++": 44.89,
+          "bleu": 13.87,
+          "sentences_with_numbers": 11,
+          "number_mismatches": 10,
+          "number_mismatch_ids": [
+            2,
+            5,
+            6,
+            7,
+            8,
+            9,
+            10,
+            11,
+            13,
+            15
+          ]
+        },
+        "all": {
+          "n": 100,
+          "chrf++": 42.87,
+          "bleu": 16.26,
+          "sentences_with_numbers": 44,
+          "number_mismatches": 29,
+          "number_mismatch_ids": [
+            2,
+            5,
+            6,
+            7,
+            8,
+            9,
+            10,
+            11,
+            13,
+            15,
+            24,
+            26,
+            27,
+            28,
+            31,
+            33,
+            34,
+            42,
+            43,
+            45,
+            46,
+            47,
+            48,
+            49,
+            50,
+            51,
+            61,
+            63,
+            65
+          ]
+        }
+      }
+    },
+    "significance": {
+      "test": "paired bootstrap resampling",
+      "n_samples": 1000,
+      "n": 19,
+      "baseline": "gemini:gemini-3.8-flash",
+      "systems": {
+        "gemini:gemini-3.8-flash": {
+          "chrF++": {
+            "score": 54.39,
+            "ci95": 2.99,
+            "p_value": null
+          },
+          "BLEU": {
+            "score": 22.46,
+            "ci95": 4.4,
+            "p_value": null
+          }
+        },
+        "nllb": {
+          "chrF++": {
+            "score": 44.89,
+            "ci95": 3.37,
+            "p_value": 0.001
+          },
+          "BLEU": {
+            "score": 13.87,
+            "ci95": 3.21,
+            "p_value": 0.001
+          }
+        },
+        "khaya": {
+          "chrF++": {
+            "score": 42.29,
+            "ci95": 3.65,
+            "p_value": 0.001
+          },
+          "BLEU": {
+            "score": 15.2,
+            "ci95": 3.92,
+            "p_value": 0.001
+          }
+        }
+      }
+    }
+  }
+}
