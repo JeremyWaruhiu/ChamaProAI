@@ -1,0 +1,45 @@
+{
+  "source_file": "2024_Finaccess_Publicdata.dta",
+  "include_suspect": false,
+  "n_features": 35,
+  "labelled_rows": 13111,
+  "train_rows_non_central": 11426,
+  "eval_rows_central": 1685,
+  "class_distribution": {
+    "train": {
+      "Low": {
+        "n": 5333,
+        "pct": 46.7
+      },
+      "Medium": {
+        "n": 4529,
+        "pct": 39.6
+      },
+      "High": {
+        "n": 1564,
+        "pct": 13.7
+      }
+    },
+    "eval_central": {
+      "Low": {
+        "n": 827,
+        "pct": 49.1
+      },
+      "Medium": {
+        "n": 486,
+        "pct": 28.8
+      },
+      "High": {
+        "n": 372,
+        "pct": 22.1
+      }
+    }
+  },
+  "leakage_excluded": 23,
+  "features_over_20pct_missing": {
+    "E3B__7": 93.5,
+    "E3B__3": 93.3,
+    "Q1": 48.1,
+    "A22iii": 26.9
+  }
+}
