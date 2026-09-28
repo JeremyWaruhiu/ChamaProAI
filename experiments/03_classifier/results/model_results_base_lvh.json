@@ -1,0 +1,224 @@
+{
+  "mode": "low_vs_high",
+  "holdout": "central_holdout",
+  "frame": "modelling_frame.csv",
+  "n_train": 6897,
+  "n_eval_central": 1199,
+  "n_features": 40,
+  "models": {
+    "random_forest": {
+      "cv_macro_f1_mean": 0.5793,
+      "cv_macro_f1_std": 0.0136,
+      "in_distribution_holdout": {
+        "macro_f1": 0.5678,
+        "balanced_accuracy": 0.5719,
+        "accuracy": 0.6819,
+        "per_class": {
+          "No default": {
+            "precision": 0.8072,
+            "recall": 0.7732,
+            "f1-score": 0.7899
+          },
+          "Default": {
+            "precision": 0.324,
+            "recall": 0.3706,
+            "f1-score": 0.3458
+          }
+        },
+        "confusion_matrix": [
+          [
+            825,
+            242
+          ],
+          [
+            197,
+            116
+          ]
+        ],
+        "auc": 0.6404
+      },
+      "central_holdout": {
+        "macro_f1": 0.5699,
+        "balanced_accuracy": 0.5702,
+        "accuracy": 0.6305,
+        "per_class": {
+          "No default": {
+            "precision": 0.7336,
+            "recall": 0.7291,
+            "f1-score": 0.7314
+          },
+          "Default": {
+            "precision": 0.4058,
+            "recall": 0.4113,
+            "f1-score": 0.4085
+          }
+        },
+        "confusion_matrix": [
+          [
+            603,
+            224
+          ],
+          [
+            219,
+            153
+          ]
+        ],
+        "auc": 0.6284
+      }
+    },
+    "hist_gradient_boosting": {
+      "cv_macro_f1_mean": 0.5679,
+      "cv_macro_f1_std": 0.0132,
+      "in_distribution_holdout": {
+        "macro_f1": 0.5594,
+        "balanced_accuracy": 0.586,
+        "accuracy": 0.6304,
+        "per_class": {
+          "No default": {
+            "precision": 0.8212,
+            "recall": 0.6673,
+            "f1-score": 0.7363
+          },
+          "Default": {
+            "precision": 0.308,
+            "recall": 0.5048,
+            "f1-score": 0.3826
+          }
+        },
+        "confusion_matrix": [
+          [
+            712,
+            355
+          ],
+          [
+            155,
+            158
+          ]
+        ],
+        "auc": 0.6212
+      },
+      "central_holdout": {
+        "macro_f1": 0.5493,
+        "balanced_accuracy": 0.5593,
+        "accuracy": 0.5838,
+        "per_class": {
+          "No default": {
+            "precision": 0.733,
+            "recall": 0.6239,
+            "f1-score": 0.6741
+          },
+          "Default": {
+            "precision": 0.3717,
+            "recall": 0.4946,
+            "f1-score": 0.4245
+          }
+        },
+        "confusion_matrix": [
+          [
+            516,
+            311
+          ],
+          [
+            188,
+            184
+          ]
+        ],
+        "auc": 0.5953
+      }
+    },
+    "rule_based_comparator": {
+      "note": "deterministic; no training",
+      "central_holdout": {
+        "macro_f1": 0.3672,
+        "balanced_accuracy": 0.5382,
+        "accuracy": 0.3895,
+        "per_class": {
+          "No default": {
+            "precision": 0.8231,
+            "recall": 0.1463,
+            "f1-score": 0.2485
+          },
+          "Default": {
+            "precision": 0.3289,
+            "recall": 0.9301,
+            "f1-score": 0.486
+          }
+        },
+        "confusion_matrix": [
+          [
+            121,
+            706
+          ],
+          [
+            26,
+            346
+          ]
+        ]
+      }
+    }
+  },
+  "selected_model": "random_forest",
+  "improvement_over_comparator_macro_f1": 0.2027,
+  "shap_top_features": [
+    {
+      "feature": "age",
+      "mean_abs_shap": 0.03781
+    },
+    {
+      "feature": "log_monthly_income",
+      "mean_abs_shap": 0.02696
+    },
+    {
+      "feature": "sacco_loan_use",
+      "mean_abs_shap": 0.02034
+    },
+    {
+      "feature": "chama_loan_use",
+      "mean_abs_shap": 0.01997
+    },
+    {
+      "feature": "B3A__3",
+      "mean_abs_shap": 0.01782
+    },
+    {
+      "feature": "children",
+      "mean_abs_shap": 0.01737
+    },
+    {
+      "feature": "F1__2",
+      "mean_abs_shap": 0.01333
+    },
+    {
+      "feature": "children_in_school",
+      "mean_abs_shap": 0.01114
+    },
+    {
+      "feature": "household_size",
+      "mean_abs_shap": 0.0105
+    },
+    {
+      "feature": "education",
+      "mean_abs_shap": 0.01037
+    },
+    {
+      "feature": "F1__1",
+      "mean_abs_shap": 0.01016
+    },
+    {
+      "feature": "is_female",
+      "mean_abs_shap": 0.00767
+    },
+    {
+      "feature": "log_agri_income",
+      "mean_abs_shap": 0.00767
+    },
+    {
+      "feature": "B3A__1",
+      "mean_abs_shap": 0.00554
+    },
+    {
+      "feature": "B1L__3",
+      "mean_abs_shap": 0.00515
+    }
+  ]
+}

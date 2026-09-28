@@ -1,0 +1,224 @@
+{
+  "mode": "low_vs_high",
+  "holdout": "random_holdout",
+  "frame": "borrower_frame.csv",
+  "n_train": 1231,
+  "n_eval_central": 411,
+  "n_features": 70,
+  "models": {
+    "random_forest": {
+      "cv_macro_f1_mean": 0.5463,
+      "cv_macro_f1_std": 0.047,
+      "in_distribution_holdout": {
+        "macro_f1": 0.5972,
+        "balanced_accuracy": 0.5827,
+        "accuracy": 0.8381,
+        "per_class": {
+          "No default": {
+            "precision": 0.8767,
+            "recall": 0.9431,
+            "f1-score": 0.9087
+          },
+          "Default": {
+            "precision": 0.4,
+            "recall": 0.2222,
+            "f1-score": 0.2857
+          }
+        },
+        "confusion_matrix": [
+          [
+            199,
+            12
+          ],
+          [
+            28,
+            8
+          ]
+        ],
+        "auc": 0.7141
+      },
+      "random_holdout": {
+        "macro_f1": 0.5226,
+        "balanced_accuracy": 0.5244,
+        "accuracy": 0.8248,
+        "per_class": {
+          "No default": {
+            "precision": 0.8605,
+            "recall": 0.9487,
+            "f1-score": 0.9024
+          },
+          "Default": {
+            "precision": 0.25,
+            "recall": 0.1,
+            "f1-score": 0.1429
+          }
+        },
+        "confusion_matrix": [
+          [
+            333,
+            18
+          ],
+          [
+            54,
+            6
+          ]
+        ],
+        "auc": 0.612
+      }
+    },
+    "hist_gradient_boosting": {
+      "cv_macro_f1_mean": 0.573,
+      "cv_macro_f1_std": 0.0461,
+      "in_distribution_holdout": {
+        "macro_f1": 0.6173,
+        "balanced_accuracy": 0.5989,
+        "accuracy": 0.8462,
+        "per_class": {
+          "No default": {
+            "precision": 0.8811,
+            "recall": 0.9479,
+            "f1-score": 0.9132
+          },
+          "Default": {
+            "precision": 0.45,
+            "recall": 0.25,
+            "f1-score": 0.3214
+          }
+        },
+        "confusion_matrix": [
+          [
+            200,
+            11
+          ],
+          [
+            27,
+            9
+          ]
+        ],
+        "auc": 0.6804
+      },
+      "random_holdout": {
+        "macro_f1": 0.5123,
+        "balanced_accuracy": 0.5175,
+        "accuracy": 0.8248,
+        "per_class": {
+          "No default": {
+            "precision": 0.8586,
+            "recall": 0.9516,
+            "f1-score": 0.9027
+          },
+          "Default": {
+            "precision": 0.2273,
+            "recall": 0.0833,
+            "f1-score": 0.122
+          }
+        },
+        "confusion_matrix": [
+          [
+            334,
+            17
+          ],
+          [
+            55,
+            5
+          ]
+        ],
+        "auc": 0.5883
+      }
+    },
+    "rule_based_comparator": {
+      "note": "deterministic; no training",
+      "random_holdout": {
+        "macro_f1": 0.3989,
+        "balanced_accuracy": 0.5299,
+        "accuracy": 0.4331,
+        "per_class": {
+          "No default": {
+            "precision": 0.8734,
+            "recall": 0.3932,
+            "f1-score": 0.5422
+          },
+          "Default": {
+            "precision": 0.1581,
+            "recall": 0.6667,
+            "f1-score": 0.2556
+          }
+        },
+        "confusion_matrix": [
+          [
+            138,
+            213
+          ],
+          [
+            20,
+            40
+          ]
+        ]
+      }
+    }
+  },
+  "selected_model": "random_forest",
+  "improvement_over_comparator_macro_f1": 0.1237,
+  "shap_top_features": [
+    {
+      "feature": "B3A__3",
+      "mean_abs_shap": 0.04171
+    },
+    {
+      "feature": "log_monthly_income",
+      "mean_abs_shap": 0.02673
+    },
+    {
+      "feature": "children_in_school",
+      "mean_abs_shap": 0.0248
+    },
+    {
+      "feature": "log_agri_income",
+      "mean_abs_shap": 0.0215
+    },
+    {
+      "feature": "log_loan_requested",
+      "mean_abs_shap": 0.01826
+    },
+    {
+      "feature": "age",
+      "mean_abs_shap": 0.01816
+    },
+    {
+      "feature": "log_loan_approved",
+      "mean_abs_shap": 0.01638
+    },
+    {
+      "feature": "n_loans_12m",
+      "mean_abs_shap": 0.01574
+    },
+    {
+      "feature": "loan_to_annual_income",
+      "mean_abs_shap": 0.01421
+    },
+    {
+      "feature": "B3A__2",
+      "mean_abs_shap": 0.01285
+    },
+    {
+      "feature": "repayment_frequency",
+      "mean_abs_shap": 0.01141
+    },
+    {
+      "feature": "F1__2",
+      "mean_abs_shap": 0.0099
+    },
+    {
+      "feature": "children",
+      "mean_abs_shap": 0.00978
+    },
+    {
+      "feature": "F1__1",
+      "mean_abs_shap": 0.00849
+    },
+    {
+      "feature": "household_size",
+      "mean_abs_shap": 0.00812
+    }
+  ]
+}

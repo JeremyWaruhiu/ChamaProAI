@@ -1,0 +1,24 @@
+{
+  "rows": 2684,
+  "of_which_sacco": 846,
+  "of_which_chama": 1943,
+  "central_kenya_rows": 368,
+  "class_distribution": {
+    "Low": {
+      "n": 1403,
+      "pct": 52.3
+    },
+    "Medium": {
+      "n": 1042,
+      "pct": 38.8
+    },
+    "High": {
+      "n": 239,
+      "pct": 8.9
+    }
+  },
+  "protocol": "stratified random split (Central Kenya too small for a geographic holdout at this sample size)",
+  "leakage_excluded": {
+    "E1xiG/E1xiK": "outstanding loan amount is partly a consequence of default"
+  }
+}

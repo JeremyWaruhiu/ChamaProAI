@@ -111,6 +111,75 @@ def encode_suspect(df: pd.DataFrame, X: pd.DataFrame) -> pd.DataFrame:
     return X
 
 
+COLLATERAL_KEYS = {
+    "Guaranteed by another person / guarantor": "guarantor",
+    "No collateral needed": "none",
+    "Salary": "salary",
+    "Group collateral": "group",
+    "savings": "savings",
+    "Land / title deed / house": "land",
+}
+REPAY_FREQ = {"Daily": 0, "Weekly": 1, "Monthly": 2, "Annually": 3,
+              "Irregularly/ Whenever I get money/ Whenever I get money": 4,
+              "Pay the whole loan in lumpsum": 5, "Havent yet started to repay": 6}
+LOAN_RECENCY = {"In the last week": 0, "In the last month": 1,
+                "Between 1 and 6 months ago": 2,
+                "Between 6 months and 1 year ago": 3, "More than 1 year ago": 4}
+
+
+def encode_loan(df: pd.DataFrame, X: pd.DataFrame) -> pd.DataFrame:
+    """Per-lender loan-module features -- what experiment 03 was missing.
+
+    G = SACCO, K = group/chama. Where a respondent has both, the SACCO record
+    is taken as primary and the chama presence kept as a flag, because SACCO
+    loans are an order of magnitude larger (median 100,000 vs 10,000 KSh).
+
+    Outstanding balance (E1xiG/E1xiK) is deliberately absent: it is partly a
+    consequence of defaulting, not a predictor of it.
+    """
+    X = X.copy()
+    num = lambda c: pd.to_numeric(df[c], errors="coerce")
+
+    has_s, has_c = num("E1viiG").notna(), num("E1viiK").notna()
+    X["has_sacco_loan"] = has_s.astype(int)
+    X["has_chama_loan"] = has_c.astype(int)
+    X["has_both_lenders"] = (has_s & has_c).astype(int)
+
+    borrowed = num("E1viiG").fillna(num("E1viiK"))
+    approved = num("E1viiiG").fillna(num("E1viiiK"))
+    X["log_loan_requested"] = np.log1p(borrowed.fillna(0))
+    X["log_loan_approved"] = np.log1p(approved.fillna(0))
+    # Ratio of approved to requested: a classic origination-side credit signal.
+    X["approved_ratio"] = (approved / borrowed).replace([np.inf, -np.inf], np.nan).fillna(1.0).clip(0, 2)
+
+    inc_annual = np.expm1(X["log_monthly_income"]) * 12
+    X["loan_to_annual_income"] = (borrowed.fillna(0) / inc_annual.replace(0, np.nan)) \
+        .replace([np.inf, -np.inf], np.nan).fillna(0).clip(0, 50)
+
+    X["n_loans_12m"] = num("E1iG").fillna(num("E1iK")).fillna(1).clip(0, 20)
+    X["n_loans_outstanding"] = num("E1iiG").fillna(num("E1iiK")).fillna(1).clip(0, 10)
+
+    coll = clean_label(df["E1ivG"]).fillna(clean_label(df["E1ivK"]))
+    for label, key in COLLATERAL_KEYS.items():
+        X["collateral_" + key] = coll.eq(label.replace('"', "")).fillna(False).astype(int)
+    X["has_guarantor"] = X["collateral_guarantor"]
+
+    freq = clean_label(df["E1vG"]).fillna(clean_label(df["E1vK"]))
+    X["repayment_frequency"] = freq.map(REPAY_FREQ).fillna(2).astype(int)
+    X["not_started_repaying"] = freq.eq("Havent yet started to repay").fillna(False).astype(int)
+
+    rec = clean_label(df["E1ixG"]).fillna(clean_label(df["E1ixK"]))
+    X["loan_recency"] = rec.map(LOAN_RECENCY).fillna(2).astype(int)
+
+    purpose = clean_label(df["E1iiiG"]).fillna(clean_label(df["E1iiiK"]))
+    for cat, n in purpose.value_counts().items():
+        if n < 60:
+            continue
+        key = "purpose_" + "".join(ch if ch.isalnum() else "_" for ch in str(cat).lower())[:26]
+        X[key.rstrip("_")] = purpose.eq(cat).fillna(False).astype(int)
+    return X
+
+
 def encode(df: pd.DataFrame) -> tuple[pd.DataFrame, pd.Series, pd.Series]:
     X = pd.DataFrame(index=df.index)
 
@@ -150,6 +219,8 @@ def encode(df: pd.DataFrame) -> tuple[pd.DataFrame, pd.Series, pd.Series]:
 
     if "managedebt_perception" in df.columns:
         X = encode_suspect(df, X)
+    if "E1viiG" in df.columns:
+        X = encode_loan(df, X)
 
     return X, df["risk_class"].astype(int), df["is_central"].astype(bool)
 
@@ -239,16 +310,37 @@ def main() -> None:
                     help="model default/no-default, then band the probability "
                          "back into the three risk classes of Table 4.3")
     ap.add_argument("--tag", default="")
+    ap.add_argument("--low-vs-high", action="store_true",
+                    help="drop the Medium class and model Low vs High only -- "
+                         "diagnostic for whether the fuzzy middle class is the "
+                         "limiting factor")
+    ap.add_argument("--random-split", action="store_true",
+                    help="stratified random split instead of the Central Kenya "
+                         "geographic holdout (for samples too small to hold a "
+                         "region out)")
     a = ap.parse_args()
 
     OUT.mkdir(parents=True, exist_ok=True)
     df = pd.read_csv(a.frame, low_memory=False)
     X, y3, central = encode(df)
-    y = (y3 > 0).astype(int) if a.binary else y3
 
-    Xtr, ytr = X.loc[~central], y.loc[~central]
-    Xev, yev = X.loc[central], y.loc[central]
-    ytr3, yev3 = y3.loc[~central], y3.loc[central]
+    if a.low_vs_high:
+        keep = y3.isin([0, 2])
+        X, y3, central, df = X.loc[keep], y3.loc[keep], central.loc[keep], df.loc[keep]
+        y = (y3 == 2).astype(int)
+    else:
+        y = (y3 > 0).astype(int) if a.binary else y3
+
+    if a.random_split:
+        from sklearn.model_selection import train_test_split as _tts
+        idx_tr, idx_ev = _tts(X.index, test_size=0.25, stratify=y, random_state=a.seed)
+        holdout_name = "random_holdout"
+    else:
+        idx_tr, idx_ev = X.index[~central], X.index[central]
+        holdout_name = "central_holdout"
+    Xtr, ytr = X.loc[idx_tr], y.loc[idx_tr]
+    Xev, yev = X.loc[idx_ev], y.loc[idx_ev]
+    ytr3, yev3 = y3.loc[idx_tr], y3.loc[idx_ev]
 
     models = {
         "random_forest": RandomForestClassifier(
@@ -259,7 +351,9 @@ def main() -> None:
             random_state=a.seed),
     }
 
-    results = {"mode": "binary_banded" if a.binary else "three_class",
+    results = {"mode": ("low_vs_high" if a.low_vs_high else
+                        "binary_banded" if a.binary else "three_class"),
+               "holdout": holdout_name,
                "frame": Path(a.frame).name,
                "n_train": int(len(Xtr)), "n_eval_central": int(len(Xev)),
                "n_features": int(X.shape[1]), "models": {}}
@@ -282,26 +376,30 @@ def main() -> None:
             "cv_macro_f1_std": round(float(cvs.std()), 4),
             "in_distribution_holdout": evaluate(
                 yin_te, m_in.predict(Xin_te), m_in.predict_proba(Xin_te)),
-            "central_holdout": evaluate(yev, m.predict(Xev), m.predict_proba(Xev)),
+            holdout_name: evaluate(yev, m.predict(Xev), m.predict_proba(Xev)),
         }
         if a.binary:
             p_tr = m.predict_proba(Xtr)[:, 1]
             p_ev = m.predict_proba(Xev)[:, 1]
             th = fit_bands(p_tr, ytr3.values)
-            entry["binary_auc_central"] = round(float(roc_auc_score(yev, p_ev)), 4)
+            entry["binary_auc"] = round(float(roc_auc_score(yev, p_ev)), 4)
             entry["band_thresholds"] = [round(v, 4) for v in th]
             entry["banded_three_class_central"] = evaluate(yev3, band(p_ev, th))
         results["models"][name] = entry
 
+    cmp_pred = comparator(df.loc[idx_ev])
+    if a.low_vs_high:
+        # Collapse the comparator to the same two classes the models see.
+        cmp_eval = evaluate((yev3.values == 2).astype(int), (cmp_pred > 0).astype(int))
+    else:
+        cmp_eval = evaluate(yev3, cmp_pred)
     results["models"]["rule_based_comparator"] = {
-        "note": "deterministic; no training",
-        "central_holdout": evaluate(yev3, comparator(df.loc[central])),
-    }
+        "note": "deterministic; no training", holdout_name: cmp_eval}
 
-    key = "banded_three_class_central" if a.binary else "central_holdout"
+    key = "banded_three_class_central" if a.binary else holdout_name
     best = max(fitted, key=lambda k: results["models"][k][key]["macro_f1"])
     results["selected_model"] = best
-    cmp_f1 = results["models"]["rule_based_comparator"]["central_holdout"]["macro_f1"]
+    cmp_f1 = results["models"]["rule_based_comparator"][holdout_name]["macro_f1"]
     best_f1 = results["models"][best][key]["macro_f1"]
     results["improvement_over_comparator_macro_f1"] = round(best_f1 - cmp_f1, 4)
 

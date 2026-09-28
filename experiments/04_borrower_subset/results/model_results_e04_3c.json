@@ -1,0 +1,284 @@
+{
+  "mode": "three_class",
+  "holdout": "random_holdout",
+  "frame": "borrower_frame.csv",
+  "n_train": 2013,
+  "n_eval_central": 671,
+  "n_features": 70,
+  "models": {
+    "random_forest": {
+      "cv_macro_f1_mean": 0.4264,
+      "cv_macro_f1_std": 0.0147,
+      "in_distribution_holdout": {
+        "macro_f1": 0.4266,
+        "balanced_accuracy": 0.426,
+        "accuracy": 0.536,
+        "per_class": {
+          "Low": {
+            "precision": 0.6216,
+            "recall": 0.545,
+            "f1-score": 0.5808
+          },
+          "Medium": {
+            "precision": 0.4755,
+            "recall": 0.6218,
+            "f1-score": 0.5389
+          },
+          "High": {
+            "precision": 0.2857,
+            "recall": 0.1111,
+            "f1-score": 0.16
+          }
+        },
+        "confusion_matrix": [
+          [
+            115,
+            90,
+            6
+          ],
+          [
+            55,
+            97,
+            4
+          ],
+          [
+            15,
+            17,
+            4
+          ]
+        ],
+        "auc_ovr_macro": 0.6017
+      },
+      "random_holdout": {
+        "macro_f1": 0.4285,
+        "balanced_accuracy": 0.4235,
+        "accuracy": 0.5186,
+        "per_class": {
+          "Low": {
+            "precision": 0.6073,
+            "recall": 0.5242,
+            "f1-score": 0.5627
+          },
+          "Medium": {
+            "precision": 0.4545,
+            "recall": 0.5962,
+            "f1-score": 0.5158
+          },
+          "High": {
+            "precision": 0.3333,
+            "recall": 0.15,
+            "f1-score": 0.2069
+          }
+        },
+        "confusion_matrix": [
+          [
+            184,
+            155,
+            12
+          ],
+          [
+            99,
+            155,
+            6
+          ],
+          [
+            20,
+            31,
+            9
+          ]
+        ],
+        "auc_ovr_macro": 0.641
+      }
+    },
+    "hist_gradient_boosting": {
+      "cv_macro_f1_mean": 0.3893,
+      "cv_macro_f1_std": 0.0261,
+      "in_distribution_holdout": {
+        "macro_f1": 0.3966,
+        "balanced_accuracy": 0.3991,
+        "accuracy": 0.531,
+        "per_class": {
+          "Low": {
+            "precision": 0.5778,
+            "recall": 0.6161,
+            "f1-score": 0.5963
+          },
+          "Medium": {
+            "precision": 0.4852,
+            "recall": 0.5256,
+            "f1-score": 0.5046
+          },
+          "High": {
+            "precision": 0.2222,
+            "recall": 0.0556,
+            "f1-score": 0.0889
+          }
+        },
+        "confusion_matrix": [
+          [
+            130,
+            77,
+            4
+          ],
+          [
+            71,
+            82,
+            3
+          ],
+          [
+            24,
+            10,
+            2
+          ]
+        ],
+        "auc_ovr_macro": 0.5731
+      },
+      "random_holdout": {
+        "macro_f1": 0.4025,
+        "balanced_accuracy": 0.3988,
+        "accuracy": 0.5276,
+        "per_class": {
+          "Low": {
+            "precision": 0.5852,
+            "recall": 0.6553,
+            "f1-score": 0.6183
+          },
+          "Medium": {
+            "precision": 0.4508,
+            "recall": 0.4577,
+            "f1-score": 0.4542
+          },
+          "High": {
+            "precision": 0.3571,
+            "recall": 0.0833,
+            "f1-score": 0.1351
+          }
+        },
+        "confusion_matrix": [
+          [
+            230,
+            117,
+            4
+          ],
+          [
+            136,
+            119,
+            5
+          ],
+          [
+            27,
+            28,
+            5
+          ]
+        ],
+        "auc_ovr_macro": 0.6049
+      }
+    },
+    "rule_based_comparator": {
+      "note": "deterministic; no training",
+      "random_holdout": {
+        "macro_f1": 0.3502,
+        "balanced_accuracy": 0.3734,
+        "accuracy": 0.3979,
+        "per_class": {
+          "Low": {
+            "precision": 0.575,
+            "recall": 0.3932,
+            "f1-score": 0.467
+          },
+          "Medium": {
+            "precision": 0.3763,
+            "recall": 0.4269,
+            "f1-score": 0.4
+          },
+          "High": {
+            "precision": 0.1324,
+            "recall": 0.3,
+            "f1-score": 0.1837
+          }
+        },
+        "confusion_matrix": [
+          [
+            138,
+            156,
+            57
+          ],
+          [
+            88,
+            111,
+            61
+          ],
+          [
+            14,
+            28,
+            18
+          ]
+        ]
+      }
+    }
+  },
+  "selected_model": "random_forest",
+  "improvement_over_comparator_macro_f1": 0.0783,
+  "shap_top_features": [
+    {
+      "feature": "n_loans_12m",
+      "mean_abs_shap": 0.0146
+    },
+    {
+      "feature": "log_monthly_income",
+      "mean_abs_shap": 0.01299
+    },
+    {
+      "feature": "children_in_school",
+      "mean_abs_shap": 0.01264
+    },
+    {
+      "feature": "B3A__3",
+      "mean_abs_shap": 0.01139
+    },
+    {
+      "feature": "age",
+      "mean_abs_shap": 0.01137
+    },
+    {
+      "feature": "has_chama_loan",
+      "mean_abs_shap": 0.01084
+    },
+    {
+      "feature": "loan_to_annual_income",
+      "mean_abs_shap": 0.01036
+    },
+    {
+      "feature": "log_loan_approved",
+      "mean_abs_shap": 0.0102
+    },
+    {
+      "feature": "chama_loan_use",
+      "mean_abs_shap": 0.00997
+    },
+    {
+      "feature": "log_loan_requested",
+      "mean_abs_shap": 0.00964
+    },
+    {
+      "feature": "household_size",
+      "mean_abs_shap": 0.00836
+    },
+    {
+      "feature": "education",
+      "mean_abs_shap": 0.00773
+    },
+    {
+      "feature": "log_agri_income",
+      "mean_abs_shap": 0.00728
+    },
+    {
+      "feature": "loan_recency",
+      "mean_abs_shap": 0.00725
+    },
+    {
+      "feature": "F1__1",
+      "mean_abs_shap": 0.00672
+    }
+  ]
+}
