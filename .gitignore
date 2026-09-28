@@ -13,6 +13,9 @@ experiments/**/results/*
 !experiments/**/results/.gitkeep
 # Exception: benchmark outputs are dissertation evidence, not scratch
 !experiments/**/results/bakeoff.json
+!experiments/**/results/prep_profile*.json
+# NOTE: modelling_frame*.csv is derived from licensed FinAccess microdata
+# and stays ignored. Only aggregate profiles are committed.
 
 # Model / dataset caches
 .hf_cache/
