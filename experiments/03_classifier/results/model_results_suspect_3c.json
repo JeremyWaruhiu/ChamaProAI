@@ -1,0 +1,283 @@
+{
+  "mode": "three_class",
+  "frame": "modelling_frame_suspect.csv",
+  "n_train": 11426,
+  "n_eval_central": 1685,
+  "n_features": 55,
+  "models": {
+    "random_forest": {
+      "cv_macro_f1_mean": 0.443,
+      "cv_macro_f1_std": 0.005,
+      "in_distribution_holdout": {
+        "macro_f1": 0.4425,
+        "balanced_accuracy": 0.4421,
+        "accuracy": 0.5122,
+        "per_class": {
+          "Low": {
+            "precision": 0.5866,
+            "recall": 0.5745,
+            "f1-score": 0.5805
+          },
+          "Medium": {
+            "precision": 0.5152,
+            "recall": 0.5442,
+            "f1-score": 0.5293
+          },
+          "High": {
+            "precision": 0.2289,
+            "recall": 0.2077,
+            "f1-score": 0.2178
+          }
+        },
+        "confusion_matrix": [
+          [
+            613,
+            348,
+            106
+          ],
+          [
+            300,
+            493,
+            113
+          ],
+          [
+            132,
+            116,
+            65
+          ]
+        ],
+        "auc_ovr_macro": 0.6371
+      },
+      "central_holdout": {
+        "macro_f1": 0.4137,
+        "balanced_accuracy": 0.4183,
+        "accuracy": 0.4522,
+        "per_class": {
+          "Low": {
+            "precision": 0.5935,
+            "recall": 0.526,
+            "f1-score": 0.5577
+          },
+          "Medium": {
+            "precision": 0.3612,
+            "recall": 0.4897,
+            "f1-score": 0.4157
+          },
+          "High": {
+            "precision": 0.3038,
+            "recall": 0.2392,
+            "f1-score": 0.2677
+          }
+        },
+        "confusion_matrix": [
+          [
+            435,
+            268,
+            124
+          ],
+          [
+            168,
+            238,
+            80
+          ],
+          [
+            130,
+            153,
+            89
+          ]
+        ],
+        "auc_ovr_macro": 0.6056
+      }
+    },
+    "hist_gradient_boosting": {
+      "cv_macro_f1_mean": 0.4317,
+      "cv_macro_f1_std": 0.0091,
+      "in_distribution_holdout": {
+        "macro_f1": 0.42,
+        "balanced_accuracy": 0.4229,
+        "accuracy": 0.4746,
+        "per_class": {
+          "Low": {
+            "precision": 0.575,
+            "recall": 0.5173,
+            "f1-score": 0.5446
+          },
+          "Medium": {
+            "precision": 0.4956,
+            "recall": 0.5022,
+            "f1-score": 0.4989
+          },
+          "High": {
+            "precision": 0.1912,
+            "recall": 0.2492,
+            "f1-score": 0.2164
+          }
+        },
+        "confusion_matrix": [
+          [
+            552,
+            350,
+            165
+          ],
+          [
+            286,
+            455,
+            165
+          ],
+          [
+            122,
+            113,
+            78
+          ]
+        ],
+        "auc_ovr_macro": 0.6193
+      },
+      "central_holdout": {
+        "macro_f1": 0.4092,
+        "balanced_accuracy": 0.4273,
+        "accuracy": 0.4184,
+        "per_class": {
+          "Low": {
+            "precision": 0.6426,
+            "recall": 0.4087,
+            "f1-score": 0.4996
+          },
+          "Medium": {
+            "precision": 0.36,
+            "recall": 0.3704,
+            "f1-score": 0.3651
+          },
+          "High": {
+            "precision": 0.2838,
+            "recall": 0.5027,
+            "f1-score": 0.3628
+          }
+        },
+        "confusion_matrix": [
+          [
+            338,
+            214,
+            275
+          ],
+          [
+            109,
+            180,
+            197
+          ],
+          [
+            79,
+            106,
+            187
+          ]
+        ],
+        "auc_ovr_macro": 0.6074
+      }
+    },
+    "rule_based_comparator": {
+      "note": "deterministic; no training",
+      "central_holdout": {
+        "macro_f1": 0.2845,
+        "balanced_accuracy": 0.3637,
+        "accuracy": 0.2961,
+        "per_class": {
+          "Low": {
+            "precision": 0.6368,
+            "recall": 0.1463,
+            "f1-score": 0.238
+          },
+          "Medium": {
+            "precision": 0.2562,
+            "recall": 0.2325,
+            "f1-score": 0.2438
+          },
+          "High": {
+            "precision": 0.2514,
+            "recall": 0.7124,
+            "f1-score": 0.3717
+          }
+        },
+        "confusion_matrix": [
+          [
+            121,
+            247,
+            459
+          ],
+          [
+            43,
+            113,
+            330
+          ],
+          [
+            26,
+            81,
+            265
+          ]
+        ]
+      }
+    }
+  },
+  "selected_model": "random_forest",
+  "improvement_over_comparator_macro_f1": 0.1292,
+  "shap_top_features": [
+    {
+      "feature": "debt_burden",
+      "mean_abs_shap": 0.03176
+    },
+    {
+      "feature": "debt_worry",
+      "mean_abs_shap": 0.01663
+    },
+    {
+      "feature": "age",
+      "mean_abs_shap": 0.01524
+    },
+    {
+      "feature": "denied_loan",
+      "mean_abs_shap": 0.01187
+    },
+    {
+      "feature": "log_monthly_income",
+      "mean_abs_shap": 0.01141
+    },
+    {
+      "feature": "raise_13k_not_asked",
+      "mean_abs_shap": 0.01138
+    },
+    {
+      "feature": "crb_not_asked",
+      "mean_abs_shap": 0.01092
+    },
+    {
+      "feature": "chama_loan_use",
+      "mean_abs_shap": 0.0108
+    },
+    {
+      "feature": "emergency_i_couldnt_come_up_with_the_m",
+      "mean_abs_shap": 0.01044
+    },
+    {
+      "feature": "log_agri_income",
+      "mean_abs_shap": 0.00943
+    },
+    {
+      "feature": "sacco_loan_use",
+      "mean_abs_shap": 0.00796
+    },
+    {
+      "feature": "B3A__3",
+      "mean_abs_shap": 0.00749
+    },
+    {
+      "feature": "children",
+      "mean_abs_shap": 0.00738
+    },
+    {
+      "feature": "raise_13k_difficulty",
+      "mean_abs_shap": 0.00672
+    },
+    {
+      "feature": "household_size",
+      "mean_abs_shap": 0.00516
+    }
+  ]
+}

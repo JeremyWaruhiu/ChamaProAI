@@ -1,0 +1,323 @@
+{
+  "mode": "binary_banded",
+  "frame": "modelling_frame_suspect.csv",
+  "n_train": 11426,
+  "n_eval_central": 1685,
+  "n_features": 55,
+  "models": {
+    "random_forest": {
+      "cv_macro_f1_mean": 0.6134,
+      "cv_macro_f1_std": 0.0084,
+      "in_distribution_holdout": {
+        "macro_f1": 0.6203,
+        "balanced_accuracy": 0.6201,
+        "accuracy": 0.6234,
+        "per_class": {
+          "No default": {
+            "precision": 0.6016,
+            "recall": 0.5717,
+            "f1-score": 0.5863
+          },
+          "Default": {
+            "precision": 0.6407,
+            "recall": 0.6686,
+            "f1-score": 0.6544
+          }
+        },
+        "confusion_matrix": [
+          [
+            610,
+            457
+          ],
+          [
+            404,
+            815
+          ]
+        ],
+        "auc": 0.6582
+      },
+      "central_holdout": {
+        "macro_f1": 0.5818,
+        "balanced_accuracy": 0.5828,
+        "accuracy": 0.584,
+        "per_class": {
+          "No default": {
+            "precision": 0.5856,
+            "recall": 0.5212,
+            "f1-score": 0.5515
+          },
+          "Default": {
+            "precision": 0.5827,
+            "recall": 0.6445,
+            "f1-score": 0.6121
+          }
+        },
+        "confusion_matrix": [
+          [
+            431,
+            396
+          ],
+          [
+            305,
+            553
+          ]
+        ],
+        "auc": 0.6222
+      },
+      "binary_auc_central": 0.6222,
+      "band_thresholds": [
+        0.508,
+        0.6829
+      ],
+      "banded_three_class_central": {
+        "macro_f1": 0.3739,
+        "balanced_accuracy": 0.3924,
+        "accuracy": 0.4415,
+        "per_class": {
+          "Low": {
+            "precision": 0.5807,
+            "recall": 0.5393,
+            "f1-score": 0.5592
+          },
+          "Medium": {
+            "precision": 0.3308,
+            "recall": 0.5329,
+            "f1-score": 0.4082
+          },
+          "High": {
+            "precision": 0.291,
+            "recall": 0.1048,
+            "f1-score": 0.1542
+          }
+        },
+        "confusion_matrix": [
+          [
+            446,
+            337,
+            44
+          ],
+          [
+            176,
+            259,
+            51
+          ],
+          [
+            146,
+            187,
+            39
+          ]
+        ]
+      }
+    },
+    "hist_gradient_boosting": {
+      "cv_macro_f1_mean": 0.5986,
+      "cv_macro_f1_std": 0.009,
+      "in_distribution_holdout": {
+        "macro_f1": 0.5968,
+        "balanced_accuracy": 0.5967,
+        "accuracy": 0.6002,
+        "per_class": {
+          "No default": {
+            "precision": 0.5758,
+            "recall": 0.5445,
+            "f1-score": 0.5597
+          },
+          "Default": {
+            "precision": 0.6194,
+            "recall": 0.6489,
+            "f1-score": 0.6338
+          }
+        },
+        "confusion_matrix": [
+          [
+            581,
+            486
+          ],
+          [
+            428,
+            791
+          ]
+        ],
+        "auc": 0.6368
+      },
+      "central_holdout": {
+        "macro_f1": 0.5875,
+        "balanced_accuracy": 0.5879,
+        "accuracy": 0.5887,
+        "per_class": {
+          "No default": {
+            "precision": 0.5875,
+            "recall": 0.5441,
+            "f1-score": 0.565
+          },
+          "Default": {
+            "precision": 0.5898,
+            "recall": 0.6317,
+            "f1-score": 0.61
+          }
+        },
+        "confusion_matrix": [
+          [
+            450,
+            377
+          ],
+          [
+            316,
+            542
+          ]
+        ],
+        "auc": 0.6211
+      },
+      "binary_auc_central": 0.6211,
+      "band_thresholds": [
+        0.5062,
+        0.6508
+      ],
+      "banded_three_class_central": {
+        "macro_f1": 0.3814,
+        "balanced_accuracy": 0.3879,
+        "accuracy": 0.4392,
+        "per_class": {
+          "Low": {
+            "precision": 0.5818,
+            "recall": 0.5635,
+            "f1-score": 0.5725
+          },
+          "Medium": {
+            "precision": 0.3243,
+            "recall": 0.4444,
+            "f1-score": 0.375
+          },
+          "High": {
+            "precision": 0.2661,
+            "recall": 0.1559,
+            "f1-score": 0.1966
+          }
+        },
+        "confusion_matrix": [
+          [
+            466,
+            285,
+            76
+          ],
+          [
+            186,
+            216,
+            84
+          ],
+          [
+            149,
+            165,
+            58
+          ]
+        ]
+      }
+    },
+    "rule_based_comparator": {
+      "note": "deterministic; no training",
+      "central_holdout": {
+        "macro_f1": 0.2845,
+        "balanced_accuracy": 0.3637,
+        "accuracy": 0.2961,
+        "per_class": {
+          "Low": {
+            "precision": 0.6368,
+            "recall": 0.1463,
+            "f1-score": 0.238
+          },
+          "Medium": {
+            "precision": 0.2562,
+            "recall": 0.2325,
+            "f1-score": 0.2438
+          },
+          "High": {
+            "precision": 0.2514,
+            "recall": 0.7124,
+            "f1-score": 0.3717
+          }
+        },
+        "confusion_matrix": [
+          [
+            121,
+            247,
+            459
+          ],
+          [
+            43,
+            113,
+            330
+          ],
+          [
+            26,
+            81,
+            265
+          ]
+        ]
+      }
+    }
+  },
+  "selected_model": "hist_gradient_boosting",
+  "improvement_over_comparator_macro_f1": 0.0969,
+  "shap_top_features": [
+    {
+      "feature": "denied_loan",
+      "mean_abs_shap": 0.17955
+    },
+    {
+      "feature": "debt_worry",
+      "mean_abs_shap": 0.16456
+    },
+    {
+      "feature": "debt_burden",
+      "mean_abs_shap": 0.13859
+    },
+    {
+      "feature": "age",
+      "mean_abs_shap": 0.10494
+    },
+    {
+      "feature": "log_monthly_income",
+      "mean_abs_shap": 0.08543
+    },
+    {
+      "feature": "raise_13k_not_asked",
+      "mean_abs_shap": 0.0661
+    },
+    {
+      "feature": "emergency_i_couldnt_come_up_with_the_m",
+      "mean_abs_shap": 0.05448
+    },
+    {
+      "feature": "sacco_loan_use",
+      "mean_abs_shap": 0.05413
+    },
+    {
+      "feature": "log_agri_income",
+      "mean_abs_shap": 0.05063
+    },
+    {
+      "feature": "B3A__3",
+      "mean_abs_shap": 0.04623
+    },
+    {
+      "feature": "marital_single",
+      "mean_abs_shap": 0.03807
+    },
+    {
+      "feature": "children",
+      "mean_abs_shap": 0.02719
+    },
+    {
+      "feature": "education",
+      "mean_abs_shap": 0.02677
+    },
+    {
+      "feature": "children_in_school",
+      "mean_abs_shap": 0.02121
+    },
+    {
+      "feature": "is_female",
+      "mean_abs_shap": 0.02005
+    }
+  ]
+}

@@ -14,6 +14,7 @@ experiments/**/results/*
 # Exception: benchmark outputs are dissertation evidence, not scratch
 !experiments/**/results/bakeoff.json
 !experiments/**/results/prep_profile*.json
+!experiments/**/results/model_results*.json
 # NOTE: modelling_frame*.csv is derived from licensed FinAccess microdata
 # and stays ignored. Only aggregate profiles are committed.
 
