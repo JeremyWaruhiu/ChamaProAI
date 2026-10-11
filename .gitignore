@@ -1,11 +1,34 @@
 # Secrets
 .env
 
-# Data — FinAccess .dta is licensed, never commit
-data/raw/*
+# Data — nothing under data/ is committable except the files named below.
+# FinAccess .dta is licensed; codebook and slices in data/explore/ are
+# derived from it; audio is personal data.
+data/**
+# Re-include directories so the exceptions below can match (git cannot
+# re-include a file whose parent directory is excluded).
+!data/**/
+!data/README.md
 !data/raw/.gitkeep
-# Codebook and slices are derived from the licensed microdata
-data/explore/
+# Text index of the audio set: versioned, the audio itself is not
+!data/manifest.csv
+
+# Audio — interview recordings of identifiable people. Personal data under
+# the Kenya Data Protection Act 2019; never committable, anywhere in the tree.
+*.wav
+*.m4a
+*.mp3
+*.flac
+*.ogg
+
+# Signed consent forms — held offline only. This repository is public.
+docs/consent/
+
+# Trained model artefacts
+models/
+
+# Frontend dependencies
+node_modules/
 
 # Virtual environment
 .venv/
