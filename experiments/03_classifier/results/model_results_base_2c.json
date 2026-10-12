@@ -1,0 +1,324 @@
+{
+  "mode": "binary_banded",
+  "holdout": "central_holdout",
+  "frame": "modelling_frame.csv",
+  "n_train": 11426,
+  "n_eval_central": 1685,
+  "n_features": 40,
+  "models": {
+    "random_forest": {
+      "cv_macro_f1_mean": 0.5793,
+      "cv_macro_f1_std": 0.0084,
+      "in_distribution_holdout": {
+        "macro_f1": 0.5858,
+        "balanced_accuracy": 0.5864,
+        "accuracy": 0.5919,
+        "per_class": {
+          "No default": {
+            "precision": 0.5711,
+            "recall": 0.5042,
+            "f1-score": 0.5356
+          },
+          "Default": {
+            "precision": 0.6064,
+            "recall": 0.6686,
+            "f1-score": 0.636
+          }
+        },
+        "confusion_matrix": [
+          [
+            538,
+            529
+          ],
+          [
+            404,
+            815
+          ]
+        ],
+        "auc": 0.6051
+      },
+      "central_holdout": {
+        "macro_f1": 0.5798,
+        "balanced_accuracy": 0.5823,
+        "accuracy": 0.584,
+        "per_class": {
+          "No default": {
+            "precision": 0.5913,
+            "recall": 0.4933,
+            "f1-score": 0.5379
+          },
+          "Default": {
+            "precision": 0.5789,
+            "recall": 0.6713,
+            "f1-score": 0.6217
+          }
+        },
+        "confusion_matrix": [
+          [
+            408,
+            419
+          ],
+          [
+            282,
+            576
+          ]
+        ],
+        "auc": 0.6039
+      },
+      "binary_auc": 0.6039,
+      "band_thresholds": [
+        0.5081,
+        0.6433
+      ],
+      "banded_three_class_central": {
+        "macro_f1": 0.352,
+        "balanced_accuracy": 0.3713,
+        "accuracy": 0.4226,
+        "per_class": {
+          "Low": {
+            "precision": 0.5874,
+            "recall": 0.5284,
+            "f1-score": 0.5563
+          },
+          "Medium": {
+            "precision": 0.3009,
+            "recall": 0.5021,
+            "f1-score": 0.3763
+          },
+          "High": {
+            "precision": 0.2385,
+            "recall": 0.0833,
+            "f1-score": 0.1235
+          }
+        },
+        "confusion_matrix": [
+          [
+            437,
+            340,
+            50
+          ],
+          [
+            193,
+            244,
+            49
+          ],
+          [
+            114,
+            227,
+            31
+          ]
+        ]
+      }
+    },
+    "hist_gradient_boosting": {
+      "cv_macro_f1_mean": 0.5687,
+      "cv_macro_f1_std": 0.0095,
+      "in_distribution_holdout": {
+        "macro_f1": 0.5662,
+        "balanced_accuracy": 0.5664,
+        "accuracy": 0.5704,
+        "per_class": {
+          "No default": {
+            "precision": 0.5428,
+            "recall": 0.5052,
+            "f1-score": 0.5233
+          },
+          "Default": {
+            "precision": 0.5916,
+            "recall": 0.6276,
+            "f1-score": 0.6091
+          }
+        },
+        "confusion_matrix": [
+          [
+            539,
+            528
+          ],
+          [
+            454,
+            765
+          ]
+        ],
+        "auc": 0.5822
+      },
+      "central_holdout": {
+        "macro_f1": 0.5707,
+        "balanced_accuracy": 0.572,
+        "accuracy": 0.5733,
+        "per_class": {
+          "No default": {
+            "precision": 0.5744,
+            "recall": 0.5042,
+            "f1-score": 0.537
+          },
+          "Default": {
+            "precision": 0.5725,
+            "recall": 0.6399,
+            "f1-score": 0.6043
+          }
+        },
+        "confusion_matrix": [
+          [
+            417,
+            410
+          ],
+          [
+            309,
+            549
+          ]
+        ],
+        "auc": 0.5872
+      },
+      "binary_auc": 0.5872,
+      "band_thresholds": [
+        0.5128,
+        0.6201
+      ],
+      "banded_three_class_central": {
+        "macro_f1": 0.3708,
+        "balanced_accuracy": 0.376,
+        "accuracy": 0.4279,
+        "per_class": {
+          "Low": {
+            "precision": 0.5669,
+            "recall": 0.5586,
+            "f1-score": 0.5627
+          },
+          "Medium": {
+            "precision": 0.3146,
+            "recall": 0.4136,
+            "f1-score": 0.3573
+          },
+          "High": {
+            "precision": 0.2511,
+            "recall": 0.1559,
+            "f1-score": 0.1924
+          }
+        },
+        "confusion_matrix": [
+          [
+            462,
+            266,
+            99
+          ],
+          [
+            211,
+            201,
+            74
+          ],
+          [
+            142,
+            172,
+            58
+          ]
+        ]
+      }
+    },
+    "rule_based_comparator": {
+      "note": "deterministic; no training",
+      "central_holdout": {
+        "macro_f1": 0.2845,
+        "balanced_accuracy": 0.3637,
+        "accuracy": 0.2961,
+        "per_class": {
+          "Low": {
+            "precision": 0.6368,
+            "recall": 0.1463,
+            "f1-score": 0.238
+          },
+          "Medium": {
+            "precision": 0.2562,
+            "recall": 0.2325,
+            "f1-score": 0.2438
+          },
+          "High": {
+            "precision": 0.2514,
+            "recall": 0.7124,
+            "f1-score": 0.3717
+          }
+        },
+        "confusion_matrix": [
+          [
+            121,
+            247,
+            459
+          ],
+          [
+            43,
+            113,
+            330
+          ],
+          [
+            26,
+            81,
+            265
+          ]
+        ]
+      }
+    }
+  },
+  "selected_model": "hist_gradient_boosting",
+  "improvement_over_comparator_macro_f1": 0.0863,
+  "shap_top_features": [
+    {
+      "feature": "log_monthly_income",
+      "mean_abs_shap": 0.17932
+    },
+    {
+      "feature": "age",
+      "mean_abs_shap": 0.11826
+    },
+    {
+      "feature": "B3A__3",
+      "mean_abs_shap": 0.11449
+    },
+    {
+      "feature": "log_agri_income",
+      "mean_abs_shap": 0.08408
+    },
+    {
+      "feature": "sacco_loan_use",
+      "mean_abs_shap": 0.06192
+    },
+    {
+      "feature": "marital_single",
+      "mean_abs_shap": 0.04738
+    },
+    {
+      "feature": "children_in_school",
+      "mean_abs_shap": 0.04738
+    },
+    {
+      "feature": "education",
+      "mean_abs_shap": 0.04469
+    },
+    {
+      "feature": "B3A__4",
+      "mean_abs_shap": 0.04016
+    },
+    {
+      "feature": "household_size",
+      "mean_abs_shap": 0.03806
+    },
+    {
+      "feature": "children",
+      "mean_abs_shap": 0.0376
+    },
+    {
+      "feature": "chama_loan_use",
+      "mean_abs_shap": 0.02608
+    },
+    {
+      "feature": "marital_divorced",
+      "mean_abs_shap": 0.02545
+    },
+    {
+      "feature": "F1__2",
+      "mean_abs_shap": 0.02513
+    },
+    {
+      "feature": "is_female",
+      "mean_abs_shap": 0.02346
+    }
+  ]
+}

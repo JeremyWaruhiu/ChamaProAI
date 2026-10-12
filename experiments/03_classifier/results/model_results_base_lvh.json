@@ -7,63 +7,63 @@
   "n_features": 40,
   "models": {
     "random_forest": {
-      "cv_macro_f1_mean": 0.5793,
-      "cv_macro_f1_std": 0.0136,
+      "cv_macro_f1_mean": 0.5765,
+      "cv_macro_f1_std": 0.0112,
       "in_distribution_holdout": {
-        "macro_f1": 0.5678,
-        "balanced_accuracy": 0.5719,
-        "accuracy": 0.6819,
+        "macro_f1": 0.5751,
+        "balanced_accuracy": 0.5797,
+        "accuracy": 0.687,
         "per_class": {
           "No default": {
-            "precision": 0.8072,
-            "recall": 0.7732,
-            "f1-score": 0.7899
+            "precision": 0.811,
+            "recall": 0.776,
+            "f1-score": 0.7931
           },
           "Default": {
-            "precision": 0.324,
-            "recall": 0.3706,
-            "f1-score": 0.3458
+            "precision": 0.3343,
+            "recall": 0.3834,
+            "f1-score": 0.3571
           }
         },
         "confusion_matrix": [
           [
-            825,
-            242
+            828,
+            239
           ],
           [
-            197,
-            116
+            193,
+            120
           ]
         ],
-        "auc": 0.6404
+        "auc": 0.6417
       },
       "central_holdout": {
-        "macro_f1": 0.5699,
-        "balanced_accuracy": 0.5702,
-        "accuracy": 0.6305,
+        "macro_f1": 0.5858,
+        "balanced_accuracy": 0.5871,
+        "accuracy": 0.6405,
         "per_class": {
           "No default": {
-            "precision": 0.7336,
-            "recall": 0.7291,
-            "f1-score": 0.7314
+            "precision": 0.745,
+            "recall": 0.7279,
+            "f1-score": 0.7364
           },
           "Default": {
-            "precision": 0.4058,
-            "recall": 0.4113,
-            "f1-score": 0.4085
+            "precision": 0.4246,
+            "recall": 0.4462,
+            "f1-score": 0.4351
           }
         },
         "confusion_matrix": [
           [
-            603,
-            224
+            602,
+            225
           ],
           [
-            219,
-            153
+            206,
+            166
           ]
         ],
-        "auc": 0.6284
+        "auc": 0.6273
       }
     },
     "hist_gradient_boosting": {
@@ -158,67 +158,67 @@
     }
   },
   "selected_model": "random_forest",
-  "improvement_over_comparator_macro_f1": 0.2027,
+  "improvement_over_comparator_macro_f1": 0.2186,
   "shap_top_features": [
     {
       "feature": "age",
-      "mean_abs_shap": 0.03781
+      "mean_abs_shap": 0.03893
     },
     {
       "feature": "log_monthly_income",
-      "mean_abs_shap": 0.02696
+      "mean_abs_shap": 0.02661
     },
     {
       "feature": "sacco_loan_use",
-      "mean_abs_shap": 0.02034
+      "mean_abs_shap": 0.01983
     },
     {
       "feature": "chama_loan_use",
-      "mean_abs_shap": 0.01997
+      "mean_abs_shap": 0.01953
     },
     {
       "feature": "B3A__3",
-      "mean_abs_shap": 0.01782
+      "mean_abs_shap": 0.01803
     },
     {
       "feature": "children",
-      "mean_abs_shap": 0.01737
+      "mean_abs_shap": 0.01764
     },
     {
       "feature": "F1__2",
-      "mean_abs_shap": 0.01333
+      "mean_abs_shap": 0.01355
     },
     {
       "feature": "children_in_school",
-      "mean_abs_shap": 0.01114
-    },
-    {
-      "feature": "household_size",
-      "mean_abs_shap": 0.0105
+      "mean_abs_shap": 0.01132
     },
     {
       "feature": "education",
-      "mean_abs_shap": 0.01037
+      "mean_abs_shap": 0.01053
     },
     {
       "feature": "F1__1",
-      "mean_abs_shap": 0.01016
+      "mean_abs_shap": 0.01051
+    },
+    {
+      "feature": "household_size",
+      "mean_abs_shap": 0.01033
     },
     {
       "feature": "is_female",
-      "mean_abs_shap": 0.00767
+      "mean_abs_shap": 0.00773
     },
     {
       "feature": "log_agri_income",
-      "mean_abs_shap": 0.00767
+      "mean_abs_shap": 0.00741
     },
     {
       "feature": "B3A__1",
-      "mean_abs_shap": 0.00554
+      "mean_abs_shap": 0.00549
     },
     {
-      "feature": "B1L__3",
-      "mean_abs_shap": 0.00515
+      "feature": "B3A__2",
+      "mean_abs_shap": 0.0053
     }
   ]
 }
