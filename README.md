@@ -159,3 +159,36 @@ python tools\explore_finaccess.py --export county,E2E,A18,Sex,B3Ii
 
 Licensed survey data, interview audio and signed consent forms are never
 committed; `.gitignore` enforces this. See [docs/ETHICS.md](docs/ETHICS.md).
+
+## Running the pipeline
+
+Place recordings in `data/raw_audio/<SPEAKER>/`, then:
+
+    python scripts/ingest_audio.py --in data/raw_audio/S01 --speaker S01
+    python scripts/transcribe.py
+    python scripts/translate_extract.py --chunk 5
+
+`ingest_audio.py` converts to 16 kHz mono WAV and builds `data/manifest.csv`,
+the index every later stage reads. `transcribe.py` writes ASR hypotheses to
+`data/asr_output.csv`. `translate_extract.py` batches responses into requests
+of five, retries 429/500/503 with exponential backoff, and writes English
+translations with extracted financial signals to `data/translation_output.csv`.
+
+### Environment variables
+
+Set in `.env` (see `.env.example`): `GEMINI_API_KEY`, `GEMINI_MODEL`,
+`ASR_MODEL`, `ASR_LANGUAGE`, `HF_TOKEN`. `ASR_LANGUAGE=sw` uses Swahili as the
+nearest proxy, since Whisper has no Kikuyu token.
+
+To isolate translation quality from transcription error, run
+`translate_extract.py --source ref`, which reads `kikuyu_ref` from the manifest
+instead of the ASR output.
+
+### Known limitations
+
+- Corpus is 40 responses from one speaker; no speaker-independent claim holds.
+- ASR runs at 1.9x real time on CPU; the five-minute performance target applies
+  to the typed-input path only.
+- Decoder repetition collapse affects ~10% of clips.
+- Cascade yield is 62.5%; asset-ownership responses currently yield nothing.
+- Feature extraction requires connectivity; capture and typed entry do not.
