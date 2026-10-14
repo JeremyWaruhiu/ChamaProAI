@@ -33,7 +33,7 @@ experiments/
   04_borrower_subset/                 SACCO/chama borrowers with loan features
   */results/                          committed JSON summaries; CSVs/logs ignored
 src/chamapro/config.py                loads .env, exposes keys and paths
-tools/explore_finaccess.py            browse the FinAccess microdata
+scripts/explore_finaccess.py            browse the FinAccess microdata
 ```
 
 ## Prerequisites
