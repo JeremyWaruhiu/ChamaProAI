@@ -12,8 +12,9 @@ and produces a three-class credit-risk classification with an explanation.
 Every speech and language component is a published artefact used at inference
 time only. Target hardware is CPU-only, 16 GB RAM.
 
-The repository currently contains the research experiments behind those design
-decisions. The application itself has not been written yet.
+The repository contains the research experiments behind those design
+decisions, the pipeline scripts, and an HTTP API (`src/chamapro/api/`) that
+exposes the pipeline to the dashboard.
 
 ## Layout
 
@@ -32,7 +33,9 @@ experiments/
   03_classifier/                      credit-risk classifier, comparator, SHAP
   04_borrower_subset/                 SACCO/chama borrowers with loan features
   */results/                          committed JSON summaries; CSVs/logs ignored
+scripts/                              pipeline stages; each is a CLI and importable
 src/chamapro/config.py                loads .env, exposes keys and paths
+src/chamapro/api/                     FastAPI app over the pipeline (SQLite storage)
 scripts/explore_finaccess.py            browse the FinAccess microdata
 ```
 
@@ -56,6 +59,7 @@ cd ChamaProAI
 python -m venv .venv
 .venv\Scripts\activate
 pip install -r requirements.txt
+pip install -e .            # makes src/chamapro importable (needed by the API)
 copy .env.example .env      # then fill in the values
 ```
 
@@ -183,6 +187,33 @@ nearest proxy, since Whisper has no Kikuyu token.
 To isolate translation quality from transcription error, run
 `translate_extract.py --source ref`, which reads `kikuyu_ref` from the manifest
 instead of the ASR output.
+
+### Running the API
+
+    uvicorn chamapro.api.main:app --reload
+    pytest                      # API tests; no model download or network
+
+Interactive docs at http://localhost:8000/docs. Startup loads `ASR_MODEL` once,
+which takes a minute on CPU. State lives in `data/chamapro.db` (SQLite) and
+uploaded audio in `data/uploads/<interview_id>/`; both are gitignored. Optional
+`CHAMAPRO_DB` and `CHAMAPRO_UPLOADS` move them elsewhere.
+
+| Method | Path                               | Purpose                                         |
+|--------|------------------------------------|-------------------------------------------------|
+| POST   | `/api/interviews`                  | start an interview `{applicant_name?}`          |
+| POST   | `/api/interviews/{id}/responses`   | upload one clip (`file`, `sentence_no`); 202, transcribed in the background |
+| GET    | `/api/interviews/{id}`             | full state; the dashboard polls this            |
+| PATCH  | `/api/responses/{id}`              | correct a transcript `{transcript}` before assessment |
+| DELETE | `/api/responses/{id}`              | discard a clip so its sentence can be re-recorded; 409 while it is being transcribed |
+| POST   | `/api/interviews/{id}/assess`      | translate, extract, score; stores the assessment |
+| GET    | `/api/health`                      | classifier, API key, ASR model status           |
+
+An assessment is written once and never changed: it stores the exact feature
+vector the classifier saw, the probabilities, SHAP contributions and the
+classifier's filename and SHA-256. SQLite triggers reject any UPDATE or DELETE
+on the `assessments` table. Once an interview is assessed, its responses can no
+longer be added, edited or deleted. Clips are transcribed one at a time, so a full
+interview of 40 clips takes about 20 minutes to clear the queue.
 
 ### Known limitations
 

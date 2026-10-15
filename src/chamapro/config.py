@@ -30,6 +30,24 @@ GOOGLE_API_KEY: str | None = os.getenv("GOOGLE_API_KEY") or None
 HF_TOKEN: str | None = os.getenv("HF_TOKEN") or None
 KHAYA_API_KEY: str | None = os.getenv("KHAYA_API_KEY") or None
 
+# --- Pipeline ----------------------------------------------------------------
+# Same precedence the scripts use: a dedicated Gemini key, else the AI Studio key.
+GEMINI_API_KEY: str | None = os.getenv("GEMINI_API_KEY") or GOOGLE_API_KEY
+# None lets each pipeline stage fall back to its own default model.
+GEMINI_MODEL: str | None = os.getenv("GEMINI_MODEL") or None
+ASR_MODEL: str = os.getenv("ASR_MODEL") or "openai/whisper-small"
+ASR_LANGUAGE: str = os.getenv("ASR_LANGUAGE") or "sw"
+
+SCRIPTS_DIR = PROJECT_ROOT / "scripts"
+MODELS_DIR = PROJECT_ROOT / "models"
+CLASSIFIER_PATH = MODELS_DIR / "classifier.joblib"
+CLASSIFIER_META_PATH = MODELS_DIR / "classifier_meta.json"
+
+# --- API ---------------------------------------------------------------------
+DB_PATH = Path(os.getenv("CHAMAPRO_DB") or DATA_DIR / "chamapro.db")
+UPLOADS_DIR = Path(os.getenv("CHAMAPRO_UPLOADS") or DATA_DIR / "uploads")
+MAX_UPLOAD_BYTES = 25 * 1024 * 1024
+
 
 def require(name: str) -> str:
     """Return the named env var or raise a clear error naming what's missing."""

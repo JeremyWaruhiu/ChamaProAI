@@ -1,0 +1,17 @@
+# Makes src/chamapro importable (pip install -e .) so the API can be started
+# with `uvicorn chamapro.api.main:app`. Dependencies live in requirements.txt.
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "chamapro"
+version = "0.1.0"
+description = "Interpretable credit assessment for Kikuyu-speaking SACCO members"
+requires-python = ">=3.11"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
