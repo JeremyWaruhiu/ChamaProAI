@@ -41,7 +41,7 @@ def test_upload_returns_202_before_transcription_finishes(client, asr, interview
     assert r.json() == {"id": r.json()["id"], "interview_id": interview,
                         "sentence_no": 1, "status": "queued"}
     assert asr.started.wait(5)
-    assert state(interview)["responses"][0]["status"] == "queued"
+    assert state(interview)["responses"][0]["status"] == "transcribing"
 
     asr.gate.set()
     wait_until(lambda: state(interview)["counts"]["transcribed"] == 1)
@@ -72,7 +72,7 @@ def test_audio_is_stored_as_16k_mono_wav(client, audio, interview, upload, state
 def test_responses_carry_domain_and_sort_by_sentence(client, interview, upload, state):
     for n in (12, 1, 7, 2):
         assert upload(interview, n).status_code == 202
-    wait_until(lambda: state(interview)["counts"] == {"queued": 0, "transcribed": 4, "failed": 0})
+    wait_until(lambda: state(interview)["counts"] == {"queued": 0, "transcribing": 0, "transcribed": 4, "failed": 0})
     rs = state(interview)["responses"]
     assert [x["sentence_no"] for x in rs] == [1, 2, 7, 12]
     assert [x["domain"] for x in rs] == ["household", "household", "income", "expenditure"]

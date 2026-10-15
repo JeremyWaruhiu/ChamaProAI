@@ -65,3 +65,4 @@ data/explore/
 models/*.joblib
 data/assessment.json
 data/features_raw.txt
+docs/Kikuyu_Recording_Worksheet.pdf

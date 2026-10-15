@@ -17,7 +17,7 @@ from fastapi import (BackgroundTasks, Depends, FastAPI, File, Form,
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from sqlalchemy import select
+from sqlalchemy import case, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -32,6 +32,7 @@ if not logging.getLogger().handlers:
 log = logging.getLogger("chamapro.api")
 
 ERRORS = {code: {"model": s.Error} for code in (404, 409, 413, 415, 422, 502, 503)}
+QUESTIONS_TOTAL = max(hi for _, hi, _ in pl.ingest_audio.DOMAINS)
 
 
 @asynccontextmanager
@@ -85,6 +86,16 @@ def require_open(iv: Interview) -> None:
         raise HTTPException(409, f"interview {iv.id} is already assessed; its record is immutable")
 
 
+def live_status_of(db: Session) -> tuple[int, int] | None:
+    """(response_id, interview_id) of the clip being transcribed right now."""
+    rid = pl.transcribing()
+    if rid is None:
+        return None
+    iid = db.scalar(select(Response.interview_id)
+                    .where(Response.id == rid, Response.status == "queued"))
+    return (rid, iid) if iid is not None else None
+
+
 def upstream_error(stage: str, e: Exception) -> HTTPException:
     """Map a pipeline-stage failure from the Gemini client to an HTTP error."""
     if isinstance(e, json.JSONDecodeError | pl.score_interview.FeatureParseError
@@ -118,6 +129,33 @@ def create_interview(body: s.InterviewCreate | None = None, db: Session = Depend
     db.add(iv)
     db.commit()
     return s.InterviewCreated(id=iv.id, status=iv.status)
+
+
+@app.get("/api/interviews", response_model=list[s.InterviewSummary])
+def list_interviews(db: Session = Depends(get_db)):
+    """Every interview, newest first, with response counts and any risk class."""
+    per_status = {st: func.coalesce(func.sum(case((Response.status == st, 1), else_=0)), 0)
+                  for st in ("queued", "transcribed", "failed")}
+    counts = (select(Response.interview_id, *(c.label(st) for st, c in per_status.items()))
+              .group_by(Response.interview_id).subquery())
+    rows = db.execute(
+        select(Interview.id, Interview.created_at, Interview.status, Applicant.name,
+               Assessment.risk_class, counts.c.queued, counts.c.transcribed, counts.c.failed)
+        .join(Applicant, Interview.applicant_id == Applicant.id)
+        .outerjoin(Assessment, Assessment.interview_id == Interview.id)
+        .outerjoin(counts, counts.c.interview_id == Interview.id)
+        .order_by(Interview.created_at.desc(), Interview.id.desc()))
+    busy = live_status_of(db)
+    out = []
+    for r in rows:
+        c = s.Counts(queued=r.queued or 0, transcribed=r.transcribed or 0, failed=r.failed or 0)
+        if busy and busy[1] == r.id:
+            c.queued, c.transcribing = c.queued - 1, 1
+        out.append(s.InterviewSummary(
+            id=r.id, applicant_name=r.name, created_at=r.created_at, status=r.status,
+            responses_recorded=c.queued + c.transcribing + c.transcribed + c.failed,
+            questions_total=QUESTIONS_TOTAL, counts=c, risk_class=r.risk_class))
+    return out
 
 
 @app.post("/api/interviews/{interview_id}/responses", status_code=202,
@@ -180,13 +218,17 @@ def upload_response(interview_id: int, background: BackgroundTasks,
          responses=ERRORS)
 def interview_state(interview_id: int, db: Session = Depends(get_db)):
     iv = get_interview(db, interview_id)
-    counts = s.Counts()
+    busy = live_status_of(db)
+    counts, responses = s.Counts(), []
     for r in iv.responses:
-        setattr(counts, r.status, getattr(counts, r.status) + 1)
+        out = s.ResponseOut.model_validate(r)
+        if busy and busy[0] == r.id:
+            out.status = "transcribing"
+        setattr(counts, out.status, getattr(counts, out.status) + 1)
+        responses.append(out)
     return s.InterviewState(id=iv.id, status=iv.status, created_at=iv.created_at,
                             applicant=s.Applicant.model_validate(iv.applicant),
-                            counts=counts,
-                            responses=[s.ResponseOut.model_validate(r) for r in iv.responses],
+                            counts=counts, responses=responses,
                             assessment=iv.assessment and s.AssessmentOut.model_validate(iv.assessment))
 
 

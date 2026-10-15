@@ -201,6 +201,7 @@ uploaded audio in `data/uploads/<interview_id>/`; both are gitignored. Optional
 | Method | Path                               | Purpose                                         |
 |--------|------------------------------------|-------------------------------------------------|
 | POST   | `/api/interviews`                  | start an interview `{applicant_name?}`          |
+| GET    | `/api/interviews`                  | all interviews, newest first, with response counts and risk class |
 | POST   | `/api/interviews/{id}/responses`   | upload one clip (`file`, `sentence_no`); 202, transcribed in the background |
 | GET    | `/api/interviews/{id}`             | full state; the dashboard polls this            |
 | PATCH  | `/api/responses/{id}`              | correct a transcript `{transcript}` before assessment |
@@ -214,6 +215,18 @@ classifier's filename and SHA-256. SQLite triggers reject any UPDATE or DELETE
 on the `assessments` table. Once an interview is assessed, its responses can no
 longer be added, edited or deleted. Clips are transcribed one at a time, so a full
 interview of 40 clips takes about 20 minutes to clear the queue.
+
+### Demo data
+
+    python scripts/seed_demo.py
+
+Creates one open interview holding all 40 S01 responses, marked transcribed,
+from `data/asr_paza.csv` and `data/audio_16k/`, so a full interview can be
+reviewed and assessed without an hour of transcription. Takes about a second
+and needs no model. Safe to re-run: it changes nothing if the demo is
+complete, restores any response deleted for re-recording, and starts a fresh
+demo once the previous one has been assessed. Audio is copied into
+`data/uploads/`, so re-recording in the dashboard never touches the corpus.
 
 ### Known limitations
 

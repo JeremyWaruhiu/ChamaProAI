@@ -6,7 +6,9 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-ResponseStatus = Literal["queued", "transcribed", "failed"]
+# Stored status is queued | transcribed | failed. Reads report the one clip the
+# worker has in hand as "transcribing"; it is still "queued" in the database.
+ResponseStatus = Literal["queued", "transcribing", "transcribed", "failed"]
 InterviewStatus = Literal["open", "assessed"]
 
 
@@ -94,8 +96,20 @@ class Applicant(ORM):
 
 class Counts(BaseModel):
     queued: int = 0
+    transcribing: int = 0
     transcribed: int = 0
     failed: int = 0
+
+
+class InterviewSummary(BaseModel):
+    id: int
+    applicant_name: str | None
+    created_at: datetime
+    status: InterviewStatus
+    responses_recorded: int
+    questions_total: int
+    counts: Counts
+    risk_class: str | None = Field(description="Set once the interview is assessed")
 
 
 class InterviewState(ORM):

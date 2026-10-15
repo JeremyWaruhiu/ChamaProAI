@@ -123,6 +123,12 @@ class TranscriptionBusy(Exception):
     """The response is being transcribed at this moment."""
 
 
+def transcribing() -> int | None:
+    """Id of the response the worker is transcribing right now, if any."""
+    with _cond:
+        return _current
+
+
 def enqueue(response_id: int) -> None:
     with _cond:
         if response_id != _current and response_id not in _pending:
