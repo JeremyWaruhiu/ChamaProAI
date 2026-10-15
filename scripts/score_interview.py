@@ -49,13 +49,26 @@ SCHEMA = """{
   "sacco_loan_use": 0/1/2 or null,
   "chama_loan_use": 0/1/2 or null,
   "is_female": 0/1 or null,
-  "marital_status": "married"|"single"|"widowed"|"divorced"|null
+  "marital_status": "married"|"single"|"widowed"|"divorced"|null,
+  "purchases_last_12m": {
+    "land_or_plot": 0/1, "new_house": 0/1, "house_materials": 0/1,
+    "business_equipment": 0/1, "farm_equipment": 0/1, "livestock": 0/1
+  },
+  "lost_as_guarantor": { "sacco": 0/1, "chama": 0/1 }
 }"""
 
 PROMPT = """Below is a loan applicant interview, translated to English.
 Extract ONLY facts the applicant actually stated. Where a fact was not stated,
 return null for that field and 0 for the binary flags. Never infer, estimate or
 guess. An incomplete answer is correct; an invented one is not.
+
+Field rules:
+  monthly_income_kes is TOTAL monthly income. If the applicant states only one
+    income figure, it belongs here, not in agri_income_kes.
+  agri_income_kes only when a figure is explicitly identified as farm, crop or
+    livestock income, separately from total income. Never duplicate one figure
+    into both fields.
+  is_female only if the applicant states their sex. Never infer it from a name.
 
 Scales:
   education_level: 0 none, 1 some primary, 2 primary complete, 3 some secondary,
@@ -75,7 +88,8 @@ def call(prompt, tries=5, timeout=300):
         try:
             r = requests.post(URL, headers={"x-goog-api-key": KEY,
                               "Content-Type": "application/json"},
-                              json={"contents": [{"parts": [{"text": prompt}]}]},
+                              json={"contents": [{"parts": [{"text": prompt}]}],
+                                    "generationConfig": {"temperature": 0}},
                               timeout=timeout)
         except requests.exceptions.RequestException as e:
             if i == tries: raise
@@ -123,6 +137,13 @@ def build_vector(f, order):
     for i, k in enumerate(["land_or_buildings", "livestock", "jewellery",
                            "digital_assets", "agroforestry"], 1):
         v[f"F1__{i}"] = int(sav.get(k, 0) or 0)
+    buy = f.get("purchases_last_12m") or {}
+    for i, k in enumerate(["land_or_plot", "new_house", "house_materials",
+                           "business_equipment", "farm_equipment", "livestock"], 1):
+        v[f"B1L__{i}"] = int(buy.get(k, 0) or 0)
+    lost = f.get("lost_as_guarantor") or {}
+    v["E3B__3"] = int(lost.get("sacco", 0) or 0)
+    v["E3B__7"] = int(lost.get("chama", 0) or 0)
 
     row = {c: v.get(c, np.nan) for c in order}
     row = {c: (np.nan if x is None else x) for c, x in row.items()}

@@ -32,7 +32,8 @@ def call(prompt, tries=5, timeout=300):
         try:
             r = requests.post(URL, headers={"x-goog-api-key": KEY,
                               "Content-Type": "application/json"},
-                              json={"contents": [{"parts": [{"text": prompt}]}]},
+                              json={"contents": [{"parts": [{"text": prompt}]}],
+                                    "generationConfig": {"temperature": 0}},
                               timeout=timeout)
         except requests.exceptions.RequestException as e:
             if i == tries: raise
