@@ -62,3 +62,6 @@ Thumbs.db
 
 # Derived exports from licensed survey data
 data/explore/
+models/*.joblib
+data/assessment.json
+data/features_raw.txt
