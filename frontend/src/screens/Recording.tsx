@@ -89,7 +89,7 @@ function AnswerPanel({ interview, q, onChange }: { interview: InterviewState; q:
   const rec = useRecorder()
   const [busy, setBusy] = useState<Busy>(null)
   const [waitingFor, setWaitingFor] = useState<number | null>(null)
-  const [error, setError] = useState<{ doing: string; error: ApiError } | null>(null)
+  const [error, setError] = useState<{ doing: string; error: ApiError; retry?: () => void } | null>(null)
   const fileInput = useRef<HTMLInputElement>(null)
 
   const response = interview.responses.find((r) => r.sentence_no === q.sentence_no)
@@ -106,7 +106,7 @@ function AnswerPanel({ interview, q, onChange }: { interview: InterviewState; q:
       await api.uploadResponse(interview.id, q.sentence_no, audio, filename)
       await onChange()
     } catch (e) {
-      setError({ doing: 'The recording was not saved', error: e as ApiError })
+      setError({ doing: 'The recording was not saved', error: e as ApiError, retry: () => upload(audio, filename) })
     } finally {
       setBusy(null)
     }
@@ -134,7 +134,7 @@ function AnswerPanel({ interview, q, onChange }: { interview: InterviewState; q:
       await api.deleteResponse(r.id, (s) => setWaitingFor(s))
       await onChange()
     } catch (e) {
-      setError({ doing: 'Could not remove the old recording', error: e as ApiError })
+      setError({ doing: 'Could not remove the old recording', error: e as ApiError, retry: () => reRecord(r) })
     } finally {
       setBusy(null)
       setWaitingFor(null)
@@ -204,7 +204,7 @@ function AnswerPanel({ interview, q, onChange }: { interview: InterviewState; q:
     <section className={`card ${styles.answer}`} aria-label="Answer">
       {body}
       {rec.error && <Notice tone="warning">{rec.error}</Notice>}
-      {error && <ErrorNotice doing={error.doing} error={error.error} />}
+      {error && <ErrorNotice doing={error.doing} error={error.error} onRetry={error.retry} />}
     </section>
   )
 }

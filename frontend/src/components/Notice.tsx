@@ -26,7 +26,7 @@ export function Notice({ tone = 'info', title, children, action }: NoticeProps) 
 export function ErrorNotice({ doing, error, onRetry }: { doing: string; error: { message: string }; onRetry?: () => void }) {
   return (
     <Notice tone="error" title={doing} action={onRetry &&
-      <button className="btn btn-secondary" onClick={onRetry}>Try again</button>}>
+      <button className="btn btn-secondary" onClick={onRetry}>Retry</button>}>
       {error.message}
     </Notice>
   )

@@ -306,7 +306,7 @@ function DecisionForm({ interviewId, name, onDecided }: { interviewId: number; n
           Record decision
         </button>
       )}
-      {error && <ErrorNotice doing="The decision was not recorded" error={error} />}
+      {error && <ErrorNotice doing="The decision was not recorded" error={error} onRetry={record} />}
     </div>
   )
 }

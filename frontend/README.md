@@ -13,10 +13,12 @@ minute on CPU.
 
 ```bash
 source .venv/bin/activate
-uvicorn chamapro.api.main:app --reload
+uvicorn chamapro.api.main:app --reload --reload-dir src --reload-dir scripts
 ```
 
-Wait for `Application startup complete`.
+Wait for `Application startup complete`. Keep both `--reload-dir` flags.
+Without them, loading the speech model writes into `.hf_cache/`, the reloader
+sees it and restarts, and the server loops forever without answering.
 
 **2. Dashboard** (port 5173).
 
@@ -36,9 +38,12 @@ needs HTTPS (for now, use **Upload a recording** there).
 ## Checks
 
 ```bash
-npm run build      # type-checks (tsc) and builds into dist/
+npm test           # Vitest: borderline rule, feature labels, recommendations, routing, timeouts
 npm run lint       # oxlint
+npm run build      # type-checks (tsc) and builds into dist/
 ```
+
+CI runs all three on every push and pull request to `main`.
 
 ## Layout
 
@@ -58,6 +63,9 @@ Routes: `#/` list · `#/interviews/:id/record/:n` · `#/interviews/:id/review` �
 
 ## Behaviour worth knowing
 
+- No request waits more than 15 seconds (the assessment, which takes about
+  30 s, gets 90 s). A request that runs out of time shows an error with a
+  **Retry** button, so no screen spins forever.
 - Every API error is shown with the server's own `detail` message. A rendering
   fault shows a reload notice instead of a blank page.
 - Answers are transcribed one at a time, about 35 s each. While any answer is

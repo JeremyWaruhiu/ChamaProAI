@@ -115,8 +115,8 @@ function NewInterview({ onCancel }: { onCancel: () => void }) {
 
   useEffect(() => { input.current?.focus() }, [])
 
-  async function submit(e: FormEvent) {
-    e.preventDefault()
+  async function submit(e?: FormEvent) {
+    e?.preventDefault()
     setBusy(true)
     setError(null)
     try {
@@ -136,7 +136,7 @@ function NewInterview({ onCancel }: { onCancel: () => void }) {
              autoComplete="off" placeholder="For example, Wanjiru Njeri"
              onChange={(e) => setName(e.target.value)} />
       <p className={`muted ${styles.hint}`}>You can leave this blank and add it later.</p>
-      {error && <ErrorNotice doing="Could not start the interview" error={error} />}
+      {error && <ErrorNotice doing="Could not start the interview" error={error} onRetry={() => submit()} />}
       <div className={styles.newActions}>
         <button type="button" className="btn btn-quiet" onClick={onCancel} disabled={busy}>Cancel</button>
         <button type="submit" className="btn btn-primary" disabled={busy}>

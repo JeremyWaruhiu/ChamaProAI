@@ -1,5 +1,7 @@
 # ChamaPro AI
 
+[![CI](https://github.com/JeremyWaruhiu/ChamaProAI/actions/workflows/ci.yml/badge.svg)](https://github.com/JeremyWaruhiu/ChamaProAI/actions/workflows/ci.yml)
+
 Interpretable machine-learning credit assessment for rural Kenyan SACCOs serving
 Kikuyu-speaking communities. Final-year BSc Informatics & Computer Science
 project, Strathmore University.
@@ -222,8 +224,13 @@ instead of the ASR output.
 
 ### Running the API
 
-    uvicorn chamapro.api.main:app --reload
+    uvicorn chamapro.api.main:app --reload --reload-dir src --reload-dir scripts
     pytest                      # API tests; no model download or network
+
+`--reload-dir` keeps the reloader to the code. Loading the speech model
+writes Python files into `.hf_cache/`, and the server also writes to `data/`;
+a plain `--reload` sees those writes, restarts, reloads the model and loops
+forever, so the dashboard never gets an answer.
 
 Interactive docs at http://localhost:8000/docs. Startup loads `ASR_MODEL` once,
 which takes a minute on CPU. State lives in `data/chamapro.db` (SQLite) and
@@ -274,7 +281,10 @@ classifier in `models/` (`python scripts/train_and_save.py`), and Node.js
 2. **Start the backend** in one terminal. It loads the speech model, which
    takes about a minute. Wait for `Application startup complete`.
 
-       uvicorn chamapro.api.main:app --reload
+       uvicorn chamapro.api.main:app --reload --reload-dir src --reload-dir scripts
+
+   Keep both `--reload-dir` flags: without them the server restarts in a loop
+   (see [Running the API](#running-the-api)).
 
 3. **Start the dashboard** in a second terminal:
 

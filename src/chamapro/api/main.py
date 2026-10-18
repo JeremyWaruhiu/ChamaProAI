@@ -1,6 +1,6 @@
 """HTTP API over the ChamaPro pipeline.
 
-    uvicorn chamapro.api.main:app --reload
+    uvicorn chamapro.api.main:app --reload --reload-dir src --reload-dir scripts
 """
 from __future__ import annotations
 

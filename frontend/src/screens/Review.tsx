@@ -176,7 +176,7 @@ function ResponseCard({ response: r, question, readOnly, draft, onDraft, onSaved
           </>
         )}
       </div>
-      {error && <ErrorNotice doing="The correction was not saved" error={error} />}
+      {error && <ErrorNotice doing="The correction was not saved" error={error} onRetry={save} />}
     </article>
   )
 }
@@ -201,6 +201,11 @@ function RunAssessment({ interview, unsaved }: { interview: InterviewState; unsa
       await api.assess(interview.id)
       navigate(paths.assessment(interview.id))
     } catch (e) {
+      // A timed-out (or concurrent) assessment may still have been stored by the server.
+      if (await assessedAnyway(interview.id)) {
+        navigate(paths.assessment(interview.id))
+        return
+      }
       setError(e as ApiError)
       setRunning(false)
       setConfirming(false)
@@ -233,7 +238,15 @@ function RunAssessment({ interview, unsaved }: { interview: InterviewState; unsa
           </button>
         </>
       )}
-      {error && <ErrorNotice doing="The assessment could not be run" error={error} />}
+      {error && <ErrorNotice doing="The assessment could not be run" error={error} onRetry={run} />}
     </section>
   )
+}
+
+async function assessedAnyway(interviewId: number): Promise<boolean> {
+  try {
+    return !!(await api.interview(interviewId)).assessment
+  } catch {
+    return false
+  }
 }

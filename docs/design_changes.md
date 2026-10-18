@@ -14,6 +14,7 @@ a one-line reason. Wireframe figure numbers refer to Chapter 4.
 | System fonts only, no web fonts | Changed | Rural branches may be offline or on slow links; nothing is fetched from the internet. |
 | Status words are plain language ("Waiting", "Transcribing", "Transcribed", "Not transcribed") | Changed | Officers have basic computer literacy; "queued" and "failed" are system terms. |
 | Interview questions grouped by the eight domains recorded in `data/manifest.csv`, not Table 3.1's domains | Changed | The 40 recorded responses use the manifest's domains (Household, Chama, …); Table 3.1's set (Social Capital, Character & Attitude) has no recordings. |
+| A request that gets no answer within 15 seconds (90 s for the assessment) shows an error with a Retry button | Added | The wireframes show no failure states; a stalled server must never leave a screen spinning forever. |
 
 ## Figure 4.8 — Login
 
@@ -52,6 +53,7 @@ a one-line reason. Wireframe figure numbers refer to Chapter 4.
 | Audio quality indicator | Deferred | Needs signal analysis that is not part of the pipeline yet. |
 | Save draft | Deferred | Every answer is saved to the server as soon as it is recorded, so there is no draft to keep. |
 | Offline buffering ("uploads when a connection is available") | Deferred | Needs a service worker and local storage of personal audio; a separate piece of work. |
+| Recording from a tablet's microphone on the branch network | Deferred (Sprint III, deployment) | Browsers allow the microphone only on `localhost` or HTTPS. The dashboard is served over plain HTTP in Sprint II, so only the laptop running it can record; a tablet must use **Upload a recording**. Serving it over HTTPS (a certificate on the branch server) is a Sprint III deployment item. |
 
 ## Figure 4.11 — Transcript review
 

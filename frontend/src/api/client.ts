@@ -3,20 +3,44 @@ import type {
   Question, ResponseOut, ResponseQueued,
 } from './types'
 
+/** No request may leave the dashboard waiting longer than this. */
+export const REQUEST_TIMEOUT_MS = 15_000
+/** Assessment translates, extracts and scores in one call: about 30 s, so it gets longer. */
+export const ASSESS_TIMEOUT_MS = 90_000
+
 /** Every failure, network or HTTP, arrives as one of these with a readable message. */
 export class ApiError extends Error {
   readonly status: number
   readonly retryAfter: number | null
+  readonly timedOut: boolean
 
-  constructor(status: number, message: string, retryAfter: number | null = null) {
+  constructor(status: number, message: string, retryAfter: number | null = null, timedOut = false) {
     super(message)
     this.name = 'ApiError'
     this.status = status
     this.retryAfter = retryAfter
+    this.timedOut = timedOut
   }
 }
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
+/** Abandon the request after timeoutMs, so no screen can spin forever. */
+async function request<T>(path: string, init?: RequestInit, timeoutMs = REQUEST_TIMEOUT_MS): Promise<T> {
+  const ctrl = new AbortController()
+  const timer = setTimeout(() => ctrl.abort(), timeoutMs)
+  try {
+    return await send<T>(path, { ...init, signal: ctrl.signal })
+  } catch (e) {
+    if (ctrl.signal.aborted) {
+      throw new ApiError(0, `The ChamaPro server did not answer within ${timeoutMs / 1000} seconds. `
+        + 'Check that it is running, then retry.', null, true)
+    }
+    throw e
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+async function send<T>(path: string, init: RequestInit): Promise<T> {
   let res: Response
   try {
     res = await fetch(`/api${path}`, init)
@@ -37,7 +61,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     const ra = Number(res.headers.get('Retry-After'))
     throw new ApiError(res.status, detail, Number.isFinite(ra) && ra > 0 ? ra : null)
   }
-  return res.json() as Promise<T>
+  return await (res.json() as Promise<T>)  // awaited, so the timeout covers the body too
 }
 
 const json = (method: string, body: unknown): RequestInit => ({
@@ -83,7 +107,7 @@ export const api = {
   saveTranscript: (responseId: number, transcript: string) =>
     request<ResponseOut>(`/responses/${responseId}`, json('PATCH', { transcript })),
   assess: (interviewId: number) =>
-    request<Assessment>(`/interviews/${interviewId}/assess`, { method: 'POST' }),
+    request<Assessment>(`/interviews/${interviewId}/assess`, { method: 'POST' }, ASSESS_TIMEOUT_MS),
   decide: (interviewId: number, decision: DecisionValue, note: string) =>
     request<Decision>(`/interviews/${interviewId}/decision`,
       json('POST', { decision, note: note.trim() || null })),
