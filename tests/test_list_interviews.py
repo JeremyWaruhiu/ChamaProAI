@@ -15,7 +15,7 @@ def test_new_interview_is_listed_empty(client, state):
                     "created_at": state(iid)["created_at"], "status": "open",
                     "responses_recorded": 0, "questions_total": 40,
                     "counts": {"queued": 0, "transcribing": 0, "transcribed": 0, "failed": 0},
-                    "risk_class": None}
+                    "risk_class": None, "decision": None}
 
 
 def test_unnamed_applicant_is_null(client):

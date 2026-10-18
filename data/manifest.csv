@@ -1,41 +1,41 @@
 id,speaker,sentence_no,condition,path,kikuyu_ref,english_ref,domain,duration_s
-S01_clean_001,S01,1,clean,data/audio_16k/S01_clean_001.wav,,,household,3.85
-S01_clean_002,S01,2,clean,data/audio_16k/S01_clean_002.wav,,,household,4.13
-S01_clean_003,S01,3,clean,data/audio_16k/S01_clean_003.wav,,,household,3.89
-S01_clean_004,S01,4,clean,data/audio_16k/S01_clean_004.wav,,,household,4.63
-S01_clean_005,S01,5,clean,data/audio_16k/S01_clean_005.wav,,,household,4.55
-S01_clean_006,S01,6,clean,data/audio_16k/S01_clean_006.wav,,,income,4.01
-S01_clean_007,S01,7,clean,data/audio_16k/S01_clean_007.wav,,,income,8.47
-S01_clean_008,S01,8,clean,data/audio_16k/S01_clean_008.wav,,,income,7.91
-S01_clean_009,S01,9,clean,data/audio_16k/S01_clean_009.wav,,,income,7.45
-S01_clean_010,S01,10,clean,data/audio_16k/S01_clean_010.wav,,,income,5.67
-S01_clean_011,S01,11,clean,data/audio_16k/S01_clean_011.wav,,,expenditure,5.85
-S01_clean_012,S01,12,clean,data/audio_16k/S01_clean_012.wav,,,expenditure,6.49
-S01_clean_013,S01,13,clean,data/audio_16k/S01_clean_013.wav,,,expenditure,6.17
-S01_clean_014,S01,14,clean,data/audio_16k/S01_clean_014.wav,,,expenditure,5.81
-S01_clean_015,S01,15,clean,data/audio_16k/S01_clean_015.wav,,,expenditure,5.15
-S01_clean_016,S01,16,clean,data/audio_16k/S01_clean_016.wav,,,assets,4.45
-S01_clean_017,S01,17,clean,data/audio_16k/S01_clean_017.wav,,,assets,3.95
-S01_clean_018,S01,18,clean,data/audio_16k/S01_clean_018.wav,,,assets,4.93
-S01_clean_019,S01,19,clean,data/audio_16k/S01_clean_019.wav,,,assets,4.97
-S01_clean_020,S01,20,clean,data/audio_16k/S01_clean_020.wav,,,assets,3.39
-S01_clean_021,S01,21,clean,data/audio_16k/S01_clean_021.wav,,,debt_repayment,5.35
-S01_clean_022,S01,22,clean,data/audio_16k/S01_clean_022.wav,,,debt_repayment,3.69
-S01_clean_023,S01,23,clean,data/audio_16k/S01_clean_023.wav,,,debt_repayment,6.21
-S01_clean_024,S01,24,clean,data/audio_16k/S01_clean_024.wav,,,debt_repayment,3.43
-S01_clean_025,S01,25,clean,data/audio_16k/S01_clean_025.wav,,,debt_repayment,4.99
-S01_clean_026,S01,26,clean,data/audio_16k/S01_clean_026.wav,,,sacco_history,4.41
-S01_clean_027,S01,27,clean,data/audio_16k/S01_clean_027.wav,,,sacco_history,6.61
-S01_clean_028,S01,28,clean,data/audio_16k/S01_clean_028.wav,,,sacco_history,6.17
-S01_clean_029,S01,29,clean,data/audio_16k/S01_clean_029.wav,,,sacco_history,7.35
-S01_clean_030,S01,30,clean,data/audio_16k/S01_clean_030.wav,,,sacco_history,9.19
-S01_clean_031,S01,31,clean,data/audio_16k/S01_clean_031.wav,,,chama,5.45
-S01_clean_032,S01,32,clean,data/audio_16k/S01_clean_032.wav,,,chama,3.83
-S01_clean_033,S01,33,clean,data/audio_16k/S01_clean_033.wav,,,chama,7.81
-S01_clean_034,S01,34,clean,data/audio_16k/S01_clean_034.wav,,,chama,3.37
-S01_clean_035,S01,35,clean,data/audio_16k/S01_clean_035.wav,,,chama,5.83
-S01_clean_036,S01,36,clean,data/audio_16k/S01_clean_036.wav,,,intent_planning,5.17
-S01_clean_037,S01,37,clean,data/audio_16k/S01_clean_037.wav,,,intent_planning,5.91
-S01_clean_038,S01,38,clean,data/audio_16k/S01_clean_038.wav,,,intent_planning,4.87
-S01_clean_039,S01,39,clean,data/audio_16k/S01_clean_039.wav,,,intent_planning,7.31
-S01_clean_040,S01,40,clean,data/audio_16k/S01_clean_040.wav,,,intent_planning,4.35
+S01_clean_001,S01,1,clean,data/audio_16k/S01_clean_001.wav,,My name is Wanjiru and I live in Githunguri.,household,3.85
+S01_clean_002,S01,2,clean,data/audio_16k/S01_clean_002.wav,,I am forty-two years old.,household,4.13
+S01_clean_003,S01,3,clean,data/audio_16k/S01_clean_003.wav,,There are six people in my household.,household,3.89
+S01_clean_004,S01,4,clean,data/audio_16k/S01_clean_004.wav,,I have four children and three of them are in school.,household,4.63
+S01_clean_005,S01,5,clean,data/audio_16k/S01_clean_005.wav,,I have lived in this village for twenty years.,household,4.55
+S01_clean_006,S01,6,clean,data/audio_16k/S01_clean_006.wav,,I sell milk from my cows every morning.,income,4.01
+S01_clean_007,S01,7,clean,data/audio_16k/S01_clean_007.wav,,I earn about eight thousand shillings in a month.,income,8.47
+S01_clean_008,S01,8,clean,data/audio_16k/S01_clean_008.wav,,My income is higher during the rainy season.,income,7.91
+S01_clean_009,S01,9,clean,data/audio_16k/S01_clean_009.wav,,Some months I do not get any money from the farm.,income,7.45
+S01_clean_010,S01,10,clean,data/audio_16k/S01_clean_010.wav,,My husband also works and brings money home.,income,5.67
+S01_clean_011,S01,11,clean,data/audio_16k/S01_clean_011.wav,,I spend about three thousand shillings on food every month.,expenditure,5.85
+S01_clean_012,S01,12,clean,data/audio_16k/S01_clean_012.wav,,School fees take most of my money.,expenditure,6.49
+S01_clean_013,S01,13,clean,data/audio_16k/S01_clean_013.wav,,I pay two hundred shillings for electricity each month.,expenditure,6.17
+S01_clean_014,S01,14,clean,data/audio_16k/S01_clean_014.wav,,I buy animal feed twice in a month.,expenditure,5.81
+S01_clean_015,S01,15,clean,data/audio_16k/S01_clean_015.wav,,When someone falls sick we spend a lot of money.,expenditure,5.15
+S01_clean_016,S01,16,clean,data/audio_16k/S01_clean_016.wav,,I have two cows and five goats.,assets,4.45
+S01_clean_017,S01,17,clean,data/audio_16k/S01_clean_017.wav,,I own one acre of land.,assets,3.95
+S01_clean_018,S01,18,clean,data/audio_16k/S01_clean_018.wav,,The land has a title deed in my name.,assets,4.93
+S01_clean_019,S01,19,clean,data/audio_16k/S01_clean_019.wav,,I have a water tank and a wheelbarrow.,assets,4.97
+S01_clean_020,S01,20,clean,data/audio_16k/S01_clean_020.wav,,My house is built of stone.,assets,3.39
+S01_clean_021,S01,21,clean,data/audio_16k/S01_clean_021.wav,,I borrowed twenty thousand shillings last year.,debt_repayment,5.35
+S01_clean_022,S01,22,clean,data/audio_16k/S01_clean_022.wav,,I have finished paying that loan.,debt_repayment,3.69
+S01_clean_023,S01,23,clean,data/audio_16k/S01_clean_023.wav,,I still owe the shopkeeper two thousand shillings.,debt_repayment,6.21
+S01_clean_024,S01,24,clean,data/audio_16k/S01_clean_024.wav,,I have never failed to repay a loan.,debt_repayment,3.43
+S01_clean_025,S01,25,clean,data/audio_16k/S01_clean_025.wav,,Once I paid late because the harvest was poor.,debt_repayment,4.99
+S01_clean_026,S01,26,clean,data/audio_16k/S01_clean_026.wav,,I joined this SACCO three years ago.,sacco_history,4.41
+S01_clean_027,S01,27,clean,data/audio_16k/S01_clean_027.wav,,I save five hundred shillings every week.,sacco_history,6.61
+S01_clean_028,S01,28,clean,data/audio_16k/S01_clean_028.wav,,I have taken two loans from the SACCO before.,sacco_history,6.17
+S01_clean_029,S01,29,clean,data/audio_16k/S01_clean_029.wav,,I was a guarantor for my neighbour.,sacco_history,7.35
+S01_clean_030,S01,30,clean,data/audio_16k/S01_clean_030.wav,,I have a mobile loan that I pay every month.,sacco_history,9.19
+S01_clean_031,S01,31,clean,data/audio_16k/S01_clean_031.wav,,I am a member of a women's group in our village.,chama,5.45
+S01_clean_032,S01,32,clean,data/audio_16k/S01_clean_032.wav,,We contribute one thousand shillings every month.,chama,3.83
+S01_clean_033,S01,33,clean,data/audio_16k/S01_clean_033.wav,,We take turns receiving the money.,chama,7.81
+S01_clean_034,S01,34,clean,data/audio_16k/S01_clean_034.wav,,I have been in the group for five years.,chama,3.37
+S01_clean_035,S01,35,clean,data/audio_16k/S01_clean_035.wav,,The group helped me buy my second cow.,chama,5.83
+S01_clean_036,S01,36,clean,data/audio_16k/S01_clean_036.wav,,I want the loan to buy a dairy cow.,intent_planning,5.17
+S01_clean_037,S01,37,clean,data/audio_16k/S01_clean_037.wav,,I will repay the loan from the milk money.,intent_planning,5.91
+S01_clean_038,S01,38,clean,data/audio_16k/S01_clean_038.wav,,I plan to finish paying within one year.,intent_planning,4.87
+S01_clean_039,S01,39,clean,data/audio_16k/S01_clean_039.wav,,If the business fails I will sell a goat to repay.,intent_planning,7.31
+S01_clean_040,S01,40,clean,data/audio_16k/S01_clean_040.wav,,I always keep a record of what I sell.,intent_planning,4.35

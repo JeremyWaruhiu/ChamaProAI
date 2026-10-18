@@ -16,7 +16,7 @@ from fastapi import (BackgroundTasks, Depends, FastAPI, File, Form,
                      HTTPException, Request, UploadFile)
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
 from sqlalchemy import case, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -25,14 +25,17 @@ from chamapro import config
 
 from . import pipeline as pl
 from . import schemas as s
-from .db import Applicant, Assessment, Interview, Response, SessionLocal, init_db, utcnow
+from .db import (Applicant, Assessment, Decision, Interview, Response, SessionLocal,
+                 init_db, utcnow)
 
 if not logging.getLogger().handlers:
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
 log = logging.getLogger("chamapro.api")
 
 ERRORS = {code: {"model": s.Error} for code in (404, 409, 413, 415, 422, 502, 503)}
-QUESTIONS_TOTAL = max(hi for _, hi, _ in pl.ingest_audio.DOMAINS)
+QUESTIONS = [s.Question(**q) for q in
+             json.loads(config.QUESTIONS_PATH.read_text(encoding="utf-8"))]
+QUESTIONS_TOTAL = len(QUESTIONS)
 
 
 @asynccontextmanager
@@ -122,6 +125,12 @@ def health():
                     classifier=meta)
 
 
+@app.get("/api/questions", response_model=list[s.Question])
+def questions():
+    """The interview script, in sentence order. Kikuyu is "" where not yet supplied."""
+    return QUESTIONS
+
+
 @app.post("/api/interviews", status_code=201, response_model=s.InterviewCreated)
 def create_interview(body: s.InterviewCreate | None = None, db: Session = Depends(get_db)):
     name = (body.applicant_name or "").strip() if body else ""
@@ -140,9 +149,11 @@ def list_interviews(db: Session = Depends(get_db)):
               .group_by(Response.interview_id).subquery())
     rows = db.execute(
         select(Interview.id, Interview.created_at, Interview.status, Applicant.name,
-               Assessment.risk_class, counts.c.queued, counts.c.transcribed, counts.c.failed)
+               Assessment.risk_class, Decision.decision,
+               counts.c.queued, counts.c.transcribed, counts.c.failed)
         .join(Applicant, Interview.applicant_id == Applicant.id)
         .outerjoin(Assessment, Assessment.interview_id == Interview.id)
+        .outerjoin(Decision, Decision.interview_id == Interview.id)
         .outerjoin(counts, counts.c.interview_id == Interview.id)
         .order_by(Interview.created_at.desc(), Interview.id.desc()))
     busy = live_status_of(db)
@@ -154,7 +165,8 @@ def list_interviews(db: Session = Depends(get_db)):
         out.append(s.InterviewSummary(
             id=r.id, applicant_name=r.name, created_at=r.created_at, status=r.status,
             responses_recorded=c.queued + c.transcribing + c.transcribed + c.failed,
-            questions_total=QUESTIONS_TOTAL, counts=c, risk_class=r.risk_class))
+            questions_total=QUESTIONS_TOTAL, counts=c, risk_class=r.risk_class,
+            decision=r.decision))
     return out
 
 
@@ -229,7 +241,22 @@ def interview_state(interview_id: int, db: Session = Depends(get_db)):
     return s.InterviewState(id=iv.id, status=iv.status, created_at=iv.created_at,
                             applicant=s.Applicant.model_validate(iv.applicant),
                             counts=counts, responses=responses,
-                            assessment=iv.assessment and s.AssessmentOut.model_validate(iv.assessment))
+                            assessment=iv.assessment and s.AssessmentOut.model_validate(iv.assessment),
+                            decision=iv.decision and s.DecisionOut.model_validate(iv.decision))
+
+
+@app.get("/api/responses/{response_id}/audio", response_class=FileResponse,
+         responses={200: {"content": {"audio/wav": {}}}, 404: {"model": s.Error}})
+def response_audio(response_id: int, db: Session = Depends(get_db)):
+    """The stored 16 kHz clip, for replay. Readable after assessment too."""
+    r = db.get(Response, response_id)
+    if r is None:
+        raise HTTPException(404, f"response {response_id} not found")
+    path = Path(r.audio_path) if r.audio_path else None
+    if path is None or not path.is_file():
+        raise HTTPException(404, f"audio for response {response_id} is missing")
+    return FileResponse(path, media_type="audio/wav",
+                        filename=f"interview{r.interview_id}_s{r.sentence_no:02d}.wav")
 
 
 @app.patch("/api/responses/{response_id}", response_model=s.ResponseOut, responses=ERRORS)
@@ -341,3 +368,24 @@ def assess(interview_id: int, db: Session = Depends(get_db)):
         db.rollback()
         raise HTTPException(409, f"interview {iv.id} is already assessed; its record is immutable")
     return s.AssessmentOut.model_validate(a)
+
+
+@app.post("/api/interviews/{interview_id}/decision", status_code=201,
+          response_model=s.DecisionOut, responses=ERRORS)
+def record_decision(interview_id: int, body: s.DecisionCreate, db: Session = Depends(get_db)):
+    """Record the officer's decision. Only after assessment, and only once."""
+    iv = get_interview(db, interview_id)
+    if iv.assessment is None:
+        raise HTTPException(409, f"interview {iv.id} has no assessment yet; "
+                                 "the decision is recorded after the officer has seen it")
+    if iv.decision is not None:
+        raise HTTPException(409, f"interview {iv.id} already has a decision; it is immutable")
+    d = Decision(interview_id=iv.id, decision=body.decision,
+                 note=(body.note or "").strip() or None)
+    db.add(d)
+    try:
+        db.commit()
+    except IntegrityError:  # a concurrent request recorded one first
+        db.rollback()
+        raise HTTPException(409, f"interview {iv.id} already has a decision; it is immutable")
+    return s.DecisionOut.model_validate(d)

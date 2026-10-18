@@ -1,0 +1,137 @@
+/* ChamaPro dashboard: tokens and shared primitives.
+   Palette follows the wireframes (Figures 4.8-4.12). System fonts only:
+   branches may be offline, so nothing is fetched from the internet. */
+
+:root {
+  --green-900: #0f3d24;
+  --green-800: #16502f;
+  --green-700: #1d6339;
+  --green-600: #2e7d4f;
+  --green-200: #b9d7c4;
+  --green-100: #e3f0e7;
+  --green-50: #f3f8f4;
+  --ink: #15241b;
+  --ink-2: #47594d;
+  --ink-3: #6b7d71;
+  --line: #c9ddd0;
+  --white: #ffffff;
+
+  --low: #1f6b40;     --low-bg: #e3f0e7;    --low-line: #9cc9ad;
+  --medium: #8a5300;  --medium-bg: #fdf1dc; --medium-line: #e5bf7a;
+  --high: #a3261d;    --high-bg: #fbe9e7;   --high-line: #e6aaa4;
+  --wait: #3f5568;    --wait-bg: #edf2f6;   --wait-line: #c3d1dd;
+
+  --focus: #e0a000;
+  --radius: 6px;
+  --shadow: 0 1px 2px rgb(15 61 36 / 8%), 0 2px 8px rgb(15 61 36 / 6%);
+  --font: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+
+  color-scheme: light;
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+
+html { -webkit-text-size-adjust: 100%; }
+
+body {
+  margin: 0;
+  background: var(--green-50);
+  color: var(--ink);
+  font-family: var(--font);
+  font-size: 18px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+h1, h2, h3 { margin: 0; line-height: 1.25; }
+p { margin: 0; }
+a { color: var(--green-700); }
+
+:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
+
+.visually-hidden {
+  position: absolute; width: 1px; height: 1px; overflow: hidden;
+  clip: rect(0 0 0 0); white-space: nowrap;
+}
+
+/* Section labels, as in the wireframes ("RECENT ASSESSMENTS") */
+.eyebrow {
+  color: var(--green-700);
+  font-size: 0.82rem;
+  font-weight: 650;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.card {
+  background: var(--white);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+}
+
+.muted { color: var(--ink-2); }
+
+/* --- Buttons: large, plain, touch-sized ------------------------------------ */
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  min-height: 52px;
+  padding: 0 22px;
+  border: 2px solid transparent;
+  border-radius: var(--radius);
+  font: inherit;
+  font-size: 1rem;
+  font-weight: 600;
+  text-decoration: none;
+  cursor: pointer;
+  transition: background-color 120ms, border-color 120ms, color 120ms;
+  -webkit-tap-highlight-color: transparent;
+}
+.btn:disabled { cursor: not-allowed; opacity: 0.45; }
+
+.btn-primary { background: var(--green-800); color: var(--white); }
+.btn-primary:not(:disabled):hover { background: var(--green-900); }
+
+.btn-secondary { background: var(--green-100); border-color: var(--green-600); color: var(--green-800); }
+.btn-secondary:not(:disabled):hover { background: #d4e8db; }
+
+.btn-quiet { background: transparent; color: var(--green-700); padding: 0 12px; }
+.btn-quiet:not(:disabled):hover { background: var(--green-100); }
+
+.btn-large { min-height: 64px; padding: 0 30px; font-size: 1.1rem; }
+.btn-block { width: 100%; }
+
+/* --- Inline spinner for buttons and waiting states ------------------------- */
+
+.spinner {
+  width: 1.05em; height: 1.05em; flex: none;
+  border: 2.5px solid currentColor; border-right-color: transparent;
+  border-radius: 50%;
+  animation: spin 900ms linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; }
+}
+
+/* --- Form fields ------------------------------------------------------------ */
+
+.field-label { display: block; margin-bottom: 6px; font-weight: 600; }
+
+.input, .textarea {
+  width: 100%;
+  border: 2px solid var(--green-200);
+  border-radius: var(--radius);
+  background: var(--green-50);
+  color: var(--ink);
+  font: inherit;
+  padding: 12px 14px;
+}
+.input { min-height: 52px; }
+.textarea { min-height: 96px; resize: vertical; line-height: 1.55; }
+.input:focus, .textarea:focus { border-color: var(--green-600); background: var(--white); outline: none; box-shadow: 0 0 0 3px rgb(46 125 79 / 20%); }

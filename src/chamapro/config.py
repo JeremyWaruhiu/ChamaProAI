@@ -39,6 +39,8 @@ ASR_MODEL: str = os.getenv("ASR_MODEL") or "openai/whisper-small"
 ASR_LANGUAGE: str = os.getenv("ASR_LANGUAGE") or "sw"
 
 SCRIPTS_DIR = PROJECT_ROOT / "scripts"
+# Built from docs/interview_questions.txt by scripts/build_questions.py
+QUESTIONS_PATH = Path(__file__).resolve().parent / "questions.json"
 MODELS_DIR = PROJECT_ROOT / "models"
 CLASSIFIER_PATH = MODELS_DIR / "classifier.joblib"
 CLASSIFIER_META_PATH = MODELS_DIR / "classifier_meta.json"

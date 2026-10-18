@@ -89,6 +89,27 @@ class AssessmentOut(ORM):
     created_at: datetime
 
 
+class Question(BaseModel):
+    sentence_no: int
+    domain: str
+    english: str
+    kikuyu: str = Field(description="Empty until a native speaker supplies it")
+
+
+DecisionValue = Literal["approve", "decline", "refer"]
+
+
+class DecisionCreate(BaseModel):
+    decision: DecisionValue
+    note: str | None = Field(default=None, max_length=2000)
+
+
+class DecisionOut(ORM):
+    decision: DecisionValue
+    note: str | None
+    created_at: datetime
+
+
 class Applicant(ORM):
     id: int
     name: str | None
@@ -110,6 +131,7 @@ class InterviewSummary(BaseModel):
     questions_total: int
     counts: Counts
     risk_class: str | None = Field(description="Set once the interview is assessed")
+    decision: DecisionValue | None = Field(description="The officer's decision, once recorded")
 
 
 class InterviewState(ORM):
@@ -120,6 +142,7 @@ class InterviewState(ORM):
     counts: Counts
     responses: list[ResponseOut]
     assessment: AssessmentOut | None
+    decision: DecisionOut | None
 
 
 class Health(BaseModel):

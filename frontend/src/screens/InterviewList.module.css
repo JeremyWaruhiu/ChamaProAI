@@ -1,0 +1,52 @@
+.top { display: flex; align-items: center; justify-content: space-between; gap: 20px; flex-wrap: wrap; margin-bottom: 24px; }
+.heading { font-size: 1.6rem; color: var(--green-900); margin-bottom: 4px; }
+
+.label { margin: 28px 0 10px; }
+
+.table { display: grid; gap: 10px; }
+
+.head, .row {
+  display: grid;
+  grid-template-columns: minmax(200px, 2.2fr) minmax(110px, 1fr) minmax(130px, 1.1fr) minmax(170px, 1.6fr) 190px;
+  align-items: center; gap: 16px;
+  padding: 0 20px;
+}
+.head { color: var(--ink-3); font-size: 0.85rem; font-weight: 650; letter-spacing: 0.04em; text-transform: uppercase; }
+
+.row {
+  min-height: 76px; color: var(--ink); text-decoration: none;
+  transition: border-color 120ms, box-shadow 120ms;
+}
+.row:hover { border-color: var(--green-600); box-shadow: 0 2px 12px rgb(15 61 36 / 12%); }
+
+.name { display: flex; flex-direction: column; font-weight: 650; font-size: 1.05rem; }
+.ref { color: var(--ink-3); font-size: 0.85rem; font-weight: 500; }
+
+.count { font-weight: 700; }
+.meter { display: block; height: 6px; margin-top: 6px; max-width: 120px; border-radius: 3px; background: var(--green-100); overflow: hidden; }
+.meter span { display: block; height: 100%; background: var(--green-600); }
+
+.status { color: var(--ink-2); }
+.riskCol { justify-self: end; text-align: right; }
+
+.empty { padding: 40px; text-align: center; }
+.emptyTitle { font-size: 1.2rem; font-weight: 700; margin-bottom: 6px; }
+
+.newForm { padding: 24px; margin-bottom: 8px; max-width: 620px; display: grid; gap: 6px; }
+.newTitle { font-size: 1.2rem; margin-bottom: 10px; }
+.hint { font-size: 0.92rem; margin-bottom: 8px; }
+.newActions { display: flex; justify-content: flex-end; gap: 12px; margin-top: 10px; }
+
+@media (max-width: 860px) {
+  .head { display: none; }
+  .row {
+    grid-template-columns: 1fr auto; grid-template-areas: "name risk" "date answers" "status status";
+    gap: 8px 16px; padding: 16px 18px;
+  }
+  .row > :nth-child(1) { grid-area: name; }
+  .row > :nth-child(2) { grid-area: date; color: var(--ink-2); }
+  .row > :nth-child(3) { grid-area: answers; justify-self: end; text-align: right; }
+  .row > :nth-child(4) { grid-area: status; }
+  .row > :nth-child(5) { grid-area: risk; }
+  .meter { margin-left: auto; }
+}

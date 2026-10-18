@@ -1,8 +1,9 @@
 """SQLite storage: applicants, interviews, responses, assessments.
 
 An assessment row is the audit record (Chapter 4): it stores the exact feature
-vector the classifier saw, never something re-derived later. SQLite triggers
-reject any UPDATE or DELETE on it, so the guarantee holds even outside the API.
+vector the classifier saw, never something re-derived later. The officer's
+decision is a separate record. SQLite triggers reject any UPDATE or DELETE on
+either, so the guarantee holds even outside the API.
 """
 from __future__ import annotations
 
@@ -55,6 +56,7 @@ class Interview(Base):
     responses: Mapped[list[Response]] = relationship(
         back_populates="interview", order_by="Response.sentence_no")
     assessment: Mapped[Assessment | None] = relationship(back_populates="interview")
+    decision: Mapped[Decision | None] = relationship(back_populates="interview")
 
 
 class Response(Base):
@@ -105,11 +107,24 @@ class Assessment(Base):
     interview: Mapped[Interview] = relationship(back_populates="assessment")
 
 
+class Decision(Base):
+    """The loan officer's decision, recorded after seeing the assessment.
+    Kept apart from the assessment: the model recommends, the officer decides."""
+    __tablename__ = "decisions"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    interview_id: Mapped[int] = mapped_column(ForeignKey("interviews.id"), unique=True)
+    decision: Mapped[str] = mapped_column(String(20))   # approve | decline | refer
+    note: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
+
+    interview: Mapped[Interview] = relationship(back_populates="decision")
+
+
 IMMUTABLE_TRIGGERS = [
-    f"""CREATE TRIGGER IF NOT EXISTS assessments_no_{op.lower()}
-        BEFORE {op} ON assessments
-        BEGIN SELECT RAISE(ABORT, 'assessments are immutable'); END"""
-    for op in ("UPDATE", "DELETE")
+    f"""CREATE TRIGGER IF NOT EXISTS {table}_no_{op.lower()}
+        BEFORE {op} ON {table}
+        BEGIN SELECT RAISE(ABORT, '{table} are immutable'); END"""
+    for table in ("assessments", "decisions") for op in ("UPDATE", "DELETE")
 ]
 
 config.DB_PATH.parent.mkdir(parents=True, exist_ok=True)

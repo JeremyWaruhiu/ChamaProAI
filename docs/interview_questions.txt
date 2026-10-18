@@ -1,0 +1,68 @@
+DRAFT - interviewer questions, pending review. Not yet validated with a SACCO
+loan officer or translated into Kikuyu.
+
+One question per scripted answer in the recording worksheet, numbered to match
+sentence_no in data/manifest.csv and grouped by its domains. Questions are
+worded so they do not suggest the answer. Wording is taken from Table 3.1
+where a sample question fits: 6, 8, 11, 12, 16, 17, 19, 23, 25, 26, 28, 30,
+36, 37. Table 3.1's "Character & Attitude" domain has no recorded answers;
+question 40 is the nearest.
+
+After editing, regenerate the API's copy:
+    python scripts/build_questions.py
+
+## Household (1-5)
+1. What is your name, and where do you live?
+2. How old are you?
+3. How many people live in your household?
+4. How many children do you have, and how many of them are in school?
+5. How long have you lived in this village?
+
+## Income (6-10)
+6. What are your main sources of income?
+7. About how much do you earn in a month?
+8. How regular is this income? Does it change with the seasons?
+9. Are there months when you earn little or nothing?
+10. Does anyone else in your household bring in money?
+
+## Expenditure (11-15)
+11. What are your main monthly expenses?
+12. Do you have school fees? How much of your money do they take?
+13. What do you pay each month for electricity or other utilities?
+14. How often do you buy inputs for your farm or animals, such as feed?
+15. What happens to your spending when someone in the family falls sick?
+
+## Assets (16-20)
+16. Do you own any livestock? How many animals?
+17. Do you own land? How much?
+18. Is the land registered? Whose name is on the title deed?
+19. What equipment do you use in your work?
+20. What is your house built of?
+
+## Debt and repayment (21-25)
+21. Have you borrowed money in the last year or two? How much?
+22. Have you finished repaying that loan?
+23. Do you owe money to anyone at the moment?
+24. Have you ever been unable to repay a loan?
+25. Were you always able to repay on time? If not, what happened?
+
+## SACCO history (26-30)
+26. How long have you been a SACCO member?
+27. How much do you save, and how often?
+28. Have you borrowed from the SACCO before?
+29. Have you ever been a guarantor for someone else's loan?
+30. Have you borrowed elsewhere, for example a mobile loan?
+
+## Chama participation (31-35)
+31. Do you belong to a chama or self-help group?
+32. How much does each member contribute, and how often?
+33. How does the group share out the contributions?
+34. How long have you been in the group?
+35. Has the group ever helped you buy something or meet a need?
+
+## Intent and planning (36-40)
+36. What will you use this loan for?
+37. How will you repay?
+38. How long do you expect to take to repay the loan?
+39. If your plan does not work out, how would you still repay?
+40. How do you keep track of what you earn and spend?

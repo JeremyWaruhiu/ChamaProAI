@@ -13,8 +13,8 @@ Every speech and language component is a published artefact used at inference
 time only. Target hardware is CPU-only, 16 GB RAM.
 
 The repository contains the research experiments behind those design
-decisions, the pipeline scripts, and an HTTP API (`src/chamapro/api/`) that
-exposes the pipeline to the dashboard.
+decisions, the pipeline scripts, an HTTP API (`src/chamapro/api/`) over the
+pipeline, and the loan officer's dashboard (`frontend/`).
 
 ## Layout
 
@@ -33,9 +33,16 @@ experiments/
   03_classifier/                      credit-risk classifier, comparator, SHAP
   04_borrower_subset/                 SACCO/chama borrowers with loan features
   */results/                          committed JSON summaries; CSVs/logs ignored
+docs/
+  interview_questions.txt             the 40 interviewer questions (DRAFT)
+  wireframes/                         Figures 4.8-4.12 of the design chapter
+  design_changes.md                   where the dashboard departs from the wireframes, and why
 scripts/                              pipeline stages; each is a CLI and importable
 src/chamapro/config.py                loads .env, exposes keys and paths
+src/chamapro/questions.json           question script served to the dashboard (built from docs/)
 src/chamapro/api/                     FastAPI app over the pipeline (SQLite storage)
+frontend/                             React dashboard (Vite + TypeScript); see frontend/README.md
+tests/                                API and script tests (pytest)
 scripts/explore_finaccess.py            browse the FinAccess microdata
 ```
 
@@ -178,6 +185,31 @@ the index every later stage reads. `transcribe.py` writes ASR hypotheses to
 of five, retries 429/500/503 with exponential backoff, and writes English
 translations with extracted financial signals to `data/translation_output.csv`.
 
+### Scoring translations
+
+    python scripts/score.py
+
+Scores translation outputs against `english_ref` in `data/manifest.csv` (the
+recording worksheet's English, which describes a fictional applicant). It reports
+chrF++ (the decision metric, as in experiment 01) and BLEU, for the whole corpus
+and per domain. By default it scores both cascades,
+`translation_output_whisper_small.csv` and `translation_output.csv` (Paza). Pass
+other files as arguments, and `--json out.json` to save the figures. A blank
+translation counts as an empty hypothesis, so the corpus score reflects what
+the cascade actually delivered.
+
+### Interview questions
+
+`docs/interview_questions.txt` is the single place to edit the question
+wording. After changing it, run
+
+    python scripts/build_questions.py
+
+to regenerate `src/chamapro/questions.json`, which the API serves. Domains come
+from the manifest. Kikuyu text already in the JSON is kept, so a native
+speaker's translations survive edits to the English. `--check` reports whether
+the JSON is out of date, and the test suite runs that check.
+
 ### Environment variables
 
 Set in `.env` (see `.env.example`): `GEMINI_API_KEY`, `GEMINI_MODEL`,
@@ -201,20 +233,73 @@ uploaded audio in `data/uploads/<interview_id>/`; both are gitignored. Optional
 | Method | Path                               | Purpose                                         |
 |--------|------------------------------------|-------------------------------------------------|
 | POST   | `/api/interviews`                  | start an interview `{applicant_name?}`          |
-| GET    | `/api/interviews`                  | all interviews, newest first, with response counts and risk class |
+| GET    | `/api/questions`                   | the 40-question script (`kikuyu` is "" until supplied) |
+| GET    | `/api/interviews`                  | all interviews, newest first, with response counts, risk class and decision |
 | POST   | `/api/interviews/{id}/responses`   | upload one clip (`file`, `sentence_no`); 202, transcribed in the background |
 | GET    | `/api/interviews/{id}`             | full state; the dashboard polls this            |
 | PATCH  | `/api/responses/{id}`              | correct a transcript `{transcript}` before assessment |
 | DELETE | `/api/responses/{id}`              | discard a clip so its sentence can be re-recorded; 409 while it is being transcribed |
+| GET    | `/api/responses/{id}/audio`        | the stored 16 kHz clip, for replay              |
 | POST   | `/api/interviews/{id}/assess`      | translate, extract, score; stores the assessment |
+| POST   | `/api/interviews/{id}/decision`    | the officer's decision `{decision: approve\|decline\|refer, note?}`, after assessment, once |
 | GET    | `/api/health`                      | classifier, API key, ASR model status           |
 
 An assessment is written once and never changed: it stores the exact feature
 vector the classifier saw, the probabilities, SHAP contributions and the
-classifier's filename and SHA-256. SQLite triggers reject any UPDATE or DELETE
-on the `assessments` table. Once an interview is assessed, its responses can no
-longer be added, edited or deleted. Clips are transcribed one at a time, so a full
+classifier's filename and SHA-256. The officer's decision is a separate record,
+written once after the assessment. SQLite triggers reject any UPDATE or DELETE
+on the `assessments` and `decisions` tables. Once an interview is assessed, its
+responses can no longer be added, edited or deleted. Clips are transcribed one at a time, so a full
 interview of 40 clips takes about 20 minutes to clear the queue.
+
+### Known limitations
+
+- Corpus is 40 responses from one speaker; no speaker-independent claim holds.
+- ASR runs at 1.9x real time on CPU; the five-minute performance target applies
+  to the typed-input path only.
+- Decoder repetition collapse affects ~10% of clips.
+- Cascade yield is 62.5%; asset-ownership responses currently yield nothing.
+- Feature extraction requires connectivity; capture and typed entry do not.
+
+## Running the full system for a demo
+
+Prerequisites: setup above, a `.env` with `GEMINI_API_KEY`, the trained
+classifier in `models/` (`python scripts/train_and_save.py`), and Node.js
+20.19 or later for the dashboard.
+
+1. **Seed the demo interview** (about a second, no model needed):
+
+       python scripts/seed_demo.py
+
+2. **Start the backend** in one terminal. It loads the speech model, which
+   takes about a minute. Wait for `Application startup complete`.
+
+       uvicorn chamapro.api.main:app --reload
+
+3. **Start the dashboard** in a second terminal:
+
+       cd frontend
+       npm install          # first time only
+       npm run dev
+
+4. Open **http://localhost:5173**. Check http://localhost:8000/api/health shows
+   `"status": "ok"`.
+
+A demo run:
+
+- Open **Demo applicant (S01)**. All 40 answers are already transcribed.
+- On **Review transcripts**, correct a transcript and save it to show the
+  *Edited* mark.
+- Press **Run assessment**. Translation and scoring take about half a minute
+  and need internet access for Gemini.
+- On the assessment, record the officer's decision.
+- To show live recording, start a **New interview** and record an answer with
+  the laptop microphone. It is transcribed in the background in about 35 s
+  while you move to the next question.
+
+Run `seed_demo.py` again before the next demo. An assessed demo cannot be
+changed, so the script then starts a fresh one. See
+[frontend/README.md](frontend/README.md) for more on the dashboard.
 
 ### Demo data
 
@@ -227,12 +312,3 @@ and needs no model. Safe to re-run: it changes nothing if the demo is
 complete, restores any response deleted for re-recording, and starts a fresh
 demo once the previous one has been assessed. Audio is copied into
 `data/uploads/`, so re-recording in the dashboard never touches the corpus.
-
-### Known limitations
-
-- Corpus is 40 responses from one speaker; no speaker-independent claim holds.
-- ASR runs at 1.9x real time on CPU; the five-minute performance target applies
-  to the typed-input path only.
-- Decoder repetition collapse affects ~10% of clips.
-- Cascade yield is 62.5%; asset-ownership responses currently yield nothing.
-- Feature extraction requires connectivity; capture and typed entry do not.

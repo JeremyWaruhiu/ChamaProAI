@@ -1,0 +1,46 @@
+.bar { background: var(--green-800); color: var(--white); }
+
+.barInner {
+  display: flex; align-items: center; justify-content: space-between; gap: 16px;
+  max-width: 1120px; margin: 0 auto; padding: 16px 24px; min-height: 64px;
+}
+
+.title { font-size: 1.25rem; font-weight: 500; letter-spacing: 0.01em; }
+.title strong { font-weight: 700; }
+.aside { font-size: 1rem; opacity: 0.92; white-space: nowrap; }
+
+.steps { background: var(--white); border-bottom: 1px solid var(--line); }
+
+.stepsInner {
+  display: flex; align-items: center; gap: 12px 24px; flex-wrap: wrap;
+  max-width: 1120px; margin: 0 auto; padding: 6px 24px;
+}
+
+.back {
+  display: inline-flex; align-items: center; min-height: 48px; padding: 0 4px;
+  color: var(--green-700); font-weight: 600; text-decoration: none;
+}
+.back:hover { text-decoration: underline; }
+
+.stepList { display: flex; gap: 6px; margin: 0 0 0 auto; padding: 0; list-style: none; flex-wrap: wrap; }
+
+.step {
+  display: inline-flex; align-items: center; gap: 10px; min-height: 48px; padding: 0 14px;
+  border-radius: var(--radius); color: var(--ink-2); font-weight: 600; text-decoration: none;
+}
+.step:hover { background: var(--green-50); color: var(--green-800); }
+.step[aria-current="step"] { background: var(--green-100); color: var(--green-800); }
+
+.stepNo {
+  display: inline-grid; place-items: center; width: 28px; height: 28px; border-radius: 50%;
+  border: 2px solid currentColor; font-size: 0.85rem;
+}
+.step[aria-current="step"] .stepNo { background: var(--green-800); border-color: var(--green-800); color: var(--white); }
+
+.main { max-width: 1120px; margin: 0 auto; padding: 28px 24px 64px; }
+
+@media (max-width: 720px) {
+  .barInner, .stepsInner, .main { padding-left: 16px; padding-right: 16px; }
+  .stepList { margin-left: 0; }
+  .step { padding: 0 10px; font-size: 0.95rem; }
+}

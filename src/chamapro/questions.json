@@ -1,0 +1,242 @@
+[
+  {
+    "sentence_no": 1,
+    "domain": "household",
+    "english": "What is your name, and where do you live?",
+    "kikuyu": ""
+  },
+  {
+    "sentence_no": 2,
+    "domain": "household",
+    "english": "How old are you?",
+    "kikuyu": ""
+  },
+  {
+    "sentence_no": 3,
+    "domain": "household",
+    "english": "How many people live in your household?",
+    "kikuyu": ""
+  },
+  {
+    "sentence_no": 4,
+    "domain": "household",
+    "english": "How many children do you have, and how many of them are in school?",
+    "kikuyu": ""
+  },
+  {
+    "sentence_no": 5,
+    "domain": "household",
+    "english": "How long have you lived in this village?",
+    "kikuyu": ""
+  },
+  {
+    "sentence_no": 6,
+    "domain": "income",
+    "english": "What are your main sources of income?",
+    "kikuyu": ""
+  },
+  {
+    "sentence_no": 7,
+    "domain": "income",
+    "english": "About how much do you earn in a month?",
+    "kikuyu": ""
+  },
+  {
+    "sentence_no": 8,
+    "domain": "income",
+    "english": "How regular is this income? Does it change with the seasons?",
+    "kikuyu": ""
+  },
+  {
+    "sentence_no": 9,
+    "domain": "income",
+    "english": "Are there months when you earn little or nothing?",
+    "kikuyu": ""
+  },
+  {
+    "sentence_no": 10,
+    "domain": "income",
+    "english": "Does anyone else in your household bring in money?",
+    "kikuyu": ""
+  },
+  {
+    "sentence_no": 11,
+    "domain": "expenditure",
+    "english": "What are your main monthly expenses?",
+    "kikuyu": ""
+  },
+  {
+    "sentence_no": 12,
+    "domain": "expenditure",
+    "english": "Do you have school fees? How much of your money do they take?",
+    "kikuyu": ""
+  },
+  {
+    "sentence_no": 13,
+    "domain": "expenditure",
+    "english": "What do you pay each month for electricity or other utilities?",
+    "kikuyu": ""
+  },
+  {
+    "sentence_no": 14,
+    "domain": "expenditure",
+    "english": "How often do you buy inputs for your farm or animals, such as feed?",
+    "kikuyu": ""
+  },
+  {
+    "sentence_no": 15,
+    "domain": "expenditure",
+    "english": "What happens to your spending when someone in the family falls sick?",
+    "kikuyu": ""
+  },
+  {
+    "sentence_no": 16,
+    "domain": "assets",
+    "english": "Do you own any livestock? How many animals?",
+    "kikuyu": ""
+  },
+  {
+    "sentence_no": 17,
+    "domain": "assets",
+    "english": "Do you own land? How much?",
+    "kikuyu": ""
+  },
+  {
+    "sentence_no": 18,
+    "domain": "assets",
+    "english": "Is the land registered? Whose name is on the title deed?",
+    "kikuyu": ""
+  },
+  {
+    "sentence_no": 19,
+    "domain": "assets",
+    "english": "What equipment do you use in your work?",
+    "kikuyu": ""
+  },
+  {
+    "sentence_no": 20,
+    "domain": "assets",
+    "english": "What is your house built of?",
+    "kikuyu": ""
+  },
+  {
+    "sentence_no": 21,
+    "domain": "debt_repayment",
+    "english": "Have you borrowed money in the last year or two? How much?",
+    "kikuyu": ""
+  },
+  {
+    "sentence_no": 22,
+    "domain": "debt_repayment",
+    "english": "Have you finished repaying that loan?",
+    "kikuyu": ""
+  },
+  {
+    "sentence_no": 23,
+    "domain": "debt_repayment",
+    "english": "Do you owe money to anyone at the moment?",
+    "kikuyu": ""
+  },
+  {
+    "sentence_no": 24,
+    "domain": "debt_repayment",
+    "english": "Have you ever been unable to repay a loan?",
+    "kikuyu": ""
+  },
+  {
+    "sentence_no": 25,
+    "domain": "debt_repayment",
+    "english": "Were you always able to repay on time? If not, what happened?",
+    "kikuyu": ""
+  },
+  {
+    "sentence_no": 26,
+    "domain": "sacco_history",
+    "english": "How long have you been a SACCO member?",
+    "kikuyu": ""
+  },
+  {
+    "sentence_no": 27,
+    "domain": "sacco_history",
+    "english": "How much do you save, and how often?",
+    "kikuyu": ""
+  },
+  {
+    "sentence_no": 28,
+    "domain": "sacco_history",
+    "english": "Have you borrowed from the SACCO before?",
+    "kikuyu": ""
+  },
+  {
+    "sentence_no": 29,
+    "domain": "sacco_history",
+    "english": "Have you ever been a guarantor for someone else's loan?",
+    "kikuyu": ""
+  },
+  {
+    "sentence_no": 30,
+    "domain": "sacco_history",
+    "english": "Have you borrowed elsewhere, for example a mobile loan?",
+    "kikuyu": ""
+  },
+  {
+    "sentence_no": 31,
+    "domain": "chama",
+    "english": "Do you belong to a chama or self-help group?",
+    "kikuyu": ""
+  },
+  {
+    "sentence_no": 32,
+    "domain": "chama",
+    "english": "How much does each member contribute, and how often?",
+    "kikuyu": ""
+  },
+  {
+    "sentence_no": 33,
+    "domain": "chama",
+    "english": "How does the group share out the contributions?",
+    "kikuyu": ""
+  },
+  {
+    "sentence_no": 34,
+    "domain": "chama",
+    "english": "How long have you been in the group?",
+    "kikuyu": ""
+  },
+  {
+    "sentence_no": 35,
+    "domain": "chama",
+    "english": "Has the group ever helped you buy something or meet a need?",
+    "kikuyu": ""
+  },
+  {
+    "sentence_no": 36,
+    "domain": "intent_planning",
+    "english": "What will you use this loan for?",
+    "kikuyu": ""
+  },
+  {
+    "sentence_no": 37,
+    "domain": "intent_planning",
+    "english": "How will you repay?",
+    "kikuyu": ""
+  },
+  {
+    "sentence_no": 38,
+    "domain": "intent_planning",
+    "english": "How long do you expect to take to repay the loan?",
+    "kikuyu": ""
+  },
+  {
+    "sentence_no": 39,
+    "domain": "intent_planning",
+    "english": "If your plan does not work out, how would you still repay?",
+    "kikuyu": ""
+  },
+  {
+    "sentence_no": 40,
+    "domain": "intent_planning",
+    "english": "How do you keep track of what you earn and spend?",
+    "kikuyu": ""
+  }
+]

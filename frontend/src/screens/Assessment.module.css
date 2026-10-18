@@ -1,0 +1,107 @@
+.page { display: grid; gap: 18px; }
+
+.support {
+  padding: 12px 18px; border-radius: var(--radius);
+  background: var(--green-900); color: var(--white); font-size: 1.02rem;
+}
+
+.borderline {
+  padding: 18px 22px; border-radius: var(--radius);
+  background: var(--medium-bg); border: 2px solid var(--medium); color: #5c3900;
+}
+.borderlineTitle { font-size: 1.3rem; font-weight: 750; margin-bottom: 4px; color: var(--medium); }
+
+.grid { display: grid; grid-template-columns: minmax(300px, 5fr) minmax(360px, 7fr); gap: 18px; align-items: start; }
+.left { display: grid; gap: 18px; }
+
+.panel { padding: 20px 22px; display: grid; gap: 12px; }
+.small { font-size: 0.95rem; }
+
+/* --- Risk class ----------------------------------------------------------- */
+.risk {
+  padding: 22px 24px; border-radius: var(--radius); border: 3px solid; text-align: center;
+  display: grid; gap: 4px; background: var(--white);
+}
+.risk.low { border-color: var(--low); background: var(--low-bg); }
+.risk.medium { border-color: var(--medium); background: var(--medium-bg); }
+.risk.high { border-color: var(--high); background: var(--high-bg); }
+.riskClass { font-size: 2.6rem; font-weight: 750; letter-spacing: 0.02em; text-transform: uppercase; line-height: 1.1; margin-top: 4px; }
+.risk.low .riskClass { color: var(--low); }
+.risk.medium .riskClass { color: var(--medium); }
+.risk.high .riskClass { color: var(--high); }
+.meaning { font-size: 1.15rem; font-weight: 650; }
+.riskProb { color: var(--ink-2); }
+
+/* --- Probability bars (plain CSS, no chart library) ------------------------ */
+.bars { display: grid; gap: 10px; margin: 0; padding: 0; list-style: none; }
+.bars li { display: grid; grid-template-columns: 80px 1fr 64px; align-items: center; gap: 12px; }
+.barLabel { font-weight: 600; }
+.barTrack { height: 22px; background: var(--green-50); border: 1px solid var(--line); border-radius: 3px; overflow: hidden; }
+.barFill { display: block; height: 100%; }
+.barFill.low { background: var(--low); }
+.barFill.medium { background: #c98a1b; }
+.barFill.high { background: var(--high); }
+.barFill.none { background: var(--ink-3); }
+.barValue { text-align: right; font-variant-numeric: tabular-nums; color: var(--ink-2); }
+.predicted .barLabel, .predicted .barValue { color: var(--ink); font-weight: 750; }
+
+/* --- Completeness --------------------------------------------------------- */
+.completenessHead { display: flex; justify-content: space-between; align-items: baseline; }
+.completenessValue { font-size: 1.6rem; font-weight: 750; color: var(--green-800); }
+.meter { display: block; height: 10px; background: var(--green-100); border-radius: 5px; overflow: hidden; }
+.meter span { display: block; height: 100%; background: var(--green-600); }
+.meter span.meterLow { background: #c98a1b; }
+
+/* --- Contributions -------------------------------------------------------- */
+.contribs { display: grid; margin: 0; padding: 0; list-style: none; }
+.contrib { display: grid; gap: 6px; padding: 12px 0; border-top: 1px solid var(--line); }
+.contrib:first-child { border-top: 0; padding-top: 4px; }
+.contribText { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.contribFact { font-weight: 600; }
+.contribValue { font-weight: 500; color: var(--ink-2); }
+.contribValue::before { content: "— "; }
+.towards, .away { font-size: 0.92rem; font-weight: 600; white-space: nowrap; }
+.towards { color: var(--green-800); }
+.away { color: var(--ink-3); }
+.contribTrack { position: relative; display: block; height: 10px; background: var(--green-50); border-radius: 2px; }
+.contribTrack::before { content: ""; position: absolute; left: 50%; top: -3px; bottom: -3px; width: 2px; background: var(--ink-3); }
+.contribPos, .contribNeg { position: absolute; top: 0; bottom: 0; border-radius: 2px; }
+.contribPos { left: 50%; background: var(--green-700); }
+.contribNeg { right: 50%; background: var(--green-200); }
+
+/* --- Facts ---------------------------------------------------------------- */
+.factsHead { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+.facts { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 10px 24px; margin: 0; }
+.fact { padding: 8px 0; border-bottom: 1px solid var(--line); }
+.fact dt { color: var(--ink-3); font-size: 0.88rem; }
+.fact dd { margin: 0; font-weight: 600; }
+.notStated { color: var(--ink-2); font-size: 0.95rem; }
+
+/* --- Decision: model and officer side by side ------------------------------ */
+.decision { display: grid; grid-template-columns: 1fr 1.4fr; border: 2px solid var(--green-800); border-radius: var(--radius); background: var(--white); overflow: hidden; }
+.side { padding: 22px 24px; display: grid; gap: 10px; align-content: start; justify-items: start; }
+.officer { background: var(--green-50); border-left: 2px solid var(--green-800); justify-items: stretch; }
+.recommendation { font-size: 1.2rem; font-weight: 650; }
+
+.form { display: grid; gap: 10px; }
+.choices { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 6px; }
+.choice { background: var(--white); border-color: var(--green-200); color: var(--ink); min-height: 60px; }
+.choice:not(:disabled):hover { border-color: var(--green-600); }
+.choice[aria-checked="true"] { background: var(--green-800); border-color: var(--green-800); color: var(--white); }
+.confirm { display: grid; gap: 10px; padding: 14px 16px; background: var(--white); border: 2px solid var(--green-600); border-radius: var(--radius); }
+.confirmActions { display: flex; justify-content: flex-end; gap: 10px; flex-wrap: wrap; }
+
+.decided { font-size: 1.7rem; font-weight: 750; color: var(--green-900); }
+.note { margin: 0; padding: 10px 14px; border-left: 4px solid var(--green-200); background: var(--white); font-style: italic; }
+.differs { color: var(--medium); font-weight: 600; }
+
+.audit { color: var(--ink-3); font-size: 0.85rem; }
+
+@media (max-width: 900px) {
+  .grid, .decision { grid-template-columns: 1fr; }
+  .officer { border-left: 0; border-top: 2px solid var(--green-800); }
+}
+@media (max-width: 560px) {
+  .choices { grid-template-columns: 1fr; }
+  .riskClass { font-size: 2.1rem; }
+}
