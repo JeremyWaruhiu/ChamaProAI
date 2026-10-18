@@ -16,7 +16,7 @@ concurrency:
 jobs:
   backend:
     name: Backend (pytest)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     env:
       # The suite fakes Whisper and Gemini. Offline mode makes any accidental
       # model download fail loudly instead of pulling gigabytes; no API key is set.
@@ -44,7 +44,7 @@ jobs:
 
   frontend:
     name: Frontend (lint, test, build)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     defaults:
       run:
         working-directory: frontend
