@@ -50,3 +50,5 @@
   .row > :nth-child(5) { grid-area: risk; }
   .meter { margin-left: auto; }
 }
+
+.adminLink { color: inherit; font-weight: 600; }

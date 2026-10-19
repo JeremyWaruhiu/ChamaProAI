@@ -1,6 +1,6 @@
 import type {
   Assessment, Decision, DecisionValue, InterviewState, InterviewSummary,
-  Question, ResponseOut, ResponseQueued,
+  Question, ResponseOut, ResponseQueued, Results,
 } from './types'
 
 /** No request may leave the dashboard waiting longer than this. */
@@ -112,4 +112,5 @@ export const api = {
     request<Decision>(`/interviews/${interviewId}/decision`,
       json('POST', { decision, note: note.trim() || null })),
   audioUrl: (responseId: number) => `/api/responses/${responseId}/audio`,
+  results: () => request<Results>('/results'),
 }

@@ -12,6 +12,7 @@ describe('parse', () => {
     ['#/interviews/7/assessment', { screen: 'assessment', id: 7 }],
     ['#interviews/7/review', { screen: 'review', id: 7 }],
     ['#/interviews/7/review/', { screen: 'review', id: 7 }],
+    ['#/admin/results', { screen: 'results' }],
   ])('%s', (hash, route) => {
     expect(parse(hash)).toEqual(route)
   })
@@ -19,6 +20,7 @@ describe('parse', () => {
   it.each([
     '#/interviews/0/review', '#/interviews/-3/review', '#/interviews/abc/review',
     '#/interviews/1.5/review', '#/interviews/7', '#/interviews/7/unknown', '#/nowhere',
+    '#/admin', '#/admin/results/x',
   ])('falls back to the list for %s', (hash) => {
     expect(parse(hash)).toEqual({ screen: 'list' })
   })

@@ -44,6 +44,8 @@ QUESTIONS_PATH = Path(__file__).resolve().parent / "questions.json"
 MODELS_DIR = PROJECT_ROOT / "models"
 CLASSIFIER_PATH = MODELS_DIR / "classifier.joblib"
 CLASSIFIER_META_PATH = MODELS_DIR / "classifier_meta.json"
+# Aggregate evaluation figures, written by scripts/export_results.py
+RESULTS_SUMMARY_PATH = PROJECT_ROOT / "results" / "summary.json"
 
 # --- API ---------------------------------------------------------------------
 DB_PATH = Path(os.getenv("CHAMAPRO_DB") or DATA_DIR / "chamapro.db")

@@ -6,16 +6,19 @@ import { useEffect, useState } from 'react'
 //   #/interviews/:id/record[/:n]     recording, question n
 //   #/interviews/:id/review          transcript review
 //   #/interviews/:id/assessment      credit assessment
+//   #/admin/results                  model & evaluation (read-only)
 
 export type Route =
   | { screen: 'list' }
   | { screen: 'record'; id: number; question: number | null }
   | { screen: 'review'; id: number }
   | { screen: 'assessment'; id: number }
+  | { screen: 'results' }
 
 export function parse(hash: string): Route {
   const parts = hash.replace(/^#\/?/, '').split('/').filter(Boolean)
   const id = Number(parts[1])
+  if (parts[0] === 'admin' && parts[1] === 'results' && parts.length === 2) return { screen: 'results' }
   if (parts[0] === 'interviews' && Number.isInteger(id) && id > 0) {
     if (parts[2] === 'record') {
       const n = Number(parts[3])
@@ -32,6 +35,7 @@ export const paths = {
   record: (id: number, n?: number) => `#/interviews/${id}/record${n ? `/${n}` : ''}`,
   review: (id: number) => `#/interviews/${id}/review`,
   assessment: (id: number) => `#/interviews/${id}/assessment`,
+  results: () => '#/admin/results',
 }
 
 export function navigate(hash: string) {

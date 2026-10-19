@@ -1,0 +1,44 @@
+.na { color: var(--ink-3); font-style: italic; font-weight: 400; }
+
+.caption { margin-top: 12px; color: var(--ink-3); font-size: 0.82rem; line-height: 1.45; }
+.notes { margin: 8px 0 0; padding-left: 20px; color: var(--medium); font-size: 0.85rem; }
+
+/* Confusion matrix */
+.cm { display: grid; gap: 4px; max-width: 520px; font-size: 0.95rem; }
+.cmCorner { color: var(--ink-3); font-size: 0.72rem; align-self: end; padding-right: 8px; }
+.cmHead { font-weight: 650; color: var(--ink-2); align-self: center; text-align: center; padding: 4px 8px; }
+.cmCell {
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  min-height: 64px; border-radius: 4px; border: 1px solid var(--line); color: var(--ink);
+}
+.cmCell small { font-size: 0.75rem; opacity: 0.85; }
+.cmDark { color: var(--white); }
+
+/* Horizontal bars */
+.hbars { display: grid; gap: 8px; }
+.hbar { display: grid; grid-template-columns: minmax(110px, 180px) 1fr minmax(70px, auto); align-items: center; gap: 12px; }
+.hbarLabel { font-size: 0.9rem; overflow-wrap: anywhere; }
+.hbarTrack { height: 18px; border-radius: 3px; background: var(--green-50); border: 1px solid var(--green-100); overflow: hidden; }
+.hbarFill { display: block; height: 100%; }
+.hbarValue { font-variant-numeric: tabular-nums; font-size: 0.9rem; text-align: right; }
+.model { background: var(--green-600); }
+.baseline { background: var(--wait); }
+.low { background: var(--low); }
+.medium { background: var(--medium); }
+.high { background: var(--high); }
+
+/* Grouped bars */
+.grouped { margin: 0; overflow-x: auto; }
+.grouped svg { display: block; width: 100%; min-width: 320px; height: auto; }
+.legend { display: flex; flex-wrap: wrap; gap: 16px; font-size: 0.85rem; color: var(--ink-2); margin-top: 4px; }
+.legend i { display: inline-block; width: 12px; height: 12px; border-radius: 2px; margin-right: 6px; vertical-align: -1px; }
+
+/* Stat tiles */
+.stat { display: flex; flex-direction: column; gap: 2px; padding: 12px 16px; background: var(--green-50); border-radius: var(--radius); }
+.statLabel { color: var(--ink-3); font-size: 0.8rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; }
+.statValue { font-size: 1.35rem; font-weight: 700; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+
+@media (max-width: 600px) {
+  .hbar { grid-template-columns: 1fr auto; }
+  .hbarTrack { grid-column: 1 / -1; grid-row: 2; }
+}

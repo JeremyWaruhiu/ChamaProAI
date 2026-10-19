@@ -1,0 +1,300 @@
+{
+  "generated_at": "2026-10-19T10:21:04+00:00",
+  "generator": "scripts/export_results.py",
+  "model_card": {
+    "source": "models/classifier_meta.json; SHA-256 computed over models/classifier.joblib",
+    "estimator": "hist_gradient_boosting",
+    "frame": "modelling_frame.csv",
+    "protocol": "central_kenya_held_out",
+    "seed": 42,
+    "n_train": 11426,
+    "n_features": 40,
+    "classes": {
+      "0": "Low",
+      "1": "Medium",
+      "2": "High"
+    },
+    "trained_on": "2026-10-15",
+    "model_file": "classifier.joblib",
+    "model_sha256": "98078253583744bd5525214e9a17afe2763948147daab4f8a5a6717da74b8546",
+    "notes": []
+  },
+  "held_out": {
+    "source": "models/classifier.joblib scored on experiments/02_finaccess_prep/results/modelling_frame.csv",
+    "validation": "geographic holdout: trained on the other 42 counties, scored on Central Kenya, which the model never saw (scripts/train_and_save.py protocol central_kenya_held_out, seed 42)",
+    "n_test": 1685,
+    "auc_macro_ovr": 0.5683,
+    "macro_f1": 0.3674,
+    "comparator_macro_f1": 0.2845,
+    "per_class": {
+      "Low": {
+        "precision": 0.5932,
+        "recall": 0.3809
+      },
+      "Medium": {
+        "precision": 0.3113,
+        "recall": 0.2613
+      },
+      "High": {
+        "precision": 0.2654,
+        "recall": 0.5323
+      }
+    },
+    "confusion_matrix": [
+      [
+        315,
+        188,
+        324
+      ],
+      [
+        135,
+        127,
+        224
+      ],
+      [
+        81,
+        93,
+        198
+      ]
+    ],
+    "labels": [
+      "Low",
+      "Medium",
+      "High"
+    ],
+    "notes": [],
+    "comparator_source": "comparator() in experiments/03_classifier/model.py"
+  },
+  "class_balance": {
+    "source": "experiments/02_finaccess_prep/results/modelling_frame.csv",
+    "validation": "geographic holdout: trained on the other 42 counties, scored on Central Kenya, which the model never saw (scripts/train_and_save.py protocol central_kenya_held_out, seed 42)",
+    "labels": [
+      "Low",
+      "Medium",
+      "High"
+    ],
+    "train": {
+      "Low": 5333,
+      "Medium": 4529,
+      "High": 1564
+    },
+    "test": {
+      "Low": 827,
+      "Medium": 486,
+      "High": 372
+    },
+    "notes": []
+  },
+  "random_forest": {
+    "source": "experiments/03_classifier/model.py",
+    "validation": "geographic holdout: trained on the other 42 counties, scored on Central Kenya, which the model never saw (scripts/train_and_save.py protocol central_kenya_held_out, seed 42)",
+    "per_class_recall": null,
+    "notes": [
+      "experiments/03_classifier/model.py computes RandomForest per-class recall, but no RandomForest model is saved and this export does not retrain"
+    ]
+  },
+  "shap": {
+    "source": "shap.TreeExplainer on models/classifier.joblib",
+    "validation": "geographic holdout: trained on the other 42 counties, scored on Central Kenya, which the model never saw (scripts/train_and_save.py protocol central_kenya_held_out, seed 42)",
+    "sample_size": 500,
+    "top_features": [
+      {
+        "feature": "age",
+        "mean_abs_shap": 0.07535
+      },
+      {
+        "feature": "log_monthly_income",
+        "mean_abs_shap": 0.0743
+      },
+      {
+        "feature": "chama_loan_use",
+        "mean_abs_shap": 0.05559
+      },
+      {
+        "feature": "log_agri_income",
+        "mean_abs_shap": 0.05226
+      },
+      {
+        "feature": "B3A__3",
+        "mean_abs_shap": 0.04442
+      },
+      {
+        "feature": "sacco_loan_use",
+        "mean_abs_shap": 0.04427
+      },
+      {
+        "feature": "education",
+        "mean_abs_shap": 0.0321
+      },
+      {
+        "feature": "children",
+        "mean_abs_shap": 0.02952
+      },
+      {
+        "feature": "household_size",
+        "mean_abs_shap": 0.02626
+      },
+      {
+        "feature": "children_in_school",
+        "mean_abs_shap": 0.01801
+      }
+    ],
+    "notes": []
+  },
+  "asr": {
+    "source": "ASR: data/asr_paza.csv, data/asr_output_whisper_small.csv; translation: data/translation_output*.csv; chrF++ and BLEU via scripts/score.py against data/manifest.csv english_ref",
+    "validation": "one speaker, 40 scripted sentences; per-domain figures rest on about 5 sentences each and are indicative only",
+    "collapse_rule": "more than 6 words and under 35% distinct (scripts/view_results.py)",
+    "systems": {
+      "paza": {
+        "asr_file": "data/asr_paza.csv",
+        "translation_file": "data/translation_output.csv",
+        "overall": {
+          "n": 40,
+          "collapse_count": 0,
+          "yield": 0.8,
+          "chrf_pp": 47.15,
+          "bleu": 29.67
+        },
+        "by_domain": {
+          "household": {
+            "n": 5,
+            "collapse_count": 0,
+            "yield": 1.0,
+            "chrf_pp": 86.46,
+            "bleu": 77.33
+          },
+          "income": {
+            "n": 5,
+            "collapse_count": 0,
+            "yield": 0.8,
+            "chrf_pp": 38.55,
+            "bleu": 13.67
+          },
+          "expenditure": {
+            "n": 5,
+            "collapse_count": 0,
+            "yield": 0.8,
+            "chrf_pp": 41.43,
+            "bleu": 26.88
+          },
+          "assets": {
+            "n": 5,
+            "collapse_count": 0,
+            "yield": 0.4,
+            "chrf_pp": 29.07,
+            "bleu": 11.75
+          },
+          "debt_repayment": {
+            "n": 5,
+            "collapse_count": 0,
+            "yield": 1.0,
+            "chrf_pp": 49.72,
+            "bleu": 25.17
+          },
+          "sacco_history": {
+            "n": 5,
+            "collapse_count": 0,
+            "yield": 0.8,
+            "chrf_pp": 51.93,
+            "bleu": 25.21
+          },
+          "chama": {
+            "n": 5,
+            "collapse_count": 0,
+            "yield": 0.6,
+            "chrf_pp": 34.85,
+            "bleu": 17.91
+          },
+          "intent_planning": {
+            "n": 5,
+            "collapse_count": 0,
+            "yield": 1.0,
+            "chrf_pp": 41.34,
+            "bleu": 13.57
+          }
+        }
+      },
+      "whisper_small": {
+        "asr_file": "data/asr_output_whisper_small.csv",
+        "translation_file": "data/translation_output_whisper_small.csv",
+        "overall": {
+          "n": 40,
+          "collapse_count": 5,
+          "yield": 0.625,
+          "chrf_pp": 31.14,
+          "bleu": 13.46
+        },
+        "by_domain": {
+          "household": {
+            "n": 5,
+            "collapse_count": 0,
+            "yield": 1.0,
+            "chrf_pp": 68.79,
+            "bleu": 55.0
+          },
+          "income": {
+            "n": 5,
+            "collapse_count": 1,
+            "yield": 0.4,
+            "chrf_pp": 21.24,
+            "bleu": 3.2
+          },
+          "expenditure": {
+            "n": 5,
+            "collapse_count": 0,
+            "yield": 1.0,
+            "chrf_pp": 40.52,
+            "bleu": 11.59
+          },
+          "assets": {
+            "n": 5,
+            "collapse_count": 3,
+            "yield": 0.0,
+            "chrf_pp": 0.0,
+            "bleu": 0.0
+          },
+          "debt_repayment": {
+            "n": 5,
+            "collapse_count": 0,
+            "yield": 0.2,
+            "chrf_pp": 12.08,
+            "bleu": 0.48
+          },
+          "sacco_history": {
+            "n": 5,
+            "collapse_count": 1,
+            "yield": 0.6,
+            "chrf_pp": 38.08,
+            "bleu": 17.8
+          },
+          "chama": {
+            "n": 5,
+            "collapse_count": 0,
+            "yield": 1.0,
+            "chrf_pp": 23.01,
+            "bleu": 5.01
+          },
+          "intent_planning": {
+            "n": 5,
+            "collapse_count": 0,
+            "yield": 0.8,
+            "chrf_pp": 30.49,
+            "bleu": 5.5
+          }
+        }
+      }
+    },
+    "domains": [
+      "household",
+      "income",
+      "expenditure",
+      "assets",
+      "debt_repayment",
+      "sacco_history",
+      "chama",
+      "intent_planning"
+    ],
+    "notes": []
+  }
+}

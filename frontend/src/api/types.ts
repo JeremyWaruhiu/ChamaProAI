@@ -94,3 +94,94 @@ export interface ResponseQueued {
   sentence_no: number
   status: ResponseStatus
 }
+
+// GET /api/results: results/summary.json (scripts/export_results.py) plus live
+// database stats. Any number may be null: not measured, never zero.
+
+export interface Section {
+  source: string
+  validation?: string
+  notes?: string[]
+}
+
+export interface ModelCard extends Section {
+  estimator: string | null
+  frame: string | null
+  protocol: string | null
+  seed: number | null
+  n_train: number | null
+  n_features: number | null
+  classes: Record<string, string> | null
+  trained_on: string | null
+  model_file: string | null
+  model_sha256: string | null
+}
+
+export interface PrecisionRecall {
+  precision: number | null
+  recall: number | null
+}
+
+export interface HeldOut extends Section {
+  n_test: number | null
+  auc_macro_ovr: number | null
+  macro_f1: number | null
+  comparator_macro_f1: number | null
+  comparator_source?: string
+  per_class: Record<string, PrecisionRecall> | null
+  confusion_matrix: number[][] | null
+  labels: string[]
+}
+
+export interface ClassBalance extends Section {
+  labels: string[]
+  train: Record<string, number> | null
+  test: Record<string, number> | null
+}
+
+export interface ShapSummary extends Section {
+  sample_size: number | null
+  top_features: { feature: string; mean_abs_shap: number }[] | null
+}
+
+export interface AsrBlock {
+  n: number
+  collapse_count: number | null
+  yield: number | null
+  chrf_pp: number | null
+  bleu: number | null
+}
+
+export interface AsrSystem {
+  asr_file: string
+  translation_file: string
+  overall: AsrBlock | null
+  by_domain: Record<string, AsrBlock> | null
+}
+
+export interface AsrComparison extends Section {
+  collapse_rule?: string
+  domains: string[]
+  systems: Record<string, AsrSystem>
+}
+
+export interface LiveStats {
+  source: string
+  interview_count: number
+  assessment_count: number
+  risk_class_distribution: Record<string, number>
+  mean_extraction_completeness: number | null
+  decision_agreement: { rule: string; decisions: number; agreements: number; rate: number | null }
+}
+
+export interface Results {
+  generated_at: string
+  generator?: string
+  model_card?: ModelCard
+  held_out?: HeldOut
+  class_balance?: ClassBalance
+  random_forest?: Section & { per_class_recall?: Record<string, number> | null }
+  shap?: ShapSummary
+  asr?: AsrComparison
+  live: LiveStats
+}

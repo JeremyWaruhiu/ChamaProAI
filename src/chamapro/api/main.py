@@ -125,6 +125,48 @@ def health():
                     classifier=meta)
 
 
+# The officer decision each model risk class recommends (RISK_MEANING in the dashboard).
+RECOMMENDED_DECISION = {"Low": "approve", "Medium": "refer", "High": "decline"}
+
+
+def live_stats(db: Session) -> dict:
+    """Aggregate counts from the database; no row-level data leaves here."""
+    n_assessed = db.scalar(select(func.count(Assessment.id))) or 0
+    dist = dict(db.execute(select(Assessment.risk_class, func.count(Assessment.id))
+                           .group_by(Assessment.risk_class)).all())
+    completeness = db.scalar(select(func.avg(Assessment.extraction_completeness)))
+    pairs = db.execute(select(Assessment.risk_class, Decision.decision)
+                       .join(Decision, Decision.interview_id == Assessment.interview_id)).all()
+    agree = sum(RECOMMENDED_DECISION.get(rc) == d for rc, d in pairs)
+    return {
+        "source": "live database",
+        "interview_count": db.scalar(select(func.count(Interview.id))) or 0,
+        "assessment_count": n_assessed,
+        "risk_class_distribution": {**dict.fromkeys(RECOMMENDED_DECISION, 0), **dist},
+        "mean_extraction_completeness": None if completeness is None else round(float(completeness), 4),
+        "decision_agreement": {
+            "rule": "agree when Low->approve, Medium->refer, High->decline",
+            "decisions": len(pairs),
+            "agreements": agree,
+            "rate": round(agree / len(pairs), 4) if pairs else None,
+        },
+    }
+
+
+@app.get("/api/results", responses=ERRORS)
+def results(db: Session = Depends(get_db)):
+    """Exported evaluation summary plus live system stats. Read-only."""
+    path = config.RESULTS_SUMMARY_PATH
+    if not path.is_file():
+        raise HTTPException(404, "results summary not found; run "
+                                 "python scripts/export_results.py to create results/summary.json")
+    try:
+        summary = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        raise HTTPException(503, f"{path.name} is not valid JSON; rerun scripts/export_results.py")
+    return {**summary, "live": live_stats(db)}
+
+
 @app.get("/api/questions", response_model=list[s.Question])
 def questions():
     """The interview script, in sentence order. Kikuyu is "" where not yet supplied."""

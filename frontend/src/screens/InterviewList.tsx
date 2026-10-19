@@ -44,7 +44,8 @@ export function InterviewList() {
   useEffect(() => { load() }, [load])
 
   return (
-    <Shell title={<><strong>ChamaPro AI</strong> | Interviews</>} aside="SACCO credit assessment">
+    <Shell title={<><strong>ChamaPro AI</strong> | Interviews</>}
+           aside={<>SACCO credit assessment · <a href={paths.results()} className={styles.adminLink}>Model &amp; Evaluation</a></>}>
       <div className={styles.top}>
         <div>
           <h2 className={styles.heading}>Loan interviews</h2>
