@@ -5,10 +5,14 @@ whose speed the test controls, a fake Gemini, and no network.
 
 Tests that score with the real classifier are marked needs_classifier and
 skip when models/classifier.joblib is absent.
+
+`client` is signed in as an officer; `admin_client` as an admin; `anon_client`
+not at all. Test passwords are random per run; none is stored anywhere.
 """
 import json
 import os
 import re
+import secrets
 import shutil
 import subprocess
 import tempfile
@@ -28,8 +32,9 @@ import soundfile as sf  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 
 from chamapro import config  # noqa: E402
+from chamapro.api import auth  # noqa: E402
 from chamapro.api import pipeline as pl  # noqa: E402
-from chamapro.api.db import Assessment, Interview, SessionLocal  # noqa: E402
+from chamapro.api.db import Assessment, Interview, SessionLocal, User  # noqa: E402
 from chamapro.api.main import app  # noqa: E402
 
 needs_classifier = pytest.mark.skipif(
@@ -112,11 +117,53 @@ class FakeGemini:
 
 # --- Fixtures ----------------------------------------------------------------
 
+# localhost, so the session cookie is not marked Secure and travels over http.
+BASE_URL = "http://localhost"
+PASSWORDS = {"officer1": secrets.token_urlsafe(16), "admin1": secrets.token_urlsafe(16)}
+ROLES = {"officer1": "officer", "admin1": "admin"}
+
+
+def add_user(username, password, role="officer", active=True):
+    with SessionLocal() as db:
+        db.add(User(username=username, password_hash=auth.hash_password(password),
+                    role=role, is_active=active))
+        db.commit()
+
+
+def signed_in(username):
+    """A new client (no lifespan; the session client owns that) signed in as username."""
+    c = TestClient(app, base_url=BASE_URL)
+    r = c.post("/api/auth/login", json={"username": username, "password": PASSWORDS[username]})
+    assert r.status_code == 200, r.text
+    return c
+
+
 @pytest.fixture(scope="session")
 def client():
     pl.transcribe.load_asr = lambda name: FakeASR()  # never load the real model
-    with TestClient(app) as c:
+    with TestClient(app, base_url=BASE_URL) as c:
+        for name, pw in PASSWORDS.items():
+            add_user(name, pw, ROLES[name])
+        r = c.post("/api/auth/login", json={"username": "officer1", "password": PASSWORDS["officer1"]})
+        assert r.status_code == 200, r.text
         yield c
+
+
+@pytest.fixture(scope="session")
+def admin_client(client):
+    return signed_in("admin1")
+
+
+@pytest.fixture
+def anon_client(client):
+    return TestClient(app, base_url=BASE_URL)
+
+
+@pytest.fixture(autouse=True)
+def _reset_login_limiter():
+    auth.limiter.clear()
+    yield
+    auth.limiter.clear()
 
 
 @pytest.fixture

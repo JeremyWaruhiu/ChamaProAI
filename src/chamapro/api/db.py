@@ -1,4 +1,4 @@
-"""SQLite storage: applicants, interviews, responses, assessments.
+"""SQLite storage: applicants, interviews, responses, assessments, users.
 
 An assessment row is the audit record (Chapter 4): it stores the exact feature
 vector the classifier saw, never something re-derived later. The officer's
@@ -13,13 +13,19 @@ from sqlalchemy import (JSON, Boolean, DateTime, Float, ForeignKey, Integer,
                         String, Text, TypeDecorator, UniqueConstraint,
                         create_engine, event)
 from sqlalchemy.orm import (DeclarativeBase, Mapped, mapped_column,
-                            relationship, sessionmaker)
+                            relationship, sessionmaker, validates)
 
 from chamapro import config
 
 
 def utcnow() -> datetime:
     return datetime.now(timezone.utc)
+
+
+def normalise_email(value: str | None) -> str | None:
+    """Emails are compared lower-case; blank means none."""
+    value = (value or "").strip().lower()
+    return value or None
 
 
 class UTCDateTime(TypeDecorator):
@@ -102,6 +108,8 @@ class Assessment(Base):
     extraction_model: Mapped[str] = mapped_column(String(200))
     model_file: Mapped[str] = mapped_column(String(200))
     model_sha256: Mapped[str] = mapped_column(String(64))
+    # Who ran it. Null on assessments made before sign-in existed.
+    assessed_by: Mapped[str | None] = mapped_column(String(64))
     created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
 
     interview: Mapped[Interview] = relationship(back_populates="assessment")
@@ -115,9 +123,41 @@ class Decision(Base):
     interview_id: Mapped[int] = mapped_column(ForeignKey("interviews.id"), unique=True)
     decision: Mapped[str] = mapped_column(String(20))   # approve | decline | refer
     note: Mapped[str | None] = mapped_column(Text)
+    # Who recorded it. Null on decisions made before sign-in existed.
+    decided_by: Mapped[str | None] = mapped_column(String(64))
     created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
 
     interview: Mapped[Interview] = relationship(back_populates="decision")
+
+
+class User(Base):
+    """A loan officer or administrator. Created with scripts/create_user.py."""
+    __tablename__ = "users"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    username: Mapped[str] = mapped_column(String(64), unique=True)
+    password_hash: Mapped[str] = mapped_column(String(255))  # scrypt$n$r$p$salt$hash
+    role: Mapped[str] = mapped_column(String(20))             # officer | admin
+    # Google account linked for "Sign in with Google"; stored lower-case.
+    # Set with scripts/link_google.py; a Google login never creates a user.
+    email: Mapped[str | None] = mapped_column(String(254), unique=True, index=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
+
+    @validates("email")
+    def _lower_email(self, _key, value):
+        return normalise_email(value)
+
+
+class AuthSession(Base):
+    """A signed-in browser. Only the SHA-256 of the cookie token is stored."""
+    __tablename__ = "sessions"
+    token_hash: Mapped[str] = mapped_column(String(64), primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
+    expires_at: Mapped[datetime] = mapped_column(UTCDateTime)
+    auth_method: Mapped[str | None] = mapped_column(String(20))  # password | google
+
+    user: Mapped[User] = relationship()
 
 
 IMMUTABLE_TRIGGERS = [
@@ -141,8 +181,23 @@ def _sqlite_pragmas(dbapi_conn, _):
     cur.close()
 
 
+# Columns added after the first release. ADD COLUMN leaves existing rows as
+# they were (NULL) and fires no UPDATE trigger, so immutability holds.
+ADDED_COLUMNS = [("assessments", "assessed_by", "VARCHAR(64)"),
+                 ("decisions", "decided_by", "VARCHAR(64)"),
+                 ("users", "email", "VARCHAR(254)"),
+                 ("sessions", "auth_method", "VARCHAR(20)")]
+# SQLite cannot add a UNIQUE column, so uniqueness comes from an index
+# (the same one create_all makes on a new database).
+ADDED_INDEXES = ["CREATE UNIQUE INDEX IF NOT EXISTS ix_users_email ON users (email)"]
+
+
 def init_db() -> None:
     Base.metadata.create_all(engine)
     with engine.begin() as conn:
-        for ddl in IMMUTABLE_TRIGGERS:
+        for table, column, ddl_type in ADDED_COLUMNS:
+            have = {r[1] for r in conn.exec_driver_sql(f"PRAGMA table_info({table})")}
+            if column not in have:
+                conn.exec_driver_sql(f"ALTER TABLE {table} ADD COLUMN {column} {ddl_type}")
+        for ddl in ADDED_INDEXES + IMMUTABLE_TRIGGERS:
             conn.exec_driver_sql(ddl)

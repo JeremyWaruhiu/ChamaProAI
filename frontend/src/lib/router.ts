@@ -6,7 +6,8 @@ import { useEffect, useState } from 'react'
 //   #/interviews/:id/record[/:n]     recording, question n
 //   #/interviews/:id/review          transcript review
 //   #/interviews/:id/assessment      credit assessment
-//   #/admin/results                  model & evaluation (read-only)
+//   #/admin/results                  model & evaluation (read-only, admins)
+//   #/login[?next=<hash>]            sign in, then return to next
 
 export type Route =
   | { screen: 'list' }
@@ -14,9 +15,14 @@ export type Route =
   | { screen: 'review'; id: number }
   | { screen: 'assessment'; id: number }
   | { screen: 'results' }
+  | { screen: 'login'; next: string | null }
 
 export function parse(hash: string): Route {
-  const parts = hash.replace(/^#\/?/, '').split('/').filter(Boolean)
+  const [path, query = ''] = hash.split('?', 2)
+  const parts = path.replace(/^#\/?/, '').split('/').filter(Boolean)
+  if (parts[0] === 'login' && parts.length === 1) {
+    return { screen: 'login', next: new URLSearchParams(query).get('next') }
+  }
   const id = Number(parts[1])
   if (parts[0] === 'admin' && parts[1] === 'results' && parts.length === 2) return { screen: 'results' }
   if (parts[0] === 'interviews' && Number.isInteger(id) && id > 0) {
@@ -36,10 +42,16 @@ export const paths = {
   review: (id: number) => `#/interviews/${id}/review`,
   assessment: (id: number) => `#/interviews/${id}/assessment`,
   results: () => '#/admin/results',
+  login: (next?: string | null) => `#/login${next ? `?next=${encodeURIComponent(next)}` : ''}`,
 }
 
 export function navigate(hash: string) {
   if (window.location.hash !== hash) window.location.hash = hash
+}
+
+/** Like navigate, but replaces the history entry: for redirects the back button should skip. */
+export function redirect(hash: string) {
+  if (window.location.hash !== hash) window.location.replace(hash)
 }
 
 export function useRoute(): Route {

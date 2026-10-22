@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react'
+import { ROLE_LABEL, useAuth } from '../lib/auth'
 import { paths } from '../lib/router'
 import styles from './Shell.module.css'
 
@@ -25,7 +26,10 @@ export function Shell({ title, aside, interviewId, step, children }: Props) {
       <header className={styles.bar}>
         <div className={styles.barInner}>
           <h1 className={styles.title}>{title}</h1>
-          {aside && <div className={styles.aside}>{aside}</div>}
+          <div className={styles.barEnd}>
+            {aside && <div className={styles.aside}>{aside}</div>}
+            <SignedIn />
+          </div>
         </div>
       </header>
       {interviewId !== undefined && (
@@ -47,5 +51,20 @@ export function Shell({ title, aside, interviewId, step, children }: Props) {
       )}
       <main className={styles.main}>{children}</main>
     </>
+  )
+}
+
+/** Who is signed in, and the way out. */
+function SignedIn() {
+  const { user, signOut } = useAuth()
+  if (!user) return null
+  return (
+    <div className={styles.user}>
+      <span className={styles.userName}>
+        <span className="visually-hidden">Signed in as </span>{user.username}
+        <span className={styles.role}>{ROLE_LABEL[user.role]}</span>
+      </span>
+      <button type="button" className={`btn ${styles.signOut}`} onClick={signOut}>Sign out</button>
+    </div>
   )
 }

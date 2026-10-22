@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { ASSESS_TIMEOUT_MS, ApiError, REQUEST_TIMEOUT_MS, api } from './client'
+import { ASSESS_TIMEOUT_MS, ApiError, REQUEST_TIMEOUT_MS, api, setUnauthorizedHandler } from './client'
 
 /** A fetch that never answers until its signal aborts, like a server stuck restarting. */
 function hangingFetch() {
@@ -46,5 +46,48 @@ describe('request timeout', () => {
     const e = await api.interviews().catch((err: unknown) => err) as ApiError
     expect(e.timedOut).toBe(false)
     expect(e.message).toMatch(/Cannot reach the ChamaPro server/)
+  })
+})
+
+describe('signed-out handling', () => {
+  const status = (code: number, detail: string) =>
+    vi.fn(async () => new Response(JSON.stringify({ detail }), { status: code }))
+
+  afterEach(() => {
+    setUnauthorizedHandler(null)
+    vi.unstubAllGlobals()
+  })
+
+  it('sends any 401 from the API back to login', async () => {
+    const onUnauthorized = vi.fn()
+    setUnauthorizedHandler(onUnauthorized)
+    vi.stubGlobal('fetch', status(401, 'session expired; sign in again'))
+    for (const call of [() => api.interviews(), () => api.interview(3), () => api.me(), () => api.results()]) {
+      await expect(call()).rejects.toMatchObject({ status: 401 })
+    }
+    expect(onUnauthorized).toHaveBeenCalledTimes(4)
+  })
+
+  it('keeps a failed sign-in on the login form, with the API message', async () => {
+    const onUnauthorized = vi.fn()
+    setUnauthorizedHandler(onUnauthorized)
+    vi.stubGlobal('fetch', status(401, 'incorrect username or password'))
+    const e = await api.login('wanjiru', 'nope').catch((err: unknown) => err) as ApiError
+    expect(e.status).toBe(401)
+    expect(e.message).toBe('incorrect username or password')
+    expect(onUnauthorized).not.toHaveBeenCalled()
+  })
+
+  it('does not treat 403 as signed out', async () => {
+    const onUnauthorized = vi.fn()
+    setUnauthorizedHandler(onUnauthorized)
+    vi.stubGlobal('fetch', status(403, 'administrators only'))
+    await expect(api.results()).rejects.toMatchObject({ status: 403, message: 'administrators only' })
+    expect(onUnauthorized).not.toHaveBeenCalled()
+  })
+
+  it('accepts the empty 204 from sign-out', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(null, { status: 204 })))
+    await expect(api.logout()).resolves.toBeNull()
   })
 })

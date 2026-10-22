@@ -5,6 +5,7 @@ import { RiskBadge } from '../components/Badges'
 import { ErrorNotice, Loading } from '../components/Notice'
 import { Shell } from '../components/Shell'
 import { applicantName, formatDate } from '../lib/format'
+import { useAuth } from '../lib/auth'
 import { DECISION_LABEL } from '../lib/risk'
 import { navigate, paths } from '../lib/router'
 import styles from './InterviewList.module.css'
@@ -30,6 +31,7 @@ export function InterviewList() {
   const [items, setItems] = useState<InterviewSummary[] | null>(null)
   const [error, setError] = useState<ApiError | null>(null)
   const [creating, setCreating] = useState(false)
+  const { user } = useAuth()
 
   const load = useCallback(async () => {
     try {
@@ -45,7 +47,7 @@ export function InterviewList() {
 
   return (
     <Shell title={<><strong>ChamaPro AI</strong> | Interviews</>}
-           aside={<>SACCO credit assessment · <a href={paths.results()} className={styles.adminLink}>Model &amp; Evaluation</a></>}>
+           aside={<>SACCO credit assessment{user?.role === 'admin' && <> · <a href={paths.results()} className={styles.adminLink}>Model &amp; Evaluation</a></>}</>}>
       <div className={styles.top}>
         <div>
           <h2 className={styles.heading}>Loan interviews</h2>

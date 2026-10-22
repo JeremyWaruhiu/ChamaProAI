@@ -20,8 +20,13 @@ a one-line reason. Wireframe figure numbers refer to Chapter 4.
 
 | Change | Status | Reason |
 |---|---|---|
-| No login screen, no officer name in the header | Deferred (Sprint III) | Authentication is out of scope for Sprint II. |
-| Branch selection | Deferred (Sprint III) | Belongs to authentication; there is one register until then. |
+| No login screen, no officer name in the header | Deferred (Sprint III) → **Implemented** | Authentication and role separation are now in place: a sign-in page at `#/login`, cookie sessions (8 h), officer and admin roles, and the signed-in username, role and Sign out in every screen's header. Only admins see and may open Model & Evaluation. |
+| Username instead of email | Changed | Accounts are created by the SACCO administrator with `scripts/create_user.py`; officers need not have an email address, and none is stored. |
+| Show / hide password toggle | Added | Typing a password on a tablet keyboard is error-prone; letting the officer check it avoids lockouts. |
+| "Forgot password?" → "Accounts are created by your SACCO administrator." | Changed | There is no email or self-service reset; the administrator resets accounts. A link that led nowhere would mislead. |
+| Five failed sign-ins for one username in 15 minutes lock it for the rest of the window | Added | Limits password guessing against a shared branch server. |
+| "Sign in with Google" button under the password form, after an "or" divider | Added | Optional, shown only when `GOOGLE_CLIENT_ID` is set. Signs in only users who already exist and have that Google email linked (`scripts/link_google.py`); it never creates an account. Google's own rendered button is used, per its branding guidelines. Password sign-in stays, since officers may have no Google account and branches may be offline. This is the one place the dashboard loads anything from the internet, and only when configured. |
+| Branch selection | Deferred (Sprint III) | There is one register for now; branches need their own data separation, not only a menu. |
 
 ## Figure 4.9 — Applicant dashboard → Interviews list
 
@@ -66,7 +71,7 @@ a one-line reason. Wireframe figure numbers refer to Chapter 4.
 | A failed or empty transcript can be typed in by the officer | Added | Otherwise that answer would be lost to the assessment. |
 | Synchronised playback bar | Changed | Replaced by a Replay button per answer; each answer is a separate 3–10 s clip. |
 | Shaded low-confidence spans and the "ASR confidence" figure | Deferred | The ASR stage does not produce per-word confidence yet. |
-| Flag for supervisor | Deferred | Needs officer roles from authentication (Sprint III). |
+| Flag for supervisor | Deferred | Officer and admin roles now exist; the flag itself and a supervisor's queue are still to be built. |
 | "Confirm and extract features" → "Run assessment", with a confirmation step | Changed | One plain action; the confirmation is there because an assessment can never be changed afterwards. |
 | Run assessment disabled until nothing is waiting or transcribing, and until corrections are saved | Added | Specified for transcription; unsaved corrections would otherwise be silently left out. |
 | Read-only once assessed | Added | Specified; assessments are immutable. |
@@ -87,7 +92,7 @@ a one-line reason. Wireframe figure numbers refer to Chapter 4.
 | Decision buttons have equal weight; nothing is preselected | Changed | The wireframe made Approve the primary button, which nudges the officer. |
 | A note can be recorded with the decision; a confirmation step precedes it | Added | Records why; the decision is permanent. |
 | The decision is marked when it differs from the model's recommendation | Added | Makes overrides visible for later review without implying the officer was wrong. |
-| Model, extraction model and classifier hash shown in a footer | Added | Auditability (Chapter 4): the record identifies exactly which model produced it. |
+| Model, extraction model and classifier hash stored with each assessment, not shown on screen | Added | Auditability (Chapter 4): the stored record identifies exactly which model produced it; the footer line was removed from the screen as clutter for officers. |
 | Approve at a reduced amount | Deferred | Needs the loan amount, which is not captured yet. |
 | Loan amount requested in the header | Deferred | Not captured by the interview yet. |
 | SACCO baseline (savings multiplier) and divergence panel | Deferred | Needs savings and guarantor records from the SACCO's system. |
@@ -103,3 +108,6 @@ a one-line reason. Wireframe figure numbers refer to Chapter 4.
 | Reads report the clip in progress as "transcribing" | Specified; the database still stores "queued". |
 | `POST /api/interviews/{id}/decision` | Specified; immutable once made, enforced by database triggers. |
 | `GET /api/responses/{id}/audio` | Not in the original list; Replay needs the stored clip after a page reload. |
+| `POST /api/auth/login`, `POST /api/auth/logout`, `GET /api/auth/me` | Authentication; every other endpoint except `/api/health` now requires a signed-in user. |
+| `POST /api/auth/google`, `GET /api/auth/config`; `users.email` (unique, lower-case) and `sessions.auth_method` | Google sign-in for linked users; the session records which method was used. |
+| `assessed_by` and `decided_by` on assessments and decisions | Records who made each one; nullable, so rows from before sign-in are left as they were. |

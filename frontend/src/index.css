@@ -135,3 +135,6 @@ a { color: var(--green-700); }
 .input { min-height: 52px; }
 .textarea { min-height: 96px; resize: vertical; line-height: 1.55; }
 .input:focus, .textarea:focus { border-color: var(--green-600); background: var(--white); outline: none; box-shadow: 0 0 0 3px rgb(46 125 79 / 20%); }
+
+/* Full-page waiting and failure states, before any screen has loaded */
+.boot { max-width: 620px; margin: 15vh auto 0; padding: 0 16px; }

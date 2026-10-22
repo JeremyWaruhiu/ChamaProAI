@@ -16,23 +16,27 @@ from fastapi import (BackgroundTasks, Depends, FastAPI, File, Form,
                      HTTPException, Request, UploadFile)
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, Response as HTTPResponse
 from sqlalchemy import case, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from chamapro import config
 
+from . import auth
 from . import pipeline as pl
 from . import schemas as s
+from .auth import require_admin, require_officer
 from .db import (Applicant, Assessment, Decision, Interview, Response, SessionLocal,
-                 init_db, utcnow)
+                 User, init_db, utcnow)
 
 if not logging.getLogger().handlers:
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
 log = logging.getLogger("chamapro.api")
 
-ERRORS = {code: {"model": s.Error} for code in (404, 409, 413, 415, 422, 502, 503)}
+ERRORS = {code: {"model": s.Error} for code in (401, 403, 404, 409, 413, 415, 422, 502, 503)}
+# Every endpoint except /api/health and /api/auth/login needs a signed-in user.
+OFFICER = [Depends(require_officer)]
 QUESTIONS = [s.Question(**q) for q in
              json.loads(config.QUESTIONS_PATH.read_text(encoding="utf-8"))]
 QUESTIONS_TOTAL = len(QUESTIONS)
@@ -125,6 +129,90 @@ def health():
                     classifier=meta)
 
 
+# --- Sign-in -----------------------------------------------------------------
+
+TOO_MANY = "too many failed sign-in attempts; try again later"
+
+
+def check_rate_limit(key: str) -> None:
+    wait = auth.limiter.retry_after(key)
+    if wait is not None:
+        raise HTTPException(429, TOO_MANY, headers={"Retry-After": str(wait)})
+
+
+def signed_in(request: Request, response: HTTPResponse, db: Session, user: User,
+              method: str) -> s.Me:
+    """The one success path for every sign-in method: session, cookie, {username, role}."""
+    token = auth.start_session(db, user, method)
+    response.set_cookie(auth.COOKIE, token, max_age=config.SESSION_HOURS * 3600, path="/api",
+                        httponly=True, samesite="strict", secure=auth.cookie_secure(request))
+    return s.Me.model_validate(user)
+
+
+@app.post("/api/auth/login", response_model=s.Me,
+          responses={401: {"model": s.Error}, 429: {"model": s.Error}})
+def login(body: s.LoginRequest, request: Request, response: HTTPResponse,
+          db: Session = Depends(get_db)):
+    name = body.username.strip()
+    check_rate_limit(name)
+    user = auth.authenticate(db, name, body.password)
+    if user is None:
+        auth.limiter.fail(name)
+        raise HTTPException(401, auth.BAD_LOGIN)
+    auth.limiter.clear(name)
+    return signed_in(request, response, db, user, "password")
+
+
+@app.get("/api/auth/config", response_model=s.AuthConfig)
+def auth_config():
+    """What the login page needs to know before anyone is signed in."""
+    return s.AuthConfig(google_client_id=config.GOOGLE_CLIENT_ID)
+
+
+@app.post("/api/auth/google", response_model=s.Me,
+          responses={401: {"model": s.Error}, 404: {"model": s.Error},
+                     429: {"model": s.Error}, 503: {"model": s.Error}})
+def google_login(body: s.GoogleLogin, request: Request, response: HTTPResponse,
+                 db: Session = Depends(get_db)):
+    """Sign in an existing user whose linked email matches a verified Google
+    account. Never creates a user; anything else is the password login's 401."""
+    client_id = config.GOOGLE_CLIENT_ID
+    if not client_id:
+        raise HTTPException(404, "Google sign-in is not configured on this server; "
+                                 "set GOOGLE_CLIENT_ID or sign in with a username and password")
+    try:
+        email = auth.verify_google_credential(body.credential, client_id)
+    except auth.GoogleUnreachable:
+        raise HTTPException(503, "could not reach Google to verify the sign-in; "
+                                 "try again, or use your username and password")
+    except auth.GoogleTokenRejected as e:
+        log.info("google sign-in refused: %s", e)
+        raise HTTPException(401, auth.BAD_LOGIN)
+    key = f"google:{email}"  # its own counter, so it cannot lock a username
+    check_rate_limit(key)
+    user = auth.user_by_email(db, email)
+    if user is None:
+        auth.limiter.fail(key)
+        raise HTTPException(401, auth.BAD_LOGIN)
+    auth.limiter.clear(key)
+    return signed_in(request, response, db, user, "google")
+
+
+@app.post("/api/auth/logout", status_code=204)
+def logout(request: Request, db: Session = Depends(get_db)):
+    """Ends this browser's session. Succeeds even if it had already ended."""
+    auth.end_session(db, request.cookies.get(auth.COOKIE))
+    out = HTTPResponse(status_code=204)
+    out.delete_cookie(auth.COOKIE, path="/api", httponly=True, samesite="strict",
+                      secure=auth.cookie_secure(request))
+    return out
+
+
+@app.get("/api/auth/me", response_model=s.Me, responses={401: {"model": s.Error}})
+def me(user: User = Depends(auth.current_user)):
+    return s.Me.model_validate(user)
+
+
 # The officer decision each model risk class recommends (RISK_MEANING in the dashboard).
 RECOMMENDED_DECISION = {"Low": "approve", "Medium": "refer", "High": "decline"}
 
@@ -153,7 +241,7 @@ def live_stats(db: Session) -> dict:
     }
 
 
-@app.get("/api/results", responses=ERRORS)
+@app.get("/api/results", responses=ERRORS, dependencies=[Depends(require_admin)])
 def results(db: Session = Depends(get_db)):
     """Exported evaluation summary plus live system stats. Read-only."""
     path = config.RESULTS_SUMMARY_PATH
@@ -167,13 +255,14 @@ def results(db: Session = Depends(get_db)):
     return {**summary, "live": live_stats(db)}
 
 
-@app.get("/api/questions", response_model=list[s.Question])
+@app.get("/api/questions", response_model=list[s.Question], responses=ERRORS, dependencies=OFFICER)
 def questions():
     """The interview script, in sentence order. Kikuyu is "" where not yet supplied."""
     return QUESTIONS
 
 
-@app.post("/api/interviews", status_code=201, response_model=s.InterviewCreated)
+@app.post("/api/interviews", status_code=201, response_model=s.InterviewCreated,
+          responses=ERRORS, dependencies=OFFICER)
 def create_interview(body: s.InterviewCreate | None = None, db: Session = Depends(get_db)):
     name = (body.applicant_name or "").strip() if body else ""
     iv = Interview(applicant=Applicant(name=name or None))
@@ -182,7 +271,8 @@ def create_interview(body: s.InterviewCreate | None = None, db: Session = Depend
     return s.InterviewCreated(id=iv.id, status=iv.status)
 
 
-@app.get("/api/interviews", response_model=list[s.InterviewSummary])
+@app.get("/api/interviews", response_model=list[s.InterviewSummary], responses=ERRORS,
+         dependencies=OFFICER)
 def list_interviews(db: Session = Depends(get_db)):
     """Every interview, newest first, with response counts and any risk class."""
     per_status = {st: func.coalesce(func.sum(case((Response.status == st, 1), else_=0)), 0)
@@ -213,7 +303,7 @@ def list_interviews(db: Session = Depends(get_db)):
 
 
 @app.post("/api/interviews/{interview_id}/responses", status_code=202,
-          response_model=s.ResponseQueued, responses=ERRORS)
+          response_model=s.ResponseQueued, responses=ERRORS, dependencies=OFFICER)
 def upload_response(interview_id: int, background: BackgroundTasks,
                     file: UploadFile = File(...), sentence_no: int = Form(..., ge=1),
                     db: Session = Depends(get_db)):
@@ -269,7 +359,7 @@ def upload_response(interview_id: int, background: BackgroundTasks,
 
 
 @app.get("/api/interviews/{interview_id}", response_model=s.InterviewState,
-         responses=ERRORS)
+         responses=ERRORS, dependencies=OFFICER)
 def interview_state(interview_id: int, db: Session = Depends(get_db)):
     iv = get_interview(db, interview_id)
     busy = live_status_of(db)
@@ -288,7 +378,7 @@ def interview_state(interview_id: int, db: Session = Depends(get_db)):
 
 
 @app.get("/api/responses/{response_id}/audio", response_class=FileResponse,
-         responses={200: {"content": {"audio/wav": {}}}, 404: {"model": s.Error}})
+         responses={200: {"content": {"audio/wav": {}}}, **ERRORS}, dependencies=OFFICER)
 def response_audio(response_id: int, db: Session = Depends(get_db)):
     """The stored 16 kHz clip, for replay. Readable after assessment too."""
     r = db.get(Response, response_id)
@@ -301,7 +391,8 @@ def response_audio(response_id: int, db: Session = Depends(get_db)):
                         filename=f"interview{r.interview_id}_s{r.sentence_no:02d}.wav")
 
 
-@app.patch("/api/responses/{response_id}", response_model=s.ResponseOut, responses=ERRORS)
+@app.patch("/api/responses/{response_id}", response_model=s.ResponseOut, responses=ERRORS,
+           dependencies=OFFICER)
 def edit_transcript(response_id: int, body: s.TranscriptEdit, db: Session = Depends(get_db)):
     r = db.get(Response, response_id)
     if r is None:
@@ -322,7 +413,7 @@ def edit_transcript(response_id: int, body: s.TranscriptEdit, db: Session = Depe
 
 
 @app.delete("/api/responses/{response_id}", response_model=s.ResponseDeleted,
-            responses=ERRORS)
+            responses=ERRORS, dependencies=OFFICER)
 def delete_response(response_id: int, db: Session = Depends(get_db)):
     r = db.get(Response, response_id)
     if r is None:
@@ -347,7 +438,8 @@ def delete_response(response_id: int, db: Session = Depends(get_db)):
 
 @app.post("/api/interviews/{interview_id}/assess", status_code=201,
           response_model=s.AssessmentOut, responses=ERRORS)
-def assess(interview_id: int, db: Session = Depends(get_db)):
+def assess(interview_id: int, db: Session = Depends(get_db),
+           user: User = Depends(require_officer)):
     iv = get_interview(db, interview_id)
     require_open(iv)
     queued = [r.sentence_no for r in iv.responses if r.status == "queued"]
@@ -401,7 +493,8 @@ def assess(interview_id: int, db: Session = Depends(get_db)):
                    features_total=out["features_total"],
                    features_not_extractable=out["features_not_extractable_from_interview"],
                    extraction_model=pl.extraction_model(),
-                   model_file=scored.model_file, model_sha256=scored.model_sha256)
+                   model_file=scored.model_file, model_sha256=scored.model_sha256,
+                   assessed_by=user.username)
     db.add(a)
     iv.status = "assessed"
     try:
@@ -414,7 +507,8 @@ def assess(interview_id: int, db: Session = Depends(get_db)):
 
 @app.post("/api/interviews/{interview_id}/decision", status_code=201,
           response_model=s.DecisionOut, responses=ERRORS)
-def record_decision(interview_id: int, body: s.DecisionCreate, db: Session = Depends(get_db)):
+def record_decision(interview_id: int, body: s.DecisionCreate, db: Session = Depends(get_db),
+                    user: User = Depends(require_officer)):
     """Record the officer's decision. Only after assessment, and only once."""
     iv = get_interview(db, interview_id)
     if iv.assessment is None:
@@ -423,7 +517,7 @@ def record_decision(interview_id: int, body: s.DecisionCreate, db: Session = Dep
     if iv.decision is not None:
         raise HTTPException(409, f"interview {iv.id} already has a decision; it is immutable")
     d = Decision(interview_id=iv.id, decision=body.decision,
-                 note=(body.note or "").strip() or None)
+                 note=(body.note or "").strip() or None, decided_by=user.username)
     db.add(d)
     try:
         db.commit()

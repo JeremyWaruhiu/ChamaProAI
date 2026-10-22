@@ -1,0 +1,72 @@
+/* Figure 4.8: green bar, centred white card on the pale green page. */
+
+.page { min-height: 100vh; min-height: 100dvh; display: flex; flex-direction: column; }
+
+.bar { background: var(--green-800); color: var(--white); }
+.brand {
+  display: flex; align-items: center; max-width: 1120px; margin: 0 auto; min-height: 64px;
+  padding: 16px 24px; font-size: 1.25rem; font-weight: 700; letter-spacing: 0.01em;
+}
+
+.main { flex: 1; display: grid; place-items: center; padding: 40px 24px; }
+
+.card {
+  width: 100%; max-width: 460px; padding: 36px 40px 28px;
+  display: grid; gap: 18px; border-color: var(--green-200);
+}
+
+.form { display: grid; gap: 18px; }
+
+.intro { text-align: center; display: grid; gap: 6px; margin-bottom: 4px; }
+.title { font-size: 1.9rem; font-weight: 600; color: var(--green-900); }
+.tagline { color: var(--green-700); font-size: 1rem; }
+
+.field { display: grid; gap: 6px; }
+/* Upper-case labels as in the wireframe; green-700 on white is 7.5:1 */
+.label { color: var(--green-700); font-size: 0.85rem; font-weight: 650; letter-spacing: 0.06em; text-transform: uppercase; }
+
+.passwordRow { position: relative; }
+.passwordInput { padding-right: 84px; }
+.toggle {
+  position: absolute; top: 50%; right: 6px; transform: translateY(-50%);
+  min-height: 40px; min-width: 64px; padding: 0 12px;
+  border: 0; border-radius: var(--radius); background: transparent;
+  color: var(--green-800); font: inherit; font-size: 0.95rem; font-weight: 650; cursor: pointer;
+}
+.toggle:hover { background: var(--green-100); }
+
+.field :global(.input)[aria-invalid="true"] { border-color: var(--high); }
+
+/* Always in the DOM so screen readers announce what is written into it. */
+.error { color: var(--high); font-weight: 600; font-size: 0.98rem; }
+.error:empty { display: none; }
+
+.form :global(.btn[aria-disabled="true"]) { cursor: progress; opacity: 0.8; }
+
+/* "or" divider, then Google's own button (GIS renders it; never restyled) */
+.google { display: grid; gap: 14px; }
+.divider { display: flex; align-items: center; gap: 12px; color: var(--ink-2); font-size: 0.9rem; }
+.divider::before, .divider::after { content: ""; flex: 1; height: 1px; background: var(--line); }
+.googleButton { display: flex; justify-content: center; min-height: 44px; }
+/* "G" on the placeholder used when Google sign-in is not configured (not Google's logo) */
+.gMark {
+  display: inline-grid; place-items: center; width: 1.5em; height: 1.5em; flex: none;
+  border: 2px solid currentColor; border-radius: 50%; font-weight: 700; font-size: 0.85em; line-height: 1;
+}
+
+.status { display: flex; align-items: center; justify-content: center; gap: 8px; color: var(--ink-2); font-size: 0.95rem; }
+
+.help { text-align: center; color: var(--ink-2); font-size: 0.92rem; }
+
+/* Tablet in landscape: little height to spare */
+@media (max-height: 700px) {
+  .main { padding-top: 20px; padding-bottom: 20px; }
+  .card, .form { gap: 14px; }
+  .card { padding-top: 24px; padding-bottom: 20px; }
+}
+
+@media (max-width: 520px) {
+  .brand { padding-left: 16px; padding-right: 16px; }
+  .main { padding: 24px 16px; place-items: start center; }
+  .card { padding: 28px 20px 22px; }
+}

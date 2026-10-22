@@ -86,6 +86,7 @@ class AssessmentOut(ORM):
     extraction_model: str
     model_file: str
     model_sha256: str
+    assessed_by: str | None = Field(default=None, description="Username; null before sign-in existed")
     created_at: datetime
 
 
@@ -107,7 +108,29 @@ class DecisionCreate(BaseModel):
 class DecisionOut(ORM):
     decision: DecisionValue
     note: str | None
+    decided_by: str | None = Field(default=None, description="Username; null before sign-in existed")
     created_at: datetime
+
+
+Role = Literal["officer", "admin"]
+
+
+class LoginRequest(BaseModel):
+    username: str = Field(min_length=1, max_length=64)
+    password: str = Field(min_length=1, max_length=1024)
+
+
+class GoogleLogin(BaseModel):
+    credential: str = Field(min_length=1, max_length=8192, description="ID token from Google Identity Services")
+
+
+class AuthConfig(BaseModel):
+    google_client_id: str | None = Field(description="Null when Google sign-in is not configured")
+
+
+class Me(ORM):
+    username: str
+    role: Role
 
 
 class Applicant(ORM):

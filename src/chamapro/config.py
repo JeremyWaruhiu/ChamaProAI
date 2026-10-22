@@ -52,6 +52,15 @@ DB_PATH = Path(os.getenv("CHAMAPRO_DB") or DATA_DIR / "chamapro.db")
 UPLOADS_DIR = Path(os.getenv("CHAMAPRO_UPLOADS") or DATA_DIR / "uploads")
 MAX_UPLOAD_BYTES = 25 * 1024 * 1024
 
+# --- Sign-in -----------------------------------------------------------------
+SESSION_HOURS = 8
+LOGIN_MAX_FAILURES = 5          # per username ...
+LOGIN_WINDOW_SECONDS = 15 * 60  # ... in this window, then 429
+# Session cookie Secure flag: "1" always, "0" never, unset = on except for localhost.
+COOKIE_SECURE: str | None = os.getenv("CHAMAPRO_COOKIE_SECURE") or None
+# OAuth 2.0 Web client ID for "Sign in with Google"; unset = Google sign-in off.
+GOOGLE_CLIENT_ID: str | None = os.getenv("GOOGLE_CLIENT_ID") or None
+
 
 def require(name: str) -> str:
     """Return the named env var or raise a clear error naming what's missing."""

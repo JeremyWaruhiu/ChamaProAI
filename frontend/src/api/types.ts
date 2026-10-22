@@ -3,6 +3,18 @@
 export type ResponseStatus = 'queued' | 'transcribing' | 'transcribed' | 'failed'
 export type InterviewStatus = 'open' | 'assessed'
 export type DecisionValue = 'approve' | 'decline' | 'refer'
+export type Role = 'officer' | 'admin'
+
+/** GET /api/auth/config: what the login page needs before sign-in. */
+export interface AuthConfig {
+  google_client_id: string | null // null: Google sign-in not configured
+}
+
+/** The signed-in user (GET /api/auth/me). */
+export interface Me {
+  username: string
+  role: Role
+}
 
 export interface Question {
   sentence_no: number
@@ -68,12 +80,14 @@ export interface Assessment {
   extraction_model: string
   model_file: string
   model_sha256: string
+  assessed_by?: string | null // null on assessments made before sign-in existed
   created_at: string
 }
 
 export interface Decision {
   decision: DecisionValue
   note: string | null
+  decided_by?: string | null
   created_at: string
 }
 

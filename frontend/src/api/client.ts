@@ -1,6 +1,6 @@
 import type {
   Assessment, Decision, DecisionValue, InterviewState, InterviewSummary,
-  Question, ResponseOut, ResponseQueued, Results,
+  AuthConfig, Me, Question, ResponseOut, ResponseQueued, Results,
 } from './types'
 
 /** No request may leave the dashboard waiting longer than this. */
@@ -21,6 +21,16 @@ export class ApiError extends Error {
     this.retryAfter = retryAfter
     this.timedOut = timedOut
   }
+}
+
+let onUnauthorized: (() => void) | null = null
+
+/** Paths whose 401 is a refused sign-in, shown on the login form, not a lost session. */
+const SIGN_IN_PATHS = new Set(['/auth/login', '/auth/google'])
+
+/** Called on any 401 except a failed sign-in: the session is gone, so go back to login. */
+export function setUnauthorizedHandler(handler: (() => void) | null) {
+  onUnauthorized = handler
 }
 
 /** Abandon the request after timeoutMs, so no screen can spin forever. */
@@ -59,8 +69,11 @@ async function send<T>(path: string, init: RequestInit): Promise<T> {
       }
     }
     const ra = Number(res.headers.get('Retry-After'))
+    // A failed sign-in is a 401 too, but that one belongs to the login form.
+    if (res.status === 401 && !SIGN_IN_PATHS.has(path)) onUnauthorized?.()
     throw new ApiError(res.status, detail, Number.isFinite(ra) && ra > 0 ? ra : null)
   }
+  if (res.status === 204) return null as T
   return await (res.json() as Promise<T>)  // awaited, so the timeout covers the body too
 }
 
@@ -73,6 +86,12 @@ const json = (method: string, body: unknown): RequestInit => ({
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 
 export const api = {
+  me: () => request<Me>('/auth/me'),
+  login: (username: string, password: string) =>
+    request<Me>('/auth/login', json('POST', { username: username.trim(), password })),
+  logout: () => request<null>('/auth/logout', { method: 'POST' }),
+  authConfig: () => request<AuthConfig>('/auth/config'),
+  googleLogin: (credential: string) => request<Me>('/auth/google', json('POST', { credential })),
   questions: () => request<Question[]>('/questions'),
   interviews: () => request<InterviewSummary[]>('/interviews'),
   interview: (id: number) => request<InterviewState>(`/interviews/${id}`),

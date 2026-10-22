@@ -42,15 +42,15 @@ def seed(risk_class, decision=None, completeness=0.5):
         db.commit()
 
 
-def test_missing_summary_is_404(client, summary_path):
-    r = client.get("/api/results")
+def test_missing_summary_is_404(admin_client, summary_path):
+    r = admin_client.get("/api/results")
     assert r.status_code == 404
     assert "scripts/export_results.py" in r.json()["detail"]
 
 
-def test_summary_is_returned_with_live_stats(client, summary_path):
+def test_summary_is_returned_with_live_stats(admin_client, summary_path):
     body = write_summary(summary_path)
-    r = client.get("/api/results")
+    r = admin_client.get("/api/results")
     assert r.status_code == 200
     out = r.json()
     for k, v in body.items():
@@ -61,7 +61,8 @@ def test_summary_is_returned_with_live_stats(client, summary_path):
     assert set(live["decision_agreement"]) == {"rule", "decisions", "agreements", "rate"}
 
 
-def test_live_stats_count_seeded_data(client, summary_path):
+def test_live_stats_count_seeded_data(admin_client, summary_path):
+    client = admin_client
     write_summary(summary_path)
     # The test database is shared across the session, so compare before and after.
     before = client.get("/api/results").json()["live"]

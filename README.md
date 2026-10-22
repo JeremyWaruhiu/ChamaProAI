@@ -249,7 +249,24 @@ uploaded audio in `data/uploads/<interview_id>/`; both are gitignored. Optional
 | GET    | `/api/responses/{id}/audio`        | the stored 16 kHz clip, for replay              |
 | POST   | `/api/interviews/{id}/assess`      | translate, extract, score; stores the assessment |
 | POST   | `/api/interviews/{id}/decision`    | the officer's decision `{decision: approve\|decline\|refer, note?}`, after assessment, once |
-| GET    | `/api/health`                      | classifier, API key, ASR model status           |
+| GET    | `/api/health`                      | classifier, API key, ASR model status (no sign-in needed) |
+| POST   | `/api/auth/login`                  | `{username, password}`; sets the session cookie, returns `{username, role}` |
+| POST   | `/api/auth/google`                 | `{credential}` (Google ID token); signs in the linked user; 404 when not configured |
+| GET    | `/api/auth/config`                 | `{google_client_id}`, null when Google sign-in is off (no sign-in needed) |
+| POST   | `/api/auth/logout`                 | ends the session and clears the cookie          |
+| GET    | `/api/auth/me`                     | `{username, role}` of the signed-in user, or 401 |
+| GET    | `/api/results`                     | model and evaluation summary plus live stats (admin only) |
+
+Every endpoint except `/api/health`, `/api/auth/config` and the sign-in endpoints needs a signed-in
+user: 401 without one, 403 for an officer on an admin-only endpoint. Officers
+and admins may use the interview, response, assessment and decision endpoints;
+only admins may read `/api/results`. Sign-in sets an HttpOnly, SameSite=Strict
+session cookie that lasts 8 hours (Secure except on localhost;
+`CHAMAPRO_COOKIE_SECURE=1` or `0` overrides). Five failed sign-ins for one
+username within 15 minutes lock it out for the rest of that window (429).
+Passwords are stored as salted scrypt hashes and sessions as SHA-256 hashes of
+the token. Each assessment and decision records the username that made it;
+rows from before sign-in existed keep a null there.
 
 An assessment is written once and never changed: it stores the exact feature
 vector the classifier saw, the probabilities, SHAP contributions and the
@@ -258,6 +275,69 @@ written once after the assessment. SQLite triggers reject any UPDATE or DELETE
 on the `assessments` and `decisions` tables. Once an interview is assessed, its
 responses can no longer be added, edited or deleted. Clips are transcribed one at a time, so a full
 interview of 40 clips takes about 20 minutes to clear the queue.
+
+### Users
+
+There are no default users and no passwords in the repository. Create the
+first administrator from the command line; the script asks for the password
+twice and never prints it:
+
+    python scripts/create_user.py admin --role admin
+
+Then add each loan officer (the role defaults to `officer`):
+
+    python scripts/create_user.py wanjiru
+
+Passwords must be at least 10 characters. The script creates the database
+tables if they do not exist yet, so it can run before the API has started.
+
+### Sign in with Google (optional)
+
+Users can also sign in with a Google account, alongside their username and
+password. Google sign-in **only signs in users who already exist** and have that
+Google email linked; it never creates an account. An unlinked or unknown email
+gets the same "incorrect username or password" as a failed password sign-in.
+Without `GOOGLE_CLIENT_ID` the login page shows no Google button at all.
+
+**1. Google Cloud setup** (once, at https://console.cloud.google.com):
+
+1. Create or pick a project.
+2. *Google Auth Platform* (formerly *APIs & Services → OAuth consent screen*):
+   set the app name and support email, choose **External** audience, and leave
+   the publishing status on **Testing**.
+3. Under *Audience → Test users*, add every Google account that will sign in.
+   In Testing mode no other account can.
+4. Under *Clients* (formerly *Credentials*), create an **OAuth client ID** of
+   type **Web application**. Under **Authorised JavaScript origins** add both
+   `http://localhost` and `http://localhost:5173`. No redirect URI is needed:
+   the dashboard uses Google's pop-up.
+5. Copy the client ID (`….apps.googleusercontent.com`). It is not a secret, but
+   it belongs in `.env`, not in the code.
+
+**2. Configure the server.** Add it to `.env` (never committed) and restart
+the API:
+
+    GOOGLE_CLIENT_ID=1234567890-abc….apps.googleusercontent.com
+
+`GET /api/auth/config` then returns it, and the login page shows Google's
+"Sign in with Google" button under the password form.
+
+**3. Link a Google email to a user:**
+
+    python scripts/link_google.py admin you@gmail.com   # link (stored lower-case)
+    python scripts/link_google.py admin                 # show the current link
+    python scripts/link_google.py admin --clear         # unlink
+
+or when creating the user: `python scripts/create_user.py wanjiru --email wanjiru@gmail.com`.
+Each email can be linked to one user. The password stays required, so an
+officer without a Google account, or a branch without internet, can always sign in.
+
+Google sign-in needs internet access in the browser (to load
+`accounts.google.com/gsi/client`) and on the server (to fetch Google's signing
+keys). It requires `email_verified` and checks the audience and issuer, and it
+shares the password login's session, cookie, 8-hour expiry and rate limit (5
+failures per email per 15 minutes). Each session records whether it began with
+a password or with Google.
 
 ### Known limitations
 
@@ -292,8 +372,13 @@ classifier in `models/` (`python scripts/train_and_save.py`), and Node.js
        npm install          # first time only
        npm run dev
 
-4. Open **http://localhost:5173**. Check http://localhost:8000/api/health shows
-   `"status": "ok"`.
+4. **Create a user** the first time (see [Users](#users)):
+
+       python scripts/create_user.py admin --role admin
+
+5. Open **http://localhost:5173** and sign in. Check
+   http://localhost:8000/api/health shows `"status": "ok"`. Admins see a
+   **Model & Evaluation** link in the interview list header; officers do not.
 
 A demo run:
 
