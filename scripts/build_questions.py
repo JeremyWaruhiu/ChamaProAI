@@ -1,9 +1,13 @@
-"""Build src/chamapro/questions.json from docs/interview_questions.txt.
+"""Build question set v1 in src/chamapro/questions.json from docs/interview_questions.txt.
 
-English comes from the text file; each question's domain comes from
-data/manifest.csv so the dashboard groups exactly as the recordings do.
-Kikuyu text already in questions.json is kept, so re-running after editing
-the English never erases a native speaker's translations.
+questions.json holds every question set as one list; each question has id,
+version, topic, order, text_en, text_kik and features (the classifier
+features it is asked for). v1 is the 40-sentence set of the recorded corpus:
+English comes from the text file, each topic from data/manifest.csv so the
+dashboard groups exactly as the recordings do. Later sets (v2) are edited in
+questions.json directly and kept as they are. Kikuyu text already in the
+file is kept, so re-running after editing the English never erases a native
+speaker's translations.
 
     python scripts/build_questions.py
     python scripts/build_questions.py --check   # exit 1 if the JSON is stale
@@ -30,6 +34,9 @@ def parse(text):
     return qs
 
 
+VERSION = "v1"
+
+
 def build(source=SOURCE, manifest=MANIFEST, existing=OUT):
     english = parse(Path(source).read_text(encoding="utf-8"))
     with Path(manifest).open(newline="", encoding="utf-8") as fh:
@@ -38,12 +45,12 @@ def build(source=SOURCE, manifest=MANIFEST, existing=OUT):
     if sorted(english) != sorted(domain):
         raise ValueError(f"questions {sorted(set(english) ^ set(domain))} do not match "
                          "the manifest's sentence numbers")
-    kikuyu = {}
-    if Path(existing).exists():
-        kikuyu = {q["sentence_no"]: q.get("kikuyu", "")
-                  for q in json.loads(Path(existing).read_text(encoding="utf-8"))}
-    return [{"sentence_no": n, "domain": domain[n], "english": english[n],
-             "kikuyu": kikuyu.get(n, "")} for n in sorted(english)]
+    current = json.loads(Path(existing).read_text(encoding="utf-8")) if Path(existing).exists() else []
+    kikuyu = {q["order"]: q.get("text_kik", "") for q in current if q["version"] == VERSION}
+    v1 = [{"id": f"{VERSION}-q{n:02d}", "version": VERSION, "topic": domain[n], "order": n,
+           "text_en": english[n], "text_kik": kikuyu.get(n, ""), "features": []}
+          for n in sorted(english)]
+    return v1 + [q for q in current if q["version"] != VERSION]
 
 
 def render(questions):

@@ -4,6 +4,12 @@ export type ResponseStatus = 'queued' | 'transcribing' | 'transcribed' | 'failed
 export type InterviewStatus = 'open' | 'assessed'
 export type DecisionValue = 'approve' | 'decline' | 'refer'
 export type Role = 'officer' | 'admin'
+export type QuestionSet = 'v1' | 'v2'
+export type Language = 'kik' | 'en'
+export type Mode = 'live' | 'practice'
+export type Source = 'audio' | 'typed'
+export type Sex = 'female' | 'male'
+export type MaritalStatus = 'married' | 'single' | 'widowed' | 'divorced'
 
 /** GET /api/auth/config: what the login page needs before sign-in. */
 export interface AuthConfig {
@@ -17,10 +23,40 @@ export interface Me {
 }
 
 export interface Question {
-  sentence_no: number
-  domain: string
-  english: string
-  kikuyu: string // "" until a native speaker supplies it
+  id: string
+  version: QuestionSet
+  topic: string
+  order: number // a response's sentence_no
+  text_en: string
+  text_kik: string // "" until a native speaker supplies it
+  features: string[] // classifier features the question is asked for
+}
+
+/** Entered by the officer when the interview is created (question set v2). */
+export interface ApplicantForm {
+  age: number
+  sex: Sex
+  education: number // code on the classifier's education ladder, 0-8
+  marital_status: MaritalStatus
+}
+
+export interface Option<T extends string | number = string | number> {
+  value: T
+  label: string
+}
+
+/** GET /api/applicant-form: the form's choices, with the codes the classifier uses. */
+export interface ApplicantFormOptions {
+  sex: Option<Sex>[]
+  education: Option<number>[]
+  marital_status: Option<MaritalStatus>[]
+}
+
+export interface InterviewCreate {
+  applicant_name: string | null
+  applicant: ApplicantForm
+  language: Language
+  mode: Mode
 }
 
 export interface Counts {
@@ -35,6 +71,9 @@ export interface InterviewSummary {
   applicant_name: string | null
   created_at: string
   status: InterviewStatus
+  question_set: QuestionSet
+  language: Language
+  mode: Mode
   responses_recorded: number
   questions_total: number
   counts: Counts
@@ -46,6 +85,7 @@ export interface ResponseOut {
   id: number
   sentence_no: number
   domain: string | null
+  source: Source // typed answers have no audio and skip ASR
   status: ResponseStatus
   error: string | null
   duration_s: number | null
@@ -73,6 +113,7 @@ export interface Assessment {
   feature_vector: Record<string, number | null>
   contributions: Contribution[] | string // string = why SHAP was unavailable
   extracted: Record<string, unknown>
+  applicant_form?: Record<string, unknown> | null // form values merged into the vector
   extraction_completeness: number
   features_populated: number
   features_total: number
@@ -91,11 +132,19 @@ export interface Decision {
   created_at: string
 }
 
+export interface Applicant extends Partial<{ [K in keyof ApplicantForm]: ApplicantForm[K] | null }> {
+  id: number
+  name: string | null
+}
+
 export interface InterviewState {
   id: number
   status: InterviewStatus
+  question_set: QuestionSet
+  language: Language
+  mode: Mode
   created_at: string
-  applicant: { id: number; name: string | null }
+  applicant: Applicant
   counts: Counts
   responses: ResponseOut[]
   assessment: Assessment | null
@@ -181,7 +230,8 @@ export interface AsrComparison extends Section {
 
 export interface LiveStats {
   source: string
-  interview_count: number
+  interview_count: number // live interviews only
+  practice_interview_count?: number
   assessment_count: number
   risk_class_distribution: Record<string, number>
   mean_extraction_completeness: number | null

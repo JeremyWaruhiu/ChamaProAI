@@ -48,6 +48,12 @@ class Applicant(Base):
     __tablename__ = "applicants"
     id: Mapped[int] = mapped_column(primary_key=True)
     name: Mapped[str | None] = mapped_column(String(200))
+    # The applicant form, entered by the officer when the interview is created.
+    # Null on applicants from before the form existed (question set v1).
+    age: Mapped[int | None] = mapped_column(Integer)
+    sex: Mapped[str | None] = mapped_column(String(10))              # female | male
+    education: Mapped[int | None] = mapped_column(Integer)           # 0-8, score_interview.EDU_LADDER
+    marital_status: Mapped[str | None] = mapped_column(String(10))   # married | single | widowed | divorced
     created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
 
 
@@ -56,6 +62,10 @@ class Interview(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     applicant_id: Mapped[int] = mapped_column(ForeignKey("applicants.id"))
     status: Mapped[str] = mapped_column(String(20), default="open")  # open | assessed
+    # Rows from before these existed are v1 / kik / live (see ADDED_COLUMNS).
+    question_set: Mapped[str] = mapped_column(String(8), default="v2")    # v1 | v2
+    language: Mapped[str] = mapped_column(String(8), default="kik")       # kik | en
+    mode: Mapped[str] = mapped_column(String(10), default="live")         # live | practice
     created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
 
     applicant: Mapped[Applicant] = relationship()
@@ -71,8 +81,9 @@ class Response(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     interview_id: Mapped[int] = mapped_column(ForeignKey("interviews.id"), index=True)
     sentence_no: Mapped[int] = mapped_column(Integer)
-    domain: Mapped[str | None] = mapped_column(String(40))
-    audio_path: Mapped[str] = mapped_column(Text)
+    domain: Mapped[str | None] = mapped_column(String(40))   # the question's topic
+    source: Mapped[str] = mapped_column(String(10), default="audio")   # audio | typed
+    audio_path: Mapped[str] = mapped_column(Text)            # "" for a typed answer
     duration_s: Mapped[float | None] = mapped_column(Float)
     status: Mapped[str] = mapped_column(String(20), default="queued")  # queued | transcribed | failed
     error: Mapped[str | None] = mapped_column(Text)
@@ -100,7 +111,9 @@ class Assessment(Base):
     probabilities: Mapped[dict] = mapped_column(JSON)
     feature_vector: Mapped[dict] = mapped_column(JSON)   # feature -> value|null, classifier order
     contributions: Mapped[list | str] = mapped_column(JSON)
-    extracted: Mapped[dict] = mapped_column(JSON)
+    extracted: Mapped[dict] = mapped_column(JSON)            # the extraction model's reply
+    # The applicant form as merged into the vector; null when there was none.
+    applicant_form: Mapped[dict | None] = mapped_column(JSON)
     extraction_completeness: Mapped[float] = mapped_column(Float)
     features_populated: Mapped[int] = mapped_column(Integer)
     features_total: Mapped[int] = mapped_column(Integer)
@@ -182,19 +195,32 @@ def _sqlite_pragmas(dbapi_conn, _):
 
 
 # Columns added after the first release. ADD COLUMN leaves existing rows as
-# they were (NULL) and fires no UPDATE trigger, so immutability holds.
+# they were (NULL, or the DEFAULT given) and fires no UPDATE trigger, so
+# immutability holds. Interviews from before question sets existed are the
+# 40-sentence Kikuyu set, live, with recorded answers: v1 / kik / live / audio.
 ADDED_COLUMNS = [("assessments", "assessed_by", "VARCHAR(64)"),
                  ("decisions", "decided_by", "VARCHAR(64)"),
                  ("users", "email", "VARCHAR(254)"),
-                 ("sessions", "auth_method", "VARCHAR(20)")]
+                 ("sessions", "auth_method", "VARCHAR(20)"),
+                 ("interviews", "question_set", "VARCHAR(8) NOT NULL DEFAULT 'v1'"),
+                 ("interviews", "language", "VARCHAR(8) NOT NULL DEFAULT 'kik'"),
+                 ("interviews", "mode", "VARCHAR(10) NOT NULL DEFAULT 'live'"),
+                 ("applicants", "age", "INTEGER"),
+                 ("applicants", "sex", "VARCHAR(10)"),
+                 ("applicants", "education", "INTEGER"),
+                 ("applicants", "marital_status", "VARCHAR(10)"),
+                 ("responses", "source", "VARCHAR(10) NOT NULL DEFAULT 'audio'"),
+                 ("assessments", "applicant_form", "JSON")]
 # SQLite cannot add a UNIQUE column, so uniqueness comes from an index
 # (the same one create_all makes on a new database).
 ADDED_INDEXES = ["CREATE UNIQUE INDEX IF NOT EXISTS ix_users_email ON users (email)"]
 
 
-def init_db() -> None:
-    Base.metadata.create_all(engine)
-    with engine.begin() as conn:
+def init_db(bind=None) -> None:
+    """Create missing tables and columns; existing rows are kept as they are."""
+    bind = bind if bind is not None else engine
+    Base.metadata.create_all(bind)
+    with bind.begin() as conn:
         for table, column, ddl_type in ADDED_COLUMNS:
             have = {r[1] for r in conn.exec_driver_sql(f"PRAGMA table_info({table})")}
             if column not in have:

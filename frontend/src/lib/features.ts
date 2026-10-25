@@ -69,15 +69,25 @@ const isNum = (v: unknown): v is number => typeof v === 'number' && Number.isFin
 const picked = (o: Obj, names: Record<string, string>) =>
   Object.entries(names).filter(([k]) => Number(o[k]) === 1).map(([, n]) => n)
 
+// Fields the applicant form fills (score_interview.FORM_FIELDS).
+const FORM_FIELDS = new Set(['age', 'is_female', 'education_level', 'marital_status'])
+
 /**
  * What the system heard, as label/value pairs, plus the facts the interview
  * did not give. Flags at 0 are reported as "none mentioned": the extraction
- * prompt sets 0 when a fact was not stated.
+ * prompt sets 0 when a fact was not stated. With an applicant form, the facts
+ * it supplied are listed apart (fromForm), not as heard or as not stated.
  */
-export function extractedFacts(extracted: Obj): { heard: Fact[]; notStated: string[] } {
+export function extractedFacts(extracted: Obj, form?: Obj | null): { heard: Fact[]; notStated: string[]; fromForm: Fact[] } {
   const heard: Fact[] = []
   const notStated: string[] = []
+  const fromForm: Fact[] = []
   const num = (key: string, label: string, fmt: (n: number) => string) => {
+    if (form && FORM_FIELDS.has(key)) {
+      const v = form[key]
+      fromForm.push({ label, value: isNum(v) ? fmt(v) : 'not entered' })
+      return
+    }
     const v = extracted[key]
     if (isNum(v)) heard.push({ label, value: fmt(v) })
     else notStated.push(label)
@@ -113,9 +123,10 @@ export function extractedFacts(extracted: Obj): { heard: Fact[]; notStated: stri
   num('chama_loan_use', 'Chama loans', (n) => LOAN_USE[n] ?? String(n))
   list('lost_as_guarantor', 'Lost money as a guarantor', { sacco: 'SACCO', chama: 'chama' })
   num('education_level', 'Education', (n) => EDUCATION[n] ?? String(n))
-  const marital = extracted.marital_status
-  if (typeof marital === 'string' && marital) heard.push({ label: 'Marital status', value: marital })
+  const marital = (form ?? extracted).marital_status
+  if (form) fromForm.push({ label: 'Marital status', value: typeof marital === 'string' && marital ? marital : 'not entered' })
+  else if (typeof marital === 'string' && marital) heard.push({ label: 'Marital status', value: marital })
   else notStated.push('Marital status')
   num('is_female', 'Sex', (n) => (n === 1 ? 'female' : 'male'))
-  return { heard, notStated }
+  return { heard, notStated, fromForm }
 }

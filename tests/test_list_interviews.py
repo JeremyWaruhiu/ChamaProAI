@@ -1,5 +1,5 @@
 """GET /api/interviews: the dashboard's interview list."""
-from conftest import wait_until
+from conftest import new_interview, wait_until
 
 
 def listed(client, interview_id):
@@ -9,17 +9,18 @@ def listed(client, interview_id):
 
 
 def test_new_interview_is_listed_empty(client, state):
-    iid = client.post("/api/interviews", json={"applicant_name": "Njeri"}).json()["id"]
+    iid = new_interview(client, "Njeri")
     item = listed(client, iid)
     assert item == {"id": iid, "applicant_name": "Njeri",
                     "created_at": state(iid)["created_at"], "status": "open",
-                    "responses_recorded": 0, "questions_total": 40,
+                    "question_set": "v2", "language": "kik", "mode": "live",
+                    "responses_recorded": 0, "questions_total": 8,
                     "counts": {"queued": 0, "transcribing": 0, "transcribed": 0, "failed": 0},
                     "risk_class": None, "decision": None}
 
 
 def test_unnamed_applicant_is_null(client):
-    iid = client.post("/api/interviews").json()["id"]
+    iid = new_interview(client, None)
     assert listed(client, iid)["applicant_name"] is None
 
 
@@ -46,6 +47,6 @@ def test_assessed_interview_shows_risk_class(client, assessed_interview):
 
 
 def test_newest_first(client):
-    ids = [client.post("/api/interviews").json()["id"] for _ in range(3)]
+    ids = [new_interview(client) for _ in range(3)]
     order = [x["id"] for x in client.get("/api/interviews").json()]
     assert [i for i in order if i in ids] == ids[::-1]

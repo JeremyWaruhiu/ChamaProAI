@@ -9,6 +9,7 @@
 .actions { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
 .line { display: flex; align-items: center; gap: 12px; color: var(--ink-2); font-size: 1.05rem; }
 .empty { display: grid; gap: 16px; }
+.typed { display: grid; gap: 10px; }
 
 .recIcon { width: 14px; height: 14px; border-radius: 50%; background: #ff6b5e; box-shadow: 0 0 0 3px rgb(255 255 255 / 25%); }
 

@@ -10,6 +10,12 @@ from pydantic import BaseModel, ConfigDict, Field
 # worker has in hand as "transcribing"; it is still "queued" in the database.
 ResponseStatus = Literal["queued", "transcribing", "transcribed", "failed"]
 InterviewStatus = Literal["open", "assessed"]
+QuestionSet = Literal["v1", "v2"]
+Language = Literal["kik", "en"]
+Mode = Literal["live", "practice"]
+Source = Literal["audio", "typed"]
+Sex = Literal["female", "male"]
+MaritalStatus = Literal["married", "single", "widowed", "divorced"]
 
 
 class ORM(BaseModel):
@@ -20,13 +26,43 @@ class Error(BaseModel):
     detail: str
 
 
+class ApplicantForm(BaseModel):
+    """Entered by the officer; fills age, is_female, education and marital_*
+    directly, so the interview does not ask for them."""
+    age: int = Field(ge=16, le=110)
+    sex: Sex
+    education: int = Field(ge=0, le=8, description="Code from GET /api/applicant-form "
+                                                     "(FinAccess A20 ladder the classifier was trained on)")
+    marital_status: MaritalStatus
+
+
 class InterviewCreate(BaseModel):
     applicant_name: str | None = Field(default=None, max_length=200)
+    applicant: ApplicantForm | None = Field(default=None, description="Required for question set v2")
+    question_set: QuestionSet = Field(default="v2", description="v1 is the 40-sentence set of the recorded corpus")
+    language: Language = "kik"
+    mode: Mode = Field(default="live", description="practice interviews are excluded from live statistics")
 
 
 class InterviewCreated(BaseModel):
     id: int
     status: InterviewStatus
+
+
+class TypedResponse(BaseModel):
+    sentence_no: int = Field(ge=1)
+    text: str = Field(min_length=1, max_length=5000)
+
+
+class Option(BaseModel):
+    value: str | int
+    label: str
+
+
+class ApplicantFormOptions(BaseModel):
+    sex: list[Option]
+    education: list[Option] = Field(description="The classifier's education ladder, in order")
+    marital_status: list[Option]
 
 
 class ResponseQueued(BaseModel):
@@ -51,6 +87,7 @@ class ResponseOut(ORM):
     id: int
     sentence_no: int
     domain: str | None
+    source: Source = Field(description="typed answers skip ASR and have no audio")
     status: ResponseStatus
     error: str | None
     duration_s: float | None
@@ -79,6 +116,8 @@ class AssessmentOut(ORM):
     contributions: list[Contribution] | str = Field(
         description="Top SHAP contributions, or a string saying why unavailable")
     extracted: dict
+    applicant_form: dict | None = Field(default=None, description="Form values merged into the vector; "
+                                                                  "null when the interview had no form")
     extraction_completeness: float
     features_populated: int
     features_total: int
@@ -91,10 +130,13 @@ class AssessmentOut(ORM):
 
 
 class Question(BaseModel):
-    sentence_no: int
-    domain: str
-    english: str
-    kikuyu: str = Field(description="Empty until a native speaker supplies it")
+    id: str
+    version: QuestionSet
+    topic: str
+    order: int = Field(description="Position in its set; a response's sentence_no")
+    text_en: str
+    text_kik: str = Field(description="Empty until a native speaker supplies it")
+    features: list[str] = Field(description="Classifier features the question is asked for")
 
 
 DecisionValue = Literal["approve", "decline", "refer"]
@@ -136,6 +178,10 @@ class Me(ORM):
 class Applicant(ORM):
     id: int
     name: str | None
+    age: int | None = None
+    sex: Sex | None = None
+    education: int | None = None
+    marital_status: MaritalStatus | None = None
 
 
 class Counts(BaseModel):
@@ -150,6 +196,9 @@ class InterviewSummary(BaseModel):
     applicant_name: str | None
     created_at: datetime
     status: InterviewStatus
+    question_set: QuestionSet
+    language: Language
+    mode: Mode
     responses_recorded: int
     questions_total: int
     counts: Counts
@@ -160,12 +209,24 @@ class InterviewSummary(BaseModel):
 class InterviewState(ORM):
     id: int
     status: InterviewStatus
+    question_set: QuestionSet
+    language: Language
+    mode: Mode
     created_at: datetime
     applicant: Applicant
     counts: Counts
     responses: list[ResponseOut]
     assessment: AssessmentOut | None
     decision: DecisionOut | None
+
+
+class AsrStatus(BaseModel):
+    loaded: bool
+    engine: str | None = Field(description="openvino | torch, as actually loaded after any fallback")
+    device: str | None = Field(description="GPU | CPU, as actually loaded after any fallback")
+    model: str | None
+    language: str
+    error: str | None = None
 
 
 class Health(BaseModel):
@@ -175,5 +236,9 @@ class Health(BaseModel):
     asr_model: str
     asr_language: str
     asr_loaded: bool
+    asr_engine: str | None = Field(description="Kikuyu ASR engine actually in use")
+    asr_device: str | None = Field(description="Kikuyu ASR device actually in use")
+    asr_decoding: str
+    asr: dict[str, AsrStatus] = Field(description="Per interview language; English loads on first use")
     extraction_model: str
     classifier: dict | None = Field(description="classifier_meta.json, if present")

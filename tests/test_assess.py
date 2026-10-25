@@ -8,7 +8,9 @@ import pandas as pd
 from chamapro import config
 from chamapro.api import pipeline as pl
 
-from conftest import needs_classifier, wait_until
+from conftest import FORM, needs_classifier, wait_until
+
+FORM_VALUES = {"age": 42, "is_female": 1, "education_level": 4, "marital_status": "married"}
 
 
 def assess(client, interview_id):
@@ -21,11 +23,14 @@ def test_assess_matches_the_pipeline_script(client, gemini, ready_interview):
     assert r.status_code == 201, r.text
     a = r.json()
 
-    expected = pl.score_interview.assess(gemini.features)   # the CLI's code path
+    form = pl.score_interview.form_values(**FORM)
+    assert form == FORM_VALUES
+    expected = pl.score_interview.assess(gemini.features, form=form)   # the CLI's code path
     assert a["risk_class"] == expected["risk_class"]
     assert a["probabilities"] == expected["probabilities"]
     assert a["contributions"] == expected["top_contributions"]
     assert a["extracted"] == expected["extracted"] == gemini.features
+    assert a["applicant_form"] == expected["applicant_form"] == FORM_VALUES
     assert a["extraction_completeness"] == expected["extraction_completeness"]
     assert a["features_populated"] == expected["features_populated"]
     assert a["features_total"] == expected["features_total"]
@@ -101,22 +106,78 @@ def test_only_untranslated_responses_are_sent_again(client, gemini, classifier_s
     assert state(ready_interview)["responses"][1]["translation"] == "english of new words"
 
 
-def test_feature_extraction_receives_numbered_english(client, gemini, classifier_stub,
-                                                      ready_interview, monkeypatch):
+def spy_extraction(monkeypatch, gemini):
+    """Capture the extraction prompts; reply with a non-object so assess stops (502)
+    before scoring, which keeps these tests free of the classifier."""
     seen = []
 
     def spy(prompt, key, model, **kwargs):
         if "JSON array" not in prompt:
-            seen.append(prompt.split("Interview:\n")[1])
-            return json.dumps([])                            # not an object -> 502
+            seen.append(prompt)
+            return json.dumps([])
         return gemini(prompt, key, model, **kwargs)
 
     monkeypatch.setattr(pl.translate_extract, "call", spy)
     monkeypatch.setattr(pl.score_interview, "call", spy)
+    return seen
+
+
+def v2_text(n):
+    return next(q["text_en"] for q in json.loads(config.QUESTIONS_PATH.read_text(encoding="utf-8"))
+                if q["version"] == "v2" and q["order"] == n)
+
+
+def test_each_answer_goes_with_its_question_and_fields(client, gemini, classifier_stub,
+                                                       ready_interview, monkeypatch):
+    seen = spy_extraction(monkeypatch, gemini)
 
     assert assess(client, ready_interview).status_code == 502
-    assert seen == ["\n".join(f"{n}. english of kikuyu response_{rid}_s{n:02d}"
-                              for rid, n in zip(_ids(client, ready_interview), (2, 6, 7)))]
+    ids = _ids(client, ready_interview)
+    fields = {2: "monthly_income_kes", 6: "lost_as_guarantor", 7: "sacco_loan_use"}
+    assert seen[0].split("Interview:\n")[1] == "\n\n".join(
+        f"Q{n} (fields: {fields[n]})\nQuestion: {v2_text(n)}\n"
+        f"Answer: english of kikuyu response_{rid}_s{n:02d}"
+        for rid, n in zip(ids, (2, 6, 7)))
+
+
+def test_form_fields_are_not_asked_for(client, gemini, classifier_stub, ready_interview, monkeypatch):
+    seen = spy_extraction(monkeypatch, gemini)
+    assess(client, ready_interview)
+    prompt = seen[0]
+    for field in ("age", "is_female", "education_level", "marital_status"):
+        assert f'"{field}"' not in prompt
+    assert "Never infer it from a name" not in prompt and "0 none, 1 some primary" not in prompt
+    # the rest of the rules stay
+    assert "Never infer, estimate or\nguess" in prompt and "Record each fact once." in prompt
+    assert "Never duplicate one figure\n    into both fields." in prompt
+    assert '"household_size"' in prompt and '"lost_as_guarantor"' in prompt
+
+
+def test_extraction_runs_at_temperature_zero(monkeypatch):
+    sent = {}
+
+    class Reply:
+        status_code = 200
+        def json(self):
+            return {"candidates": [{"content": {"parts": [{"text": "{}"}]}}]}
+
+    monkeypatch.setattr(pl.score_interview.requests, "post",
+                        lambda url, **kw: sent.update(kw) or Reply())
+    pl.score_interview.extract_features([(1, "I am 42")], key="k", model="m")
+    assert sent["json"]["generationConfig"]["temperature"] == 0
+
+
+def test_v1_interview_without_form_keeps_the_full_prompt(client, gemini, classifier_stub, upload,
+                                                         state, monkeypatch):
+    iid = client.post("/api/interviews", json={"question_set": "v1"}).json()["id"]
+    upload(iid, 2)
+    wait_until(lambda: state(iid)["counts"]["transcribed"] == 1)
+    seen = spy_extraction(monkeypatch, gemini)
+
+    assess(client, iid)
+
+    assert '"age"' in seen[0] and '"marital_status"' in seen[0] and '"is_female"' in seen[0]
+    assert "Question: How old are you?\nAnswer: english of kikuyu" in seen[0]
 
 
 def _ids(client, interview_id):

@@ -22,7 +22,7 @@ pipeline, and the loan officer's dashboard (`frontend/`).
 
 ```
 .env.example                          variable names for secrets (copy to .env)
-requirements.txt                      Python dependencies (CPU-only torch)
+requirements.txt                      Python dependencies, pinned (CPU-only torch, OpenVINO)
 data/
   README.md                           data provenance and how to obtain it
   raw/                                FinAccess .dta goes here (never committed)
@@ -36,12 +36,13 @@ experiments/
   04_borrower_subset/                 SACCO/chama borrowers with loan features
   */results/                          committed JSON summaries; CSVs/logs ignored
 docs/
-  interview_questions.txt             the 40 interviewer questions (DRAFT)
+  interview_questions.txt             question set v1: the 40 sentences of the recorded corpus (DRAFT)
   wireframes/                         Figures 4.8-4.12 of the design chapter
   design_changes.md                   where the dashboard departs from the wireframes, and why
 scripts/                              pipeline stages; each is a CLI and importable
 src/chamapro/config.py                loads .env, exposes keys and paths
-src/chamapro/questions.json           question script served to the dashboard (built from docs/)
+src/chamapro/questions.json           question sets v1 (built from docs/) and v2 (edited here), served to the dashboard
+models/                               classifier and OpenVINO ASR exports (gitignored; see Setup)
 src/chamapro/api/                     FastAPI app over the pipeline (SQLite storage)
 frontend/                             React dashboard (Vite + TypeScript); see frontend/README.md
 tests/                                API and script tests (pytest)
@@ -72,8 +73,23 @@ pip install -e .            # makes src/chamapro importable (needed by the API)
 copy .env.example .env      # then fill in the values
 ```
 
-`requirements.txt` pulls the CPU-only build of PyTorch; no GPU or CUDA is
-needed.
+`requirements.txt` pins the environment the system is tested on, including
+the CPU-only build of PyTorch with its matching torchvision (a mismatched
+torchvision breaks `from transformers import pipeline`;
+`tests/test_environment.py` checks the installed versions against the pins).
+No CUDA is needed.
+
+Speech recognition runs on OpenVINO with int8 weights, on an Intel GPU where
+there is one and on the CPU otherwise. Export the two models once (downloads
+about 3 GB into `.hf_cache/`, writes `models/paza-ov-int8/` and
+`models/whisper-en-ov-int8/`, both gitignored):
+
+```powershell
+python scripts/export_openvino.py              # or --only kik / --only en
+```
+
+Without an export the API falls back to the torch model, which is several
+times slower on a CPU.
 
 ### Environment variables
 
@@ -183,7 +199,10 @@ Place recordings in `data/raw_audio/<SPEAKER>/`, then:
 
 `ingest_audio.py` converts to 16 kHz mono WAV and builds `data/manifest.csv`,
 the index every later stage reads. `transcribe.py` writes ASR hypotheses to
-`data/asr_output.csv`. `translate_extract.py` batches responses into requests
+`data/asr_output.csv`; it takes the same engine settings as the API
+(`--engine openvino|torch`, `--device GPU|CPU`, `--ov-dir`, `--decoding
+timestamps|plain`, `--tokens-per-second`, defaulting to the `ASR_*` variables
+below). `translate_extract.py` batches responses into requests
 of five, retries 429/500/503 with exponential backoff, and writes English
 translations with extracted financial signals to `data/translation_output.csv`.
 
@@ -202,21 +221,94 @@ the cascade actually delivered.
 
 ### Interview questions
 
-`docs/interview_questions.txt` is the single place to edit the question
-wording. After changing it, run
+`src/chamapro/questions.json` holds every question set as one list. Each
+question has `id`, `version`, `topic`, `order`, `text_en`, `text_kik` ("" until a
+native speaker supplies it) and `features`, the classifier features it is asked
+for.
 
-    python scripts/build_questions.py
+- **v2** (current, 8 questions) is what new interviews ask. It is edited in
+  `questions.json` directly. Age, sex, highest education and marital status
+  are not asked: the officer enters them on the **applicant form** when
+  creating the interview (`GET /api/applicant-form` lists the choices with the
+  codes the classifier was trained on). Form plus v2 cover the classifier's 40
+  features exactly once; `tests/test_questions.py` checks it. The main source
+  of income named in answer to question 2 also sets its income-source flag
+  (an extraction rule), but the flags are listed under question 3 only.
+- **v1** (40 sentences) is the set of the recorded corpus, kept so the
+  Kikuyu demo interview and the evaluation still load. Interviews created
+  before question sets existed are v1. `docs/interview_questions.txt` is the
+  single place to edit its wording; after changing it, run
 
-to regenerate `src/chamapro/questions.json`, which the API serves. Domains come
-from the manifest. Kikuyu text already in the JSON is kept, so a native
-speaker's translations survive edits to the English. `--check` reports whether
-the JSON is out of date, and the test suite runs that check.
+      python scripts/build_questions.py
+
+  Domains come from the manifest. Kikuyu text already in the JSON is kept, so
+  a native speaker's translations survive edits to the English, and other sets
+  are left as they are. `--check` reports whether the JSON is out of date, and
+  the test suite runs that check.
+
+Feature extraction sends each answer with its question and the fields that
+question targets, at temperature 0, under the same rules as before: only
+what the applicant stated, nothing inferred, each fact recorded once. Fields
+the applicant form fills are left out of the prompt and merged into the
+feature vector directly; the assessment stores the form values beside the
+extraction model's reply.
 
 ### Environment variables
 
 Set in `.env` (see `.env.example`): `GEMINI_API_KEY`, `GEMINI_MODEL`,
 `ASR_MODEL`, `ASR_LANGUAGE`, `HF_TOKEN`. `ASR_LANGUAGE=sw` uses Swahili as the
 nearest proxy, since Whisper has no Kikuyu token.
+
+| Variable                 | Default                                 | Meaning |
+|--------------------------|-----------------------------------------|---------|
+| `ASR_ENGINE`             | `openvino`                              | `openvino` or `torch` |
+| `ASR_DEVICE`             | `GPU`                                   | `GPU` or `CPU`; OpenVINO falls back to the CPU when there is no usable GPU |
+| `ASR_OV_MODEL_DIR`       | `models/paza-ov-int8`                   | Kikuyu OpenVINO export; if missing, the torch engine runs `ASR_MODEL` |
+| `ASR_MODEL`              | `microsoft/paza-whisper-large-v3-turbo` | Kikuyu torch model |
+| `ASR_EN_OV_MODEL_DIR`    | `models/whisper-en-ov-int8`             | English OpenVINO export (same fallback, to `ASR_EN_MODEL`) |
+| `ASR_EN_MODEL`           | `openai/whisper-large-v3-turbo`         | English torch model |
+| `ASR_DECODING`           | `timestamps`                            | `timestamps` or `plain`; see the ASR benchmark before changing it |
+| `ASR_TOKENS_PER_SECOND`  | `12`                                    | generation cap: `max_new_tokens` = 16 + this × clip seconds |
+
+Every transcription keeps the decoding safeguards: `condition_on_prev_tokens`
+off, and with timestamped decoding any chunk that starts after the clip's end
+is dropped. The token cap stops a run-on continuation from being generated in
+the first place. The server logs which engine and device it ended up on, and
+`/api/health` reports them (`asr_engine`, `asr_device`, and `asr` per
+language).
+
+### ASR benchmark
+
+    python scripts/benchmark_asr.py            # all 40 clips; about 45 minutes, most of it torch CPU
+    python scripts/benchmark_asr.py --runs openvino:GPU --limit 5
+
+Runs the 40 manifest clips under torch CPU, OpenVINO CPU int8 and OpenVINO GPU
+int8, each with (a) timestamped decoding + end-of-clip truncation + token cap
+and (b) plain decoding + token cap. It records total and mean real-time factor
+(ASR seconds per audio second), the repetition-collapse count (the rule in
+`scripts/view_results.py`) and character-level agreement with
+`data/asr_paza.csv`. Per-clip transcripts go to `data/asr_benchmark/`
+(gitignored); only aggregates go to `results/asr_benchmark.json`. A run that
+cannot load its engine or device is recorded as skipped, never silently
+measured on another.
+
+Results on this machine (Intel Core Ultra 7 256V CPU, integrated "Intel(R) Graphics [0x64a0]" GPU as OpenVINO reports it; 40 clips,
+217 s of audio; `results/asr_benchmark.json`):
+
+| Engine   | Device | Decoding   | Total RTF | Mean RTF | Collapsed | Agreement (mean) | Exact |
+|----------|--------|------------|----------:|---------:|----------:|-----------------:|------:|
+| torch    | CPU    | timestamps | 3.73 | 3.90 | 0 | 0.913 | 34 |
+| torch    | CPU    | plain      | 3.53 | 3.69 | 0 | 0.329 | 0 |
+| OpenVINO | CPU    | timestamps | 1.08 | 1.14 | 0 | 0.845 | 22 |
+| OpenVINO | CPU    | plain      | 1.69 | 1.72 | 0 | 0.305 | 0 |
+| OpenVINO | GPU    | timestamps | 0.44 | 0.45 | 0 | 0.825 | 22 |
+| OpenVINO | GPU    | plain      | 0.47 | 0.47 | 0 | 0.303 | 0 |
+
+Agreement is similarity to the earlier uncapped torch run, not accuracy: the
+six torch-timestamps clips that differ are exactly the six whose reference
+ran on past the speech, where the cap cut the continuation short. Plain
+decoding keeps generating after the speech ends, up to the cap. The default
+stays `timestamps` until a decision is made on these figures.
 
 To isolate translation quality from transcription error, run
 `translate_extract.py --source ref`, which reads `kikuyu_ref` from the manifest
@@ -232,30 +324,34 @@ writes Python files into `.hf_cache/`, and the server also writes to `data/`;
 a plain `--reload` sees those writes, restarts, reloads the model and loops
 forever, so the dashboard never gets an answer.
 
-Interactive docs at http://localhost:8000/docs. Startup loads `ASR_MODEL` once,
-which takes a minute on CPU. State lives in `data/chamapro.db` (SQLite) and
+Interactive docs at http://localhost:8000/docs. Startup loads the Kikuyu ASR
+model once (about 15 s for the OpenVINO GPU export, a minute for torch on
+CPU); the English model loads the first time an English answer is
+transcribed. State lives in `data/chamapro.db` (SQLite) and
 uploaded audio in `data/uploads/<interview_id>/`; both are gitignored. Optional
 `CHAMAPRO_DB` and `CHAMAPRO_UPLOADS` move them elsewhere.
 
 | Method | Path                               | Purpose                                         |
 |--------|------------------------------------|-------------------------------------------------|
-| POST   | `/api/interviews`                  | start an interview `{applicant_name?}`          |
-| GET    | `/api/questions`                   | the 40-question script (`kikuyu` is "" until supplied) |
+| POST   | `/api/interviews`                  | start an interview `{applicant_name?, applicant: {age, sex, education, marital_status}, language?: kik\|en, mode?: live\|practice, question_set?: v2\|v1}`; the form is required for v2 |
+| GET    | `/api/questions?version=v2`        | one question set, in order (`text_kik` is "" until supplied) |
+| GET    | `/api/applicant-form`              | the applicant form's choices, with the classifier's codes |
 | GET    | `/api/interviews`                  | all interviews, newest first, with response counts, risk class and decision |
 | POST   | `/api/interviews/{id}/responses`   | upload one clip (`file`, `sentence_no`); 202, transcribed in the background |
+| POST   | `/api/interviews/{id}/responses/typed` | a typed answer `{sentence_no, text}`; `source: "typed"`, no audio, no ASR, ready for review |
 | GET    | `/api/interviews/{id}`             | full state; the dashboard polls this            |
 | PATCH  | `/api/responses/{id}`              | correct a transcript `{transcript}` before assessment |
 | DELETE | `/api/responses/{id}`              | discard a clip so its sentence can be re-recorded; 409 while it is being transcribed |
 | GET    | `/api/responses/{id}/audio`        | the stored 16 kHz clip, for replay              |
-| POST   | `/api/interviews/{id}/assess`      | translate, extract, score; stores the assessment |
+| POST   | `/api/interviews/{id}/assess`      | translate (Kikuyu only), extract, score; stores the assessment |
 | POST   | `/api/interviews/{id}/decision`    | the officer's decision `{decision: approve\|decline\|refer, note?}`, after assessment, once |
-| GET    | `/api/health`                      | classifier, API key, ASR model status (no sign-in needed) |
+| GET    | `/api/health`                      | classifier, API key, ASR engine/device/model per language (no sign-in needed) |
 | POST   | `/api/auth/login`                  | `{username, password}`; sets the session cookie, returns `{username, role}` |
 | POST   | `/api/auth/google`                 | `{credential}` (Google ID token); signs in the linked user; 404 when not configured |
 | GET    | `/api/auth/config`                 | `{google_client_id}`, null when Google sign-in is off (no sign-in needed) |
 | POST   | `/api/auth/logout`                 | ends the session and clears the cookie          |
 | GET    | `/api/auth/me`                     | `{username, role}` of the signed-in user, or 401 |
-| GET    | `/api/results`                     | model and evaluation summary plus live stats (admin only) |
+| GET    | `/api/results`                     | model and evaluation summary plus live stats, practice interviews excluded (admin only) |
 
 Every endpoint except `/api/health`, `/api/auth/config` and the sign-in endpoints needs a signed-in
 user: 401 without one, 403 for an officer on an admin-only endpoint. Officers
@@ -273,8 +369,20 @@ vector the classifier saw, the probabilities, SHAP contributions and the
 classifier's filename and SHA-256. The officer's decision is a separate record,
 written once after the assessment. SQLite triggers reject any UPDATE or DELETE
 on the `assessments` and `decisions` tables. Once an interview is assessed, its
-responses can no longer be added, edited or deleted. Clips are transcribed one at a time, so a full
-interview of 40 clips takes about 20 minutes to clear the queue.
+responses can no longer be added, edited or deleted. Clips are transcribed one
+at a time, in the background.
+
+**Interview options.** An interview's `language` is `kik` (Kikuyu answers,
+transcribed by Paza and translated to English before extraction) or `en`
+(English answers, transcribed by the English model with language `en`, and
+not translated). Its `mode` is `live` or `practice`: a practice interview
+works the same way, but every dashboard screen of it shows a practice banner,
+its decision is labelled practice, and it is left out of every live figure
+on the Model & Evaluation page. Any answer can be typed instead of recorded.
+
+The database is migrated in place at startup: existing interviews become
+`v1`, `kik`, `live`, existing responses `audio`, and nothing else changes
+(ADD COLUMN only, so the immutability triggers are untouched).
 
 ### Users
 
@@ -342,11 +450,16 @@ a password or with Google.
 ### Known limitations
 
 - Corpus is 40 responses from one speaker; no speaker-independent claim holds.
-- ASR runs at 1.9x real time on CPU; the five-minute performance target applies
-  to the typed-input path only.
+- ASR speed depends on the engine: see the ASR benchmark above. With the
+  torch engine on a CPU it runs slower than real time.
 - Decoder repetition collapse affects ~10% of clips.
 - Cascade yield is 62.5%; asset-ownership responses currently yield nothing.
 - Feature extraction requires connectivity; capture and typed entry do not.
+- Question set v2 has no Kikuyu wording yet (`text_kik` is ""); the dashboard
+  shows the English until a native speaker supplies it.
+- v2 question 4 asks about stored grain and household goods, which have no
+  classifier feature; jewellery, digital assets and agroforestry (F1__3-5)
+  are recorded only if the applicant mentions them.
 
 ## Running the full system for a demo
 
@@ -354,9 +467,9 @@ Prerequisites: setup above, a `.env` with `GEMINI_API_KEY`, the trained
 classifier in `models/` (`python scripts/train_and_save.py`), and Node.js
 20.19 or later for the dashboard.
 
-1. **Seed the demo interview** (about a second, no model needed):
+1. **Seed the demo interviews** (about a second, no model needed):
 
-       python scripts/seed_demo.py
+       python scripts/seed_demo.py                  # --practice-only without the audio corpus
 
 2. **Start the backend** in one terminal. It loads the speech model, which
    takes about a minute. Wait for `Application startup complete`.
@@ -388,9 +501,14 @@ A demo run:
 - Press **Run assessment**. Translation and scoring take about half a minute
   and need internet access for Gemini.
 - On the assessment, record the officer's decision.
-- To show live recording, start a **New interview** and record an answer with
-  the laptop microphone. It is transcribed in the background in about 35 s
-  while you move to the next question.
+- Open **Practice: Mary Wambui (fictional)** for an English practice
+  interview: the applicant form is filled in and all eight answers are typed,
+  so it can be assessed at once. Every screen of it shows the practice
+  banner, and it does not count in the live statistics.
+- To show live recording, start a **New interview**, fill in the applicant
+  form and record an answer with the laptop microphone. It is transcribed in
+  the background while you move to the next question; any answer can be
+  typed instead.
 
 Run `seed_demo.py` again before the next demo. An assessed demo cannot be
 changed, so the script then starts a fresh one. See
@@ -400,10 +518,14 @@ changed, so the script then starts a fresh one. See
 
     python scripts/seed_demo.py
 
-Creates one open interview holding all 40 S01 responses, marked transcribed,
-from `data/asr_paza.csv` and `data/audio_16k/`, so a full interview can be
-reviewed and assessed without an hour of transcription. Takes about a second
-and needs no model. Safe to re-run: it changes nothing if the demo is
-complete, restores any response deleted for re-recording, and starts a fresh
-demo once the previous one has been assessed. Audio is copied into
-`data/uploads/`, so re-recording in the dashboard never touches the corpus.
+Creates one open interview holding all 40 S01 responses (question set v1,
+Kikuyu, live), marked transcribed, from `data/asr_paza.csv` and
+`data/audio_16k/`, so a full interview can be reviewed and assessed without
+an hour of transcription. It also creates an English practice interview
+(question set v2) for a fictional applicant, with the applicant form filled
+in and all eight answers typed; `--practice-only` creates just that one, for
+a machine without the audio corpus. Takes about a second and needs no model.
+Safe to re-run: it changes nothing if both are complete, restores any
+response deleted for re-recording, and starts a fresh one once the previous
+one has been assessed. Audio is copied into `data/uploads/`, so re-recording
+in the dashboard never touches the corpus.

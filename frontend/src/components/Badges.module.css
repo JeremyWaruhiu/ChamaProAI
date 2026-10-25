@@ -10,6 +10,7 @@
 .transcribing { color: var(--green-700); background: var(--green-100); border-color: var(--green-200); }
 .transcribed { color: var(--white); background: var(--green-600); border-color: var(--green-600); }
 .failed { color: var(--high); background: var(--high-bg); border-color: var(--high-line); }
+.typed { color: var(--green-800); background: var(--white); border-color: var(--green-600); }
 .edited { color: var(--medium); background: var(--medium-bg); border-color: var(--medium-line); }
 
 .pulse {

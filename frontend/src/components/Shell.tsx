@@ -17,10 +17,12 @@ interface Props {
   /** Interview screens show the back link and the three-step flow. */
   interviewId?: number
   step?: Step
+  /** A practice interview: every screen of it says so. */
+  practice?: boolean
   children: ReactNode
 }
 
-export function Shell({ title, aside, interviewId, step, children }: Props) {
+export function Shell({ title, aside, interviewId, step, practice, children }: Props) {
   return (
     <>
       <header className={styles.bar}>
@@ -49,8 +51,20 @@ export function Shell({ title, aside, interviewId, step, children }: Props) {
           </div>
         </nav>
       )}
+      {practice && <PracticeBanner />}
       <main className={styles.main}>{children}</main>
     </>
+  )
+}
+
+export function PracticeBanner() {
+  return (
+    <div className={styles.practice} role="note">
+      <p className={styles.practiceInner}>
+        <strong>Practice interview.</strong> For training only: not a real application. Its results are
+        left out of the live statistics and its decision is labelled practice.
+      </p>
+    </div>
   )
 }
 

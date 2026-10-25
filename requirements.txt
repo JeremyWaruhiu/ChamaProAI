@@ -1,8 +1,21 @@
-# CPU-only torch. The --index-url line makes the intent explicit: no CUDA build.
+# Pinned to the working environment. torch and torchvision must be a matched
+# pair from the CPU wheel index: a mismatched torchvision breaks
+# `from transformers import pipeline` (tests/test_environment.py checks this).
 --extra-index-url https://download.pytorch.org/whl/cpu
-torch>=2.3,<3
+torch==2.14.1+cpu
+torchvision==0.29.1+cpu
 
-transformers>=4.44,<5
+transformers==4.57.6
+numpy==2.4.6
+
+# --- ASR on OpenVINO (scripts/transcribe.py, scripts/export_openvino.py) ---
+openvino==2026.4.1
+openvino-tokenizers==2026.4.1.0   # tokenizer IR written by the optimum-cli export
+optimum==2.3.0
+optimum-intel==2.2.0
+nncf==3.4.0                       # int8 weight compression at export
+rapidfuzz                         # character similarity in scripts/benchmark_asr.py
+
 datasets>=2.20
 sentencepiece            # NLLB tokenizer backend
 sacrebleu>=2.4

@@ -35,8 +35,26 @@ KHAYA_API_KEY: str | None = os.getenv("KHAYA_API_KEY") or None
 GEMINI_API_KEY: str | None = os.getenv("GEMINI_API_KEY") or GOOGLE_API_KEY
 # None lets each pipeline stage fall back to its own default model.
 GEMINI_MODEL: str | None = os.getenv("GEMINI_MODEL") or None
-ASR_MODEL: str = os.getenv("ASR_MODEL") or "openai/whisper-small"
+def _project_path(value: str) -> Path:
+    """A path from .env; relative ones are taken from the project root."""
+    p = Path(value)
+    return p if p.is_absolute() else PROJECT_ROOT / p
+
+
+# Kikuyu interviews. ASR_MODEL is the torch model, used when the OpenVINO
+# export (scripts/export_openvino.py) is missing or ASR_ENGINE=torch.
+ASR_MODEL: str = os.getenv("ASR_MODEL") or "microsoft/paza-whisper-large-v3-turbo"
 ASR_LANGUAGE: str = os.getenv("ASR_LANGUAGE") or "sw"
+ASR_ENGINE: str = (os.getenv("ASR_ENGINE") or "openvino").lower()       # openvino | torch
+ASR_DEVICE: str = (os.getenv("ASR_DEVICE") or "GPU").upper()            # GPU | CPU (falls back to CPU)
+ASR_OV_MODEL_DIR: Path = _project_path(os.getenv("ASR_OV_MODEL_DIR") or "models/paza-ov-int8")
+# timestamps | plain; see scripts/benchmark_asr.py before changing it.
+ASR_DECODING: str = (os.getenv("ASR_DECODING") or "timestamps").lower()
+# Generation cap per second of audio; None keeps transcribe.TOKENS_PER_SECOND.
+ASR_TOKENS_PER_SECOND: float | None = float(os.getenv("ASR_TOKENS_PER_SECOND") or 0) or None
+# English interviews: same engine and device settings, loaded on first use.
+ASR_EN_MODEL: str = os.getenv("ASR_EN_MODEL") or "openai/whisper-large-v3-turbo"
+ASR_EN_OV_MODEL_DIR: Path = _project_path(os.getenv("ASR_EN_OV_MODEL_DIR") or "models/whisper-en-ov-int8")
 
 SCRIPTS_DIR = PROJECT_ROOT / "scripts"
 # Built from docs/interview_questions.txt by scripts/build_questions.py

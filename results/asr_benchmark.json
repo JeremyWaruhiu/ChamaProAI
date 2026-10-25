@@ -1,0 +1,151 @@
+{
+  "generated_at": "2026-10-23T02:17:31+00:00",
+  "generator": "scripts/benchmark_asr.py",
+  "clips": 40,
+  "audio_seconds": 217.02,
+  "settings": {
+    "model": "microsoft/paza-whisper-large-v3-turbo",
+    "ov_dir": "models/paza-ov-int8",
+    "language": "sw",
+    "tokens_per_second": 12.0,
+    "tokens_base": 16,
+    "max_new_tokens_ceiling": 440
+  },
+  "definitions": {
+    "timestamps": "timestamped decoding; chunks starting at or after the clip end dropped; max_new_tokens = tokens_base + tokens_per_second * clip seconds",
+    "plain": "plain decoding (no timestamps); same max_new_tokens cap",
+    "total_rtf": "sum of ASR seconds / sum of audio seconds (below 1 is faster than real time)",
+    "mean_rtf": "mean of per-clip ASR seconds / clip seconds",
+    "timing": "wall clock per clip, model already loaded, after one uncounted warm-up clip",
+    "collapse_count": "more than 6 words and under 35% distinct (scripts/view_results.py)",
+    "agreement": "character-level similarity to data/asr_paza.csv, 1 - Levenshtein distance / longer length, after case-folding and collapsing whitespace",
+    "reference": "data/asr_paza.csv: torch, timestamped decoding with end-of-clip truncation and no token cap"
+  },
+  "reference": {
+    "file": "data/asr_paza.csv",
+    "n": 40,
+    "collapse_count": 0
+  },
+  "environment": {
+    "platform": "Linux-6.18.54.1-microsoft-standard-WSL2-x86_64-with-glibc2.39",
+    "cpu_count": 8,
+    "openvino_devices": {
+      "CPU": "Intel(R) Core(TM) Ultra 7 256V",
+      "GPU": "Intel(R) Graphics [0x64a0] (iGPU)"
+    },
+    "packages": {
+      "python": "3.12.3",
+      "torch": "2.14.1+cpu",
+      "transformers": "4.57.6",
+      "openvino": "2026.4.1",
+      "optimum-intel": "2.2.0",
+      "optimum": "2.3.0",
+      "nncf": "3.4.0",
+      "numpy": "2.4.6"
+    }
+  },
+  "runs": {
+    "torch:CPU": {
+      "timestamps": {
+        "n": 40,
+        "audio_seconds": 217.02,
+        "asr_seconds": 808.93,
+        "total_rtf": 3.7274,
+        "mean_rtf": 3.8985,
+        "collapse_count": 0,
+        "empty_count": 1,
+        "agreement_n": 40,
+        "agreement_mean": 0.9129,
+        "agreement_median": 1.0,
+        "agreement_min": 0.3262,
+        "exact_matches": 34,
+        "load_seconds": 13.48,
+        "model": "microsoft/paza-whisper-large-v3-turbo"
+      },
+      "plain": {
+        "n": 40,
+        "audio_seconds": 217.02,
+        "asr_seconds": 765.8,
+        "total_rtf": 3.5287,
+        "mean_rtf": 3.6895,
+        "collapse_count": 0,
+        "empty_count": 0,
+        "agreement_n": 40,
+        "agreement_mean": 0.329,
+        "agreement_median": 0.2857,
+        "agreement_min": 0.0,
+        "exact_matches": 0,
+        "load_seconds": 13.48,
+        "model": "microsoft/paza-whisper-large-v3-turbo"
+      }
+    },
+    "openvino:CPU": {
+      "timestamps": {
+        "n": 40,
+        "audio_seconds": 217.02,
+        "asr_seconds": 234.74,
+        "total_rtf": 1.0817,
+        "mean_rtf": 1.1351,
+        "collapse_count": 0,
+        "empty_count": 1,
+        "agreement_n": 40,
+        "agreement_mean": 0.8452,
+        "agreement_median": 1.0,
+        "agreement_min": 0.2423,
+        "exact_matches": 22,
+        "load_seconds": 5.4,
+        "model": "/home/jeremy/ChamaProAI/models/paza-ov-int8"
+      },
+      "plain": {
+        "n": 40,
+        "audio_seconds": 217.02,
+        "asr_seconds": 366.11,
+        "total_rtf": 1.687,
+        "mean_rtf": 1.7186,
+        "collapse_count": 0,
+        "empty_count": 0,
+        "agreement_n": 40,
+        "agreement_mean": 0.3048,
+        "agreement_median": 0.2942,
+        "agreement_min": 0.0,
+        "exact_matches": 0,
+        "load_seconds": 5.4,
+        "model": "/home/jeremy/ChamaProAI/models/paza-ov-int8"
+      }
+    },
+    "openvino:GPU": {
+      "timestamps": {
+        "n": 40,
+        "audio_seconds": 217.02,
+        "asr_seconds": 94.33,
+        "total_rtf": 0.4347,
+        "mean_rtf": 0.4498,
+        "collapse_count": 0,
+        "empty_count": 1,
+        "agreement_n": 40,
+        "agreement_mean": 0.8247,
+        "agreement_median": 1.0,
+        "agreement_min": 0.1209,
+        "exact_matches": 22,
+        "load_seconds": 2.54,
+        "model": "/home/jeremy/ChamaProAI/models/paza-ov-int8"
+      },
+      "plain": {
+        "n": 40,
+        "audio_seconds": 217.02,
+        "asr_seconds": 100.87,
+        "total_rtf": 0.4648,
+        "mean_rtf": 0.4744,
+        "collapse_count": 0,
+        "empty_count": 0,
+        "agreement_n": 40,
+        "agreement_mean": 0.3032,
+        "agreement_median": 0.2849,
+        "agreement_min": 0.0,
+        "exact_matches": 0,
+        "load_seconds": 2.54,
+        "model": "/home/jeremy/ChamaProAI/models/paza-ov-int8"
+      }
+    }
+  }
+}

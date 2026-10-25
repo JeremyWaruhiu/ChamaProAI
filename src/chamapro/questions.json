@@ -1,242 +1,475 @@
 [
   {
-    "sentence_no": 1,
-    "domain": "household",
-    "english": "What is your name, and where do you live?",
-    "kikuyu": ""
+    "id": "v1-q01",
+    "version": "v1",
+    "topic": "household",
+    "order": 1,
+    "text_en": "What is your name, and where do you live?",
+    "text_kik": "",
+    "features": []
   },
   {
-    "sentence_no": 2,
-    "domain": "household",
-    "english": "How old are you?",
-    "kikuyu": ""
+    "id": "v1-q02",
+    "version": "v1",
+    "topic": "household",
+    "order": 2,
+    "text_en": "How old are you?",
+    "text_kik": "",
+    "features": []
   },
   {
-    "sentence_no": 3,
-    "domain": "household",
-    "english": "How many people live in your household?",
-    "kikuyu": ""
+    "id": "v1-q03",
+    "version": "v1",
+    "topic": "household",
+    "order": 3,
+    "text_en": "How many people live in your household?",
+    "text_kik": "",
+    "features": []
   },
   {
-    "sentence_no": 4,
-    "domain": "household",
-    "english": "How many children do you have, and how many of them are in school?",
-    "kikuyu": ""
+    "id": "v1-q04",
+    "version": "v1",
+    "topic": "household",
+    "order": 4,
+    "text_en": "How many children do you have, and how many of them are in school?",
+    "text_kik": "",
+    "features": []
   },
   {
-    "sentence_no": 5,
-    "domain": "household",
-    "english": "How long have you lived in this village?",
-    "kikuyu": ""
+    "id": "v1-q05",
+    "version": "v1",
+    "topic": "household",
+    "order": 5,
+    "text_en": "How long have you lived in this village?",
+    "text_kik": "",
+    "features": []
   },
   {
-    "sentence_no": 6,
-    "domain": "income",
-    "english": "What are your main sources of income?",
-    "kikuyu": ""
+    "id": "v1-q06",
+    "version": "v1",
+    "topic": "income",
+    "order": 6,
+    "text_en": "What are your main sources of income?",
+    "text_kik": "",
+    "features": []
   },
   {
-    "sentence_no": 7,
-    "domain": "income",
-    "english": "About how much do you earn in a month?",
-    "kikuyu": ""
+    "id": "v1-q07",
+    "version": "v1",
+    "topic": "income",
+    "order": 7,
+    "text_en": "About how much do you earn in a month?",
+    "text_kik": "",
+    "features": []
   },
   {
-    "sentence_no": 8,
-    "domain": "income",
-    "english": "How regular is this income? Does it change with the seasons?",
-    "kikuyu": ""
+    "id": "v1-q08",
+    "version": "v1",
+    "topic": "income",
+    "order": 8,
+    "text_en": "How regular is this income? Does it change with the seasons?",
+    "text_kik": "",
+    "features": []
   },
   {
-    "sentence_no": 9,
-    "domain": "income",
-    "english": "Are there months when you earn little or nothing?",
-    "kikuyu": ""
+    "id": "v1-q09",
+    "version": "v1",
+    "topic": "income",
+    "order": 9,
+    "text_en": "Are there months when you earn little or nothing?",
+    "text_kik": "",
+    "features": []
   },
   {
-    "sentence_no": 10,
-    "domain": "income",
-    "english": "Does anyone else in your household bring in money?",
-    "kikuyu": ""
+    "id": "v1-q10",
+    "version": "v1",
+    "topic": "income",
+    "order": 10,
+    "text_en": "Does anyone else in your household bring in money?",
+    "text_kik": "",
+    "features": []
   },
   {
-    "sentence_no": 11,
-    "domain": "expenditure",
-    "english": "What are your main monthly expenses?",
-    "kikuyu": ""
+    "id": "v1-q11",
+    "version": "v1",
+    "topic": "expenditure",
+    "order": 11,
+    "text_en": "What are your main monthly expenses?",
+    "text_kik": "",
+    "features": []
   },
   {
-    "sentence_no": 12,
-    "domain": "expenditure",
-    "english": "Do you have school fees? How much of your money do they take?",
-    "kikuyu": ""
+    "id": "v1-q12",
+    "version": "v1",
+    "topic": "expenditure",
+    "order": 12,
+    "text_en": "Do you have school fees? How much of your money do they take?",
+    "text_kik": "",
+    "features": []
   },
   {
-    "sentence_no": 13,
-    "domain": "expenditure",
-    "english": "What do you pay each month for electricity or other utilities?",
-    "kikuyu": ""
+    "id": "v1-q13",
+    "version": "v1",
+    "topic": "expenditure",
+    "order": 13,
+    "text_en": "What do you pay each month for electricity or other utilities?",
+    "text_kik": "",
+    "features": []
   },
   {
-    "sentence_no": 14,
-    "domain": "expenditure",
-    "english": "How often do you buy inputs for your farm or animals, such as feed?",
-    "kikuyu": ""
+    "id": "v1-q14",
+    "version": "v1",
+    "topic": "expenditure",
+    "order": 14,
+    "text_en": "How often do you buy inputs for your farm or animals, such as feed?",
+    "text_kik": "",
+    "features": []
   },
   {
-    "sentence_no": 15,
-    "domain": "expenditure",
-    "english": "What happens to your spending when someone in the family falls sick?",
-    "kikuyu": ""
+    "id": "v1-q15",
+    "version": "v1",
+    "topic": "expenditure",
+    "order": 15,
+    "text_en": "What happens to your spending when someone in the family falls sick?",
+    "text_kik": "",
+    "features": []
   },
   {
-    "sentence_no": 16,
-    "domain": "assets",
-    "english": "Do you own any livestock? How many animals?",
-    "kikuyu": ""
+    "id": "v1-q16",
+    "version": "v1",
+    "topic": "assets",
+    "order": 16,
+    "text_en": "Do you own any livestock? How many animals?",
+    "text_kik": "",
+    "features": []
   },
   {
-    "sentence_no": 17,
-    "domain": "assets",
-    "english": "Do you own land? How much?",
-    "kikuyu": ""
+    "id": "v1-q17",
+    "version": "v1",
+    "topic": "assets",
+    "order": 17,
+    "text_en": "Do you own land? How much?",
+    "text_kik": "",
+    "features": []
   },
   {
-    "sentence_no": 18,
-    "domain": "assets",
-    "english": "Is the land registered? Whose name is on the title deed?",
-    "kikuyu": ""
+    "id": "v1-q18",
+    "version": "v1",
+    "topic": "assets",
+    "order": 18,
+    "text_en": "Is the land registered? Whose name is on the title deed?",
+    "text_kik": "",
+    "features": []
   },
   {
-    "sentence_no": 19,
-    "domain": "assets",
-    "english": "What equipment do you use in your work?",
-    "kikuyu": ""
+    "id": "v1-q19",
+    "version": "v1",
+    "topic": "assets",
+    "order": 19,
+    "text_en": "What equipment do you use in your work?",
+    "text_kik": "",
+    "features": []
   },
   {
-    "sentence_no": 20,
-    "domain": "assets",
-    "english": "What is your house built of?",
-    "kikuyu": ""
+    "id": "v1-q20",
+    "version": "v1",
+    "topic": "assets",
+    "order": 20,
+    "text_en": "What is your house built of?",
+    "text_kik": "",
+    "features": []
   },
   {
-    "sentence_no": 21,
-    "domain": "debt_repayment",
-    "english": "Have you borrowed money in the last year or two? How much?",
-    "kikuyu": ""
+    "id": "v1-q21",
+    "version": "v1",
+    "topic": "debt_repayment",
+    "order": 21,
+    "text_en": "Have you borrowed money in the last year or two? How much?",
+    "text_kik": "",
+    "features": []
   },
   {
-    "sentence_no": 22,
-    "domain": "debt_repayment",
-    "english": "Have you finished repaying that loan?",
-    "kikuyu": ""
+    "id": "v1-q22",
+    "version": "v1",
+    "topic": "debt_repayment",
+    "order": 22,
+    "text_en": "Have you finished repaying that loan?",
+    "text_kik": "",
+    "features": []
   },
   {
-    "sentence_no": 23,
-    "domain": "debt_repayment",
-    "english": "Do you owe money to anyone at the moment?",
-    "kikuyu": ""
+    "id": "v1-q23",
+    "version": "v1",
+    "topic": "debt_repayment",
+    "order": 23,
+    "text_en": "Do you owe money to anyone at the moment?",
+    "text_kik": "",
+    "features": []
   },
   {
-    "sentence_no": 24,
-    "domain": "debt_repayment",
-    "english": "Have you ever been unable to repay a loan?",
-    "kikuyu": ""
+    "id": "v1-q24",
+    "version": "v1",
+    "topic": "debt_repayment",
+    "order": 24,
+    "text_en": "Have you ever been unable to repay a loan?",
+    "text_kik": "",
+    "features": []
   },
   {
-    "sentence_no": 25,
-    "domain": "debt_repayment",
-    "english": "Were you always able to repay on time? If not, what happened?",
-    "kikuyu": ""
+    "id": "v1-q25",
+    "version": "v1",
+    "topic": "debt_repayment",
+    "order": 25,
+    "text_en": "Were you always able to repay on time? If not, what happened?",
+    "text_kik": "",
+    "features": []
   },
   {
-    "sentence_no": 26,
-    "domain": "sacco_history",
-    "english": "How long have you been a SACCO member?",
-    "kikuyu": ""
+    "id": "v1-q26",
+    "version": "v1",
+    "topic": "sacco_history",
+    "order": 26,
+    "text_en": "How long have you been a SACCO member?",
+    "text_kik": "",
+    "features": []
   },
   {
-    "sentence_no": 27,
-    "domain": "sacco_history",
-    "english": "How much do you save, and how often?",
-    "kikuyu": ""
+    "id": "v1-q27",
+    "version": "v1",
+    "topic": "sacco_history",
+    "order": 27,
+    "text_en": "How much do you save, and how often?",
+    "text_kik": "",
+    "features": []
   },
   {
-    "sentence_no": 28,
-    "domain": "sacco_history",
-    "english": "Have you borrowed from the SACCO before?",
-    "kikuyu": ""
+    "id": "v1-q28",
+    "version": "v1",
+    "topic": "sacco_history",
+    "order": 28,
+    "text_en": "Have you borrowed from the SACCO before?",
+    "text_kik": "",
+    "features": []
   },
   {
-    "sentence_no": 29,
-    "domain": "sacco_history",
-    "english": "Have you ever been a guarantor for someone else's loan?",
-    "kikuyu": ""
+    "id": "v1-q29",
+    "version": "v1",
+    "topic": "sacco_history",
+    "order": 29,
+    "text_en": "Have you ever been a guarantor for someone else's loan?",
+    "text_kik": "",
+    "features": []
   },
   {
-    "sentence_no": 30,
-    "domain": "sacco_history",
-    "english": "Have you borrowed elsewhere, for example a mobile loan?",
-    "kikuyu": ""
+    "id": "v1-q30",
+    "version": "v1",
+    "topic": "sacco_history",
+    "order": 30,
+    "text_en": "Have you borrowed elsewhere, for example a mobile loan?",
+    "text_kik": "",
+    "features": []
   },
   {
-    "sentence_no": 31,
-    "domain": "chama",
-    "english": "Do you belong to a chama or self-help group?",
-    "kikuyu": ""
+    "id": "v1-q31",
+    "version": "v1",
+    "topic": "chama",
+    "order": 31,
+    "text_en": "Do you belong to a chama or self-help group?",
+    "text_kik": "",
+    "features": []
   },
   {
-    "sentence_no": 32,
-    "domain": "chama",
-    "english": "How much does each member contribute, and how often?",
-    "kikuyu": ""
+    "id": "v1-q32",
+    "version": "v1",
+    "topic": "chama",
+    "order": 32,
+    "text_en": "How much does each member contribute, and how often?",
+    "text_kik": "",
+    "features": []
   },
   {
-    "sentence_no": 33,
-    "domain": "chama",
-    "english": "How does the group share out the contributions?",
-    "kikuyu": ""
+    "id": "v1-q33",
+    "version": "v1",
+    "topic": "chama",
+    "order": 33,
+    "text_en": "How does the group share out the contributions?",
+    "text_kik": "",
+    "features": []
   },
   {
-    "sentence_no": 34,
-    "domain": "chama",
-    "english": "How long have you been in the group?",
-    "kikuyu": ""
+    "id": "v1-q34",
+    "version": "v1",
+    "topic": "chama",
+    "order": 34,
+    "text_en": "How long have you been in the group?",
+    "text_kik": "",
+    "features": []
   },
   {
-    "sentence_no": 35,
-    "domain": "chama",
-    "english": "Has the group ever helped you buy something or meet a need?",
-    "kikuyu": ""
+    "id": "v1-q35",
+    "version": "v1",
+    "topic": "chama",
+    "order": 35,
+    "text_en": "Has the group ever helped you buy something or meet a need?",
+    "text_kik": "",
+    "features": []
   },
   {
-    "sentence_no": 36,
-    "domain": "intent_planning",
-    "english": "What will you use this loan for?",
-    "kikuyu": ""
+    "id": "v1-q36",
+    "version": "v1",
+    "topic": "intent_planning",
+    "order": 36,
+    "text_en": "What will you use this loan for?",
+    "text_kik": "",
+    "features": []
   },
   {
-    "sentence_no": 37,
-    "domain": "intent_planning",
-    "english": "How will you repay?",
-    "kikuyu": ""
+    "id": "v1-q37",
+    "version": "v1",
+    "topic": "intent_planning",
+    "order": 37,
+    "text_en": "How will you repay?",
+    "text_kik": "",
+    "features": []
   },
   {
-    "sentence_no": 38,
-    "domain": "intent_planning",
-    "english": "How long do you expect to take to repay the loan?",
-    "kikuyu": ""
+    "id": "v1-q38",
+    "version": "v1",
+    "topic": "intent_planning",
+    "order": 38,
+    "text_en": "How long do you expect to take to repay the loan?",
+    "text_kik": "",
+    "features": []
   },
   {
-    "sentence_no": 39,
-    "domain": "intent_planning",
-    "english": "If your plan does not work out, how would you still repay?",
-    "kikuyu": ""
+    "id": "v1-q39",
+    "version": "v1",
+    "topic": "intent_planning",
+    "order": 39,
+    "text_en": "If your plan does not work out, how would you still repay?",
+    "text_kik": "",
+    "features": []
   },
   {
-    "sentence_no": 40,
-    "domain": "intent_planning",
-    "english": "How do you keep track of what you earn and spend?",
-    "kikuyu": ""
+    "id": "v1-q40",
+    "version": "v1",
+    "topic": "intent_planning",
+    "order": 40,
+    "text_en": "How do you keep track of what you earn and spend?",
+    "text_kik": "",
+    "features": []
+  },
+  {
+    "id": "v2-q1",
+    "version": "v2",
+    "topic": "household",
+    "order": 1,
+    "text_en": "How many people live in your household? How many of them are your children, and of those, how many are under five and how many are in school?",
+    "text_kik": "",
+    "features": [
+      "household_size",
+      "children",
+      "children_under5",
+      "children_in_school"
+    ]
+  },
+  {
+    "id": "v2-q2",
+    "version": "v2",
+    "topic": "income",
+    "order": 2,
+    "text_en": "What is your main way of earning money, and about how much do you earn in a normal month?",
+    "text_kik": "",
+    "features": [
+      "log_monthly_income",
+      "income_missing"
+    ]
+  },
+  {
+    "id": "v2-q3",
+    "version": "v2",
+    "topic": "income_sources",
+    "order": 3,
+    "text_en": "What other ways does your household get money — for example farming, livestock, casual work, a business, or money sent by relatives? How much of it comes from farming?",
+    "text_kik": "",
+    "features": [
+      "B3A__1",
+      "B3A__2",
+      "B3A__3",
+      "B3A__4",
+      "B3A__5",
+      "B3A__6",
+      "B3A__7",
+      "B3A__8",
+      "B3A__9",
+      "B3A__10",
+      "B3A__11",
+      "log_agri_income"
+    ]
+  },
+  {
+    "id": "v2-q4",
+    "version": "v2",
+    "topic": "savings_in_kind",
+    "order": 4,
+    "text_en": "Apart from money, do you keep savings in other forms, such as livestock, stored grain, land or household goods?",
+    "text_kik": "",
+    "features": [
+      "F1__1",
+      "F1__2",
+      "F1__3",
+      "F1__4",
+      "F1__5"
+    ]
+  },
+  {
+    "id": "v2-q5",
+    "version": "v2",
+    "topic": "purchases",
+    "order": 5,
+    "text_en": "In the last 12 months, have you bought land or a plot, built or improved a house, or bought equipment or animals for your farm or business?",
+    "text_kik": "",
+    "features": [
+      "B1L__1",
+      "B1L__2",
+      "B1L__3",
+      "B1L__4",
+      "B1L__5",
+      "B1L__6"
+    ]
+  },
+  {
+    "id": "v2-q6",
+    "version": "v2",
+    "topic": "guarantorship",
+    "order": 6,
+    "text_en": "Have you ever guaranteed someone else's loan and lost money because they did not pay? Was it a SACCO or a chama loan?",
+    "text_kik": "",
+    "features": [
+      "E3B__3",
+      "E3B__7"
+    ]
+  },
+  {
+    "id": "v2-q7",
+    "version": "v2",
+    "topic": "sacco_borrowing",
+    "order": 7,
+    "text_en": "Have you ever taken a loan from a SACCO?",
+    "text_kik": "",
+    "features": [
+      "sacco_loan_use"
+    ]
+  },
+  {
+    "id": "v2-q8",
+    "version": "v2",
+    "topic": "chama_borrowing",
+    "order": 8,
+    "text_en": "Have you ever borrowed from your chama?",
+    "text_kik": "",
+    "features": [
+      "chama_loan_use"
+    ]
   }
 ]

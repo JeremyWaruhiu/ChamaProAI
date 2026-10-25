@@ -1,7 +1,8 @@
 """Bridge to the pipeline scripts, plus the background transcription worker.
 
 The scripts in scripts/ are the pipeline; this module only imports them and
-holds the one ASR model the process loads at startup.
+holds the ASR models: the Kikuyu one, loaded at startup, and the English one,
+loaded the first time an English answer is transcribed.
 """
 from __future__ import annotations
 
@@ -32,7 +33,13 @@ log = logging.getLogger("chamapro.api")
 
 AUDIO_SUFFIXES = ingest_audio.SUFFIXES | {".mp4", ".wma", ".aiff", ".aif"}
 
-_asr = None
+# Language code stored on an interview -> the ASR language token.
+ASR_LANGUAGES = {"kik": config.ASR_LANGUAGE, "en": "en"}
+
+_asr: transcribe.ASR | None = None       # Kikuyu
+_asr_en: transcribe.ASR | None = None    # English, loaded on first use
+_asr_en_error: str | None = None
+_asr_en_lock = threading.Lock()
 # One worker thread transcribes one clip at a time: inference is CPU-bound and
 # the HF pipeline is not thread-safe. Request-scoped BackgroundTasks only
 # enqueue, so a 40-clip interview never parks 40 threads in the shared pool.
@@ -45,14 +52,50 @@ _stopping = False
 
 
 def load_asr() -> None:
+    """Load the Kikuyu model on the configured engine and device; any
+    fallback is logged and shows in /api/health."""
     global _asr
-    log.info("loading ASR model %s", config.ASR_MODEL)
-    _asr = transcribe.load_asr(config.ASR_MODEL)
-    log.info("ASR model ready")
+    log.info("loading Kikuyu ASR: engine=%s device=%s", config.ASR_ENGINE, config.ASR_DEVICE)
+    _asr = transcribe.load_asr(config.ASR_MODEL, config.ASR_ENGINE, config.ASR_DEVICE,
+                               config.ASR_OV_MODEL_DIR, log=log.info)
+    log.info("Kikuyu ASR ready: %s", _asr.label)
+
+
+def english_asr() -> transcribe.ASR:
+    """The English model with the same engine settings, loaded on first use."""
+    global _asr_en, _asr_en_error
+    with _asr_en_lock:
+        if _asr_en is None:
+            log.info("loading English ASR: engine=%s device=%s", config.ASR_ENGINE, config.ASR_DEVICE)
+            try:
+                _asr_en = transcribe.load_asr(config.ASR_EN_MODEL, config.ASR_ENGINE, config.ASR_DEVICE,
+                                              config.ASR_EN_OV_MODEL_DIR, log=log.info)
+            except Exception as e:
+                _asr_en_error = f"{type(e).__name__}: {e}"
+                raise
+            _asr_en_error = None
+            log.info("English ASR ready: %s", _asr_en.label)
+        return _asr_en
 
 
 def asr_loaded() -> bool:
     return _asr is not None
+
+
+def asr_status() -> dict:
+    """What each language's ASR runs on, for /api/health."""
+    out = {}
+    for lang, asr, err in (("kik", _asr, None), ("en", _asr_en, _asr_en_error)):
+        out[lang] = {"loaded": asr is not None, "engine": asr and asr.engine,
+                     "device": asr and asr.device, "model": asr and asr.label,
+                     "language": ASR_LANGUAGES[lang], "error": err}
+    return out
+
+
+def asr_settings() -> dict:
+    """Decoding settings shared by every transcription."""
+    return {"decoding": config.ASR_DECODING,
+            "tokens_per_second": config.ASR_TOKENS_PER_SECOND or transcribe.TOKENS_PER_SECOND}
 
 
 def extraction_model() -> str:
@@ -95,12 +138,14 @@ def transcribe_response(response_id: int) -> None:
         r = db.get(Response, response_id)
         if r is None or r.status != "queued":
             return
-        path, duration = r.audio_path, r.duration_s
+        path, duration, language = r.audio_path, r.duration_s, r.interview.language
 
     try:
-        if _asr is None:
+        asr = english_asr() if language == "en" else _asr
+        if asr is None:
             raise RuntimeError("ASR model not loaded")
-        out = transcribe.transcribe_clip(path, _asr, config.ASR_LANGUAGE, duration=duration)
+        out = transcribe.transcribe_clip(path, asr.pipe, ASR_LANGUAGES[language],
+                                         duration=duration, **asr_settings())
     except Exception as e:
         log.exception("transcription failed for response %s", response_id)
         update = {"status": "failed", "error": f"{type(e).__name__}: {e}"}
@@ -108,7 +153,7 @@ def transcribe_response(response_id: int) -> None:
         log.info("response %s transcribed in %ss", response_id, out["seconds"])
         update = {"status": "transcribed", "error": None, "transcript": out["text"],
                   "transcript_asr": out["text"], "asr_seconds": out["seconds"],
-                  "asr_model": config.ASR_MODEL, "transcribed_at": utcnow()}
+                  "asr_model": asr.label, "transcribed_at": utcnow()}
 
     with SessionLocal() as db:
         r = db.get(Response, response_id)

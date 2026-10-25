@@ -25,10 +25,10 @@ def write_summary(path, **extra):
     return body
 
 
-def seed(risk_class, decision=None, completeness=0.5):
+def seed(risk_class, decision=None, completeness=0.5, mode="live"):
     """An assessed interview, optionally with the officer's decision."""
     with SessionLocal() as db:
-        iv = Interview(applicant=Applicant(name=None), status="assessed")
+        iv = Interview(applicant=Applicant(name=None), status="assessed", mode=mode)
         db.add(iv)
         db.flush()
         db.add(Assessment(

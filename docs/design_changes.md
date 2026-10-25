@@ -13,7 +13,10 @@ a one-line reason. Wireframe figure numbers refer to Chapter 4.
 | Risk classes use colour (green / amber / red) as well as text | Changed | The wireframes are monochrome; colour speeds recognition, and the text label means it never relies on colour alone. |
 | System fonts only, no web fonts | Changed | Rural branches may be offline or on slow links; nothing is fetched from the internet. |
 | Status words are plain language ("Waiting", "Transcribing", "Transcribed", "Not transcribed") | Changed | Officers have basic computer literacy; "queued" and "failed" are system terms. |
-| Interview questions grouped by the eight domains recorded in `data/manifest.csv`, not Table 3.1's domains | Changed | The 40 recorded responses use the manifest's domains (Household, Chama, …); Table 3.1's set (Social Capital, Character & Attitude) has no recordings. |
+| Interview questions grouped by the eight domains recorded in `data/manifest.csv`, not Table 3.1's domains | Changed | The 40 recorded responses use the manifest's domains (Household, Chama, …); Table 3.1's set (Social Capital, Character & Attitude) has no recordings. Applies to question set v1; v2 has one topic per question. |
+| Question set v2: eight questions, one per topic, each targeting named classifier features; age, sex, education and marital status move to an applicant form | Changed | The 40-sentence draft asked many things the classifier never uses and left some features to chance. Form plus v2 cover the 40 features exactly once (tested). v1 is kept so the recorded Kikuyu demo and the evaluation still load. |
+| Practice interviews: a banner on every screen of the interview, the decision labelled practice, excluded from live statistics | Added | Officers need to rehearse on the real screens without a training run counting as a lending decision or skewing the figures on Model & Evaluation. |
+| English interviews (interview language Kikuyu or English) | Added | Some applicants prefer English. English answers are transcribed by the English Whisper model and are not translated. |
 | A request that gets no answer within 15 seconds (90 s for the assessment) shows an error with a Retry button | Added | The wireframes show no failure states; a stalled server must never leave a screen spinning forever. |
 
 ## Figure 4.8 — Login
@@ -33,22 +36,25 @@ a one-line reason. Wireframe figure numbers refer to Chapter 4.
 | Change | Status | Reason |
 |---|---|---|
 | Lists interviews, not an applicant register | Changed | There are no applicant records beyond a name until registration exists; an interview is the unit an officer works on. |
-| Columns: applicant, date, answers recorded out of 40, status, risk class | Changed | Specified for Sprint II; shows recording progress, which the wireframe's single badge could not. |
+| Columns: applicant, date, answers recorded out of the interview's question count, status, risk class | Changed | Specified for Sprint II; shows recording progress, which the wireframe's single badge could not. |
+| "English" and "Practice" tags under the applicant's name; a practice decision reads "Practice decision: …" | Added | The two options change how an interview is handled; they must be visible before it is opened. |
 | "PROCESSING" badge replaced by a status column ("Transcribing answers", "Ready for review", "Decision: …") | Changed | Status and risk class are different facts; mixing them in one badge hid which step an interview is at. |
 | Officer's decision shown in the status column | Added | The list should show whether a decision has been recorded, not only the model's class. |
 | Opening an interview goes to its next step (record, review or assessment) | Added | Saves the officer finding where they left off. |
 | Search by name or member number | Deferred | Not needed at Sprint II volumes; needs the applicant register. |
 | Member numbers (M-0412) | Deferred | No member register yet. |
 | Pagination | Deferred | Not needed at Sprint II volumes. |
-| New interview opens an inline form for the applicant's name | Added | The wireframe shows the button but not what follows; the name is optional so an interview can start at once. |
+| New interview opens an inline form: name (optional), then the applicant form (age, sex, highest education, marital status), interview language and a practice checkbox | Added → Changed | The wireframe shows the button but not what follows. The four applicant facts are entered here rather than asked in the interview, in the exact categories the classifier was trained on (FinAccess A20 education ladder, A21 marital categories), served by `GET /api/applicant-form` so the form and the model cannot drift apart. |
 
 ## Figure 4.10 — Interview recording
 
 | Change | Status | Reason |
 |---|---|---|
 | One question per screen with Previous / Next | Kept | As in the wireframe. |
-| Kikuyu question text with English gloss beneath | Kept, with fallback | The Kikuyu wording is still being corrected by a native speaker; where it is missing the English is shown alone. |
-| Questions are a draft (`docs/interview_questions.txt`) | Changed | No 40-question instrument existed; one question per scripted answer was drafted from Table 3.1's wording, pending review. |
+| Kikuyu question text with English gloss beneath | Kept, with fallback | The Kikuyu wording is still being corrected by a native speaker; where it is missing the English is shown alone. English interviews show the English only. v2 has no Kikuyu wording yet. |
+| Questions are a draft (`docs/interview_questions.txt`) | Changed | No 40-question instrument existed; one question per scripted answer was drafted from Table 3.1's wording, pending review. This is question set v1; new interviews use the eight-question v2 in `questions.json`. |
+| **Type the answer** beside Record and Upload | Added | Lets the officer enter an answer when recording is impossible or the applicant prefers to write; a typed answer skips transcription and is ready for review at once. |
+| v2 progress shows one numbered button per question instead of domain segments | Changed | With one question per topic, domain segments would repeat the question buttons. v1 keeps the eight domain segments. |
 | Record answer, Stop, Replay, Re-record | Kept | As in the wireframe; Replay plays the stored clip from the server. |
 | Upload a recording | Added | Specified; lets an officer use a phone recording when the laptop microphone fails. |
 | Live status badge per answer (Waiting, Transcribing, Transcribed, Not transcribed) with a calm waiting message and estimate | Added | Transcription takes about 35 s per clip on CPU; the officer must see that waiting is normal and can carry on. |
@@ -69,6 +75,7 @@ a one-line reason. Wireframe figure numbers refer to Chapter 4.
 | "Edit transcript" → transcript is always editable, with Save correction and Undo | Changed | Removes a step on a touchscreen. |
 | Edited answers marked "Edited", with the speech model's original text and the time of correction | Added | Specified; the original is kept for audit. |
 | A failed or empty transcript can be typed in by the officer | Added | Otherwise that answer would be lost to the assessment. |
+| Typed answers marked "Typed", with no Replay | Added | There is no recording; the mark tells a reviewer the text was entered by hand, not heard by the model. |
 | Synchronised playback bar | Changed | Replaced by a Replay button per answer; each answer is a separate 3–10 s clip. |
 | Shaded low-confidence spans and the "ASR confidence" figure | Deferred | The ASR stage does not produce per-word confidence yet. |
 | Flag for supervisor | Deferred | Officer and admin roles now exist; the flag itself and a supervisor's queue are still to be built. |
@@ -92,7 +99,9 @@ a one-line reason. Wireframe figure numbers refer to Chapter 4.
 | Decision buttons have equal weight; nothing is preselected | Changed | The wireframe made Approve the primary button, which nudges the officer. |
 | A note can be recorded with the decision; a confirmation step precedes it | Added | Records why; the decision is permanent. |
 | The decision is marked when it differs from the model's recommendation | Added | Makes overrides visible for later review without implying the officer was wrong. |
-| Model, extraction model and classifier hash stored with each assessment, not shown on screen | Added | Auditability (Chapter 4): the stored record identifies exactly which model produced it; the footer line was removed from the screen as clutter for officers. |
+| One audit line under each assessment: assessment id, time, who assessed it, classifier file and SHA-256, extraction model, "stored permanently" | Added | Auditability (Chapter 4): the stored record identifies exactly which model produced it and who ran it; the line is small and at the foot of the screen, so it does not compete with the decision. |
+| Facts entered on the applicant form listed apart from "What the system heard" | Added | They were typed by the officer, not extracted from speech; listing them as heard, or as "not stated", would misdescribe them. |
+| A practice interview's decision panel and recorded decision say "practice" | Added | A practice decision must never be mistaken for a lending decision. |
 | Approve at a reduced amount | Deferred | Needs the loan amount, which is not captured yet. |
 | Loan amount requested in the header | Deferred | Not captured by the interview yet. |
 | SACCO baseline (savings multiplier) and divergence panel | Deferred | Needs savings and guarantor records from the SACCO's system. |
@@ -111,3 +120,9 @@ a one-line reason. Wireframe figure numbers refer to Chapter 4.
 | `POST /api/auth/login`, `POST /api/auth/logout`, `GET /api/auth/me` | Authentication; every other endpoint except `/api/health` now requires a signed-in user. |
 | `POST /api/auth/google`, `GET /api/auth/config`; `users.email` (unique, lower-case) and `sessions.auth_method` | Google sign-in for linked users; the session records which method was used. |
 | `assessed_by` and `decided_by` on assessments and decisions | Records who made each one; nullable, so rows from before sign-in are left as they were. |
+| `GET /api/questions?version=`, question sets v1 and v2 in one `questions.json` (`id, version, topic, order, text_en, text_kik, features`) | The dashboard loads the set an interview was created with. |
+| `GET /api/applicant-form`; applicant `age, sex, education, marital_status`; `assessments.applicant_form` | The form's choices come from the classifier's encoding; the form values merged into the vector are stored with the assessment. |
+| `interviews.question_set, language, mode`; `responses.source` | Migrated in place with ADD COLUMN: existing rows become v1 / kik / live / audio. |
+| `POST /api/interviews/{id}/responses/typed` | Typed answers: no audio, no ASR. |
+| `/api/health` reports the ASR engine and device actually loaded, per language | OpenVINO on the GPU falls back to the CPU, and a missing export to torch; the health check shows which happened. |
+| Live statistics on `/api/results` exclude practice interviews | Practice runs are not operational data. |

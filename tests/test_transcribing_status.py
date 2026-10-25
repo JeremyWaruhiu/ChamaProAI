@@ -7,7 +7,7 @@ import threading
 
 from chamapro.api.db import Response, SessionLocal
 
-from conftest import wait_until
+from conftest import new_interview, wait_until
 
 
 def statuses(state, interview_id):
@@ -50,8 +50,7 @@ def test_status_moves_to_the_next_clip(client, asr, interview, upload, state):
 
 
 def test_other_interviews_show_no_transcribing(client, asr, upload, state):
-    busy = client.post("/api/interviews").json()["id"]
-    idle = client.post("/api/interviews").json()["id"]
+    busy, idle = new_interview(client), new_interview(client)
     asr.gate = threading.Event()
     upload(busy, 1)
     assert asr.started.wait(5)

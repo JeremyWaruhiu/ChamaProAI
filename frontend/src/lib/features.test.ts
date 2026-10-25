@@ -90,3 +90,28 @@ describe('extractedFacts', () => {
     expect(notStated).toContain('Marital status')
   })
 })
+
+describe('extractedFacts with an applicant form', () => {
+  const form = { age: 38, is_female: 1, education_level: 4, marital_status: 'married' }
+
+  it('lists the form facts apart, never as not stated', () => {
+    const { heard, notStated, fromForm } = extractedFacts({ household_size: 5 }, form)
+    expect(fromForm).toEqual([
+      { label: 'Age', value: '38 years' },
+      { label: 'Education', value: 'secondary complete' },
+      { label: 'Marital status', value: 'married' },
+      { label: 'Sex', value: 'female' },
+    ])
+    for (const label of ['Age', 'Education', 'Marital status', 'Sex']) {
+      expect(notStated).not.toContain(label)
+      expect(heard.map((f) => f.label)).not.toContain(label)
+    }
+    expect(heard).toContainEqual({ label: 'Household size', value: '5 people' })
+  })
+
+  it('without a form, reports those facts from the interview as before', () => {
+    const { notStated, fromForm } = extractedFacts({})
+    expect(fromForm).toEqual([])
+    expect(notStated).toEqual(expect.arrayContaining(['Age', 'Education', 'Marital status', 'Sex']))
+  })
+})

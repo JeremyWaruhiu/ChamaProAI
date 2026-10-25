@@ -24,8 +24,9 @@ data/**
 # Signed consent forms — held offline only. This repository is public.
 docs/consent/
 
-# Trained model artefacts
+# Trained model artefacts, including the OpenVINO ASR exports (models/*-ov-*/)
 models/
+models/*-ov-*/
 
 # Frontend dependencies
 node_modules/

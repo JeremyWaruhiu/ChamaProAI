@@ -1,6 +1,6 @@
 import type {
-  Assessment, Decision, DecisionValue, InterviewState, InterviewSummary,
-  AuthConfig, Me, Question, ResponseOut, ResponseQueued, Results,
+  ApplicantFormOptions, Assessment, Decision, DecisionValue, InterviewCreate, InterviewState,
+  InterviewSummary, AuthConfig, Me, Question, QuestionSet, ResponseOut, ResponseQueued, Results,
 } from './types'
 
 /** No request may leave the dashboard waiting longer than this. */
@@ -92,12 +92,13 @@ export const api = {
   logout: () => request<null>('/auth/logout', { method: 'POST' }),
   authConfig: () => request<AuthConfig>('/auth/config'),
   googleLogin: (credential: string) => request<Me>('/auth/google', json('POST', { credential })),
-  questions: () => request<Question[]>('/questions'),
+  questions: (version: QuestionSet) => request<Question[]>(`/questions?version=${version}`),
+  applicantForm: () => request<ApplicantFormOptions>('/applicant-form'),
   interviews: () => request<InterviewSummary[]>('/interviews'),
   interview: (id: number) => request<InterviewState>(`/interviews/${id}`),
-  createInterview: (applicantName: string) =>
+  createInterview: (body: InterviewCreate) =>
     request<{ id: number; status: string }>('/interviews',
-      json('POST', { applicant_name: applicantName.trim() || null })),
+      json('POST', { ...body, applicant_name: body.applicant_name?.trim() || null })),
 
   uploadResponse(interviewId: number, sentenceNo: number, audio: Blob, filename: string) {
     const form = new FormData()
@@ -122,6 +123,11 @@ export const api = {
       }
     }
   },
+
+  /** An answer typed instead of recorded: no audio, no transcription wait. */
+  typeResponse: (interviewId: number, sentenceNo: number, text: string) =>
+    request<ResponseOut>(`/interviews/${interviewId}/responses/typed`,
+      json('POST', { sentence_no: sentenceNo, text: text.trim() })),
 
   saveTranscript: (responseId: number, transcript: string) =>
     request<ResponseOut>(`/responses/${responseId}`, json('PATCH', { transcript })),

@@ -68,22 +68,32 @@ def uploads(interview_id):
 
 class FakeASR:
     """Stands in for the Whisper pipeline. Set .gate to an Event to hold a
-    clip mid-transcription until the test releases it; set .fail to raise."""
+    clip mid-transcription until the test releases it; set .fail to raise.
+    .kwargs records what each call was given (generate_kwargs, timestamps)."""
 
-    def __init__(self):
+    def __init__(self, prefix="kikuyu"):
+        self.prefix = prefix
         self.calls: list[str] = []
+        self.kwargs: list[dict] = []
         self.started = threading.Event()
         self.gate: threading.Event | None = None
         self.fail = False
 
     def __call__(self, path, **kwargs):
         self.calls.append(Path(path).name)
+        self.kwargs.append(kwargs)
         self.started.set()
         if self.gate is not None:
             self.gate.wait(timeout=10)
         if self.fail:
             raise RuntimeError("decoder exploded")
-        return {"text": f"kikuyu {Path(path).stem}", "chunks": []}
+        return {"text": f"{self.prefix} {Path(path).stem}", "chunks": []}
+
+
+def loaded(fake, model=None):
+    """A FakeASR as transcribe.load_asr returns it: torch on the CPU, so its
+    provenance label is just the model name."""
+    return pl.transcribe.ASR(fake, "torch", "CPU", model or config.ASR_MODEL)
 
 
 class FakeGemini:
@@ -115,6 +125,18 @@ class FakeGemini:
              for n, t in items]) + "\n```"
 
 
+# The applicant form every v2 interview needs.
+FORM = {"age": 42, "sex": "female", "education": 4, "marital_status": "married"}
+
+
+def new_interview(client, name="test", **fields):
+    """Create an interview (v2, Kikuyu, live, with the form unless overridden)."""
+    body = {"applicant_name": name, "applicant": FORM, **fields}
+    r = client.post("/api/interviews", json=body)
+    assert r.status_code == 201, r.text
+    return r.json()["id"]
+
+
 # --- Fixtures ----------------------------------------------------------------
 
 # localhost, so the session cookie is not marked Secure and travels over http.
@@ -140,7 +162,8 @@ def signed_in(username):
 
 @pytest.fixture(scope="session")
 def client():
-    pl.transcribe.load_asr = lambda name: FakeASR()  # never load the real model
+    # never load a real model
+    pl.transcribe.load_asr = lambda name, *a, **k: loaded(FakeASR(), name)
     with TestClient(app, base_url=BASE_URL) as c:
         for name, pw in PASSWORDS.items():
             add_user(name, pw, ROLES[name])
@@ -169,10 +192,19 @@ def _reset_login_limiter():
 @pytest.fixture
 def asr(monkeypatch, client):
     fake = FakeASR()
-    monkeypatch.setattr(pl, "_asr", fake)
+    monkeypatch.setattr(pl, "_asr", loaded(fake))
     yield fake
     if fake.gate is not None:
         fake.gate.set()
+    wait_until(worker_idle)
+
+
+@pytest.fixture
+def asr_en(monkeypatch, client):
+    """The English model, as if already loaded on first use."""
+    fake = FakeASR(prefix="english")
+    monkeypatch.setattr(pl, "_asr_en", loaded(fake, config.ASR_EN_MODEL))
+    yield fake
     wait_until(worker_idle)
 
 
@@ -223,7 +255,7 @@ def wav(audio):
 
 @pytest.fixture
 def interview(client):
-    return client.post("/api/interviews", json={"applicant_name": "test"}).json()["id"]
+    return new_interview(client)
 
 
 @pytest.fixture

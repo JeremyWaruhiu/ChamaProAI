@@ -161,7 +161,7 @@ export function ResultsBody({ data }: { data: ResultsData }) {
 
       <Card title="Live system stats">
         <div className={styles.stats}>
-          <Stat label="Interviews"><Value v={live.interview_count} digits={0} /></Stat>
+          <Stat label="Live interviews"><Value v={live.interview_count} digits={0} /></Stat>
           <Stat label="Assessments"><Value v={live.assessment_count} digits={0} /></Stat>
           <Stat label="Mean extraction completeness"><Value v={live.mean_extraction_completeness} percent /></Stat>
           <Stat label="Officer agrees with model">
@@ -174,6 +174,8 @@ export function ResultsBody({ data }: { data: ResultsData }) {
         <p className={`muted ${styles.small}`}>
           Agreement: {live.decision_agreement.agreements} of {live.decision_agreement.decisions} decisions
           ({live.decision_agreement.rule}).
+          {' '}Practice interviews are left out of every figure here
+          {live.practice_interview_count ? ` (${live.practice_interview_count} held)` : ''}.
         </p>
         <Caption source={`${live.source}, read at request time`}
                  validation="operational counts, not an evaluation; the demo database is seeded and small" />

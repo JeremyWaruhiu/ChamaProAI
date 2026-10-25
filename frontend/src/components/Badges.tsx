@@ -26,3 +26,8 @@ export function RiskBadge({ risk }: { risk: string }) {
 export function EditedBadge() {
   return <span className={`${styles.badge} ${styles.edited}`}>Edited</span>
 }
+
+/** An answer the officer typed: no recording, nothing to transcribe. */
+export function TypedBadge() {
+  return <span className={`${styles.badge} ${styles.typed}`}>Typed</span>
+}

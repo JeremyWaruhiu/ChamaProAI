@@ -5,7 +5,8 @@ import { NOT_MEASURED } from '../lib/measure'
 import { ResultsBody } from './Results'
 
 const live: Results['live'] = {
-  source: 'live database', interview_count: 0, assessment_count: 0,
+  source: 'live database; practice interviews excluded', interview_count: 0, assessment_count: 0,
+  practice_interview_count: 2,
   risk_class_distribution: { Low: 0, Medium: 0, High: 0 }, mean_extraction_completeness: null,
   decision_agreement: { rule: 'r', decisions: 0, agreements: 0, rate: null },
 }
@@ -16,6 +17,12 @@ describe('ResultsBody', () => {
     expect(out).toContain(NOT_MEASURED)
     expect(out).not.toContain('NaN')
     expect(out).not.toContain('role="cell"')       // no confusion matrix drawn
+  })
+
+  it('says practice interviews are left out of the live stats', () => {
+    const out = renderToStaticMarkup(<ResultsBody data={{ generated_at: '2026-10-19T00:00:00Z', live }} />)
+    expect(out).toContain('Live interviews')
+    expect(out).toContain('Practice interviews are left out of every figure here (2 held)')
   })
 
   it('shows null metrics as "not yet measured" next to measured ones', () => {

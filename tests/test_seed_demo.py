@@ -11,7 +11,7 @@ import soundfile as sf
 import seed_demo  # scripts/ is on sys.path via chamapro.api.pipeline
 from chamapro import config
 
-from conftest import uploads
+from conftest import needs_classifier, uploads
 
 
 @pytest.fixture
@@ -50,6 +50,7 @@ def test_seed_creates_a_transcribed_interview(client, corpus, name, state):
     assert (res.created, res.added, res.total) == (True, 5, 5)
     st = state(res.interview_id)
     assert st["applicant"]["name"] == name and st["status"] == "open"
+    assert (st["question_set"], st["language"], st["mode"]) == ("v1", "kik", "live")
     assert st["counts"] == {"queued": 0, "transcribing": 0, "transcribed": 5, "failed": 0}
     for resp, row in zip(st["responses"], rows):
         assert resp["sentence_no"] == row["sentence_no"]
@@ -58,6 +59,7 @@ def test_seed_creates_a_transcribed_interview(client, corpus, name, state):
         assert resp["asr_model"] == seed_demo.CSV_ASR_MODEL
         assert resp["asr_seconds"] == 35.5 and resp["duration_s"] == 0.5
         assert resp["edited"] is False and resp["translation"] is None
+        assert resp["source"] == "audio"
 
 
 def test_seed_copies_audio_into_uploads(client, corpus, name, state):
@@ -163,3 +165,52 @@ def test_real_corpus_seeds_all_40(client, name, state):
     assert res.total == 40 and st["counts"]["transcribed"] == 40
     assert [x["sentence_no"] for x in st["responses"]] == list(range(1, 41))
     assert len(uploads(res.interview_id)) == 40
+
+
+# --- English practice interview ----------------------------------------------
+
+def test_seed_practice_creates_an_english_practice_interview(client, name, state):
+    res = seed_demo.seed_practice(name)
+
+    assert (res.created, res.added, res.total) == (True, 8, 8)
+    st = state(res.interview_id)
+    assert (st["question_set"], st["language"], st["mode"], st["status"]) == ("v2", "en", "practice", "open")
+    assert st["applicant"] == {"id": st["applicant"]["id"], "name": name, **seed_demo.PRACTICE_FORM}
+    assert st["counts"] == {"queued": 0, "transcribing": 0, "transcribed": 8, "failed": 0}
+    assert [r["sentence_no"] for r in st["responses"]] == list(range(1, 9))
+    assert all(r["source"] == "typed" and r["transcript"] == seed_demo.PRACTICE_ANSWERS[r["sentence_no"]]
+               for r in st["responses"])
+    assert uploads(res.interview_id) == []                     # no audio at all
+
+
+def test_seed_practice_is_idempotent(client, name, state):
+    first = seed_demo.seed_practice(name)
+    before = state(first.interview_id)
+    again = seed_demo.seed_practice(name)
+    assert (again.interview_id, again.created, again.added) == (first.interview_id, False, 0)
+    assert state(first.interview_id) == before
+
+
+def test_practice_applicant_is_fictional():
+    assert "fictional" in seed_demo.PRACTICE_NAME.lower()
+    assert seed_demo.PRACTICE_NAME.lower().startswith("practice")
+
+
+@needs_classifier
+def test_seeded_practice_interview_is_fully_assessable(client, gemini, name):
+    res = seed_demo.seed_practice(name)
+    r = client.post(f"/api/interviews/{res.interview_id}/assess")
+    assert r.status_code == 201, r.text
+    a = r.json()
+    assert a["applicant_form"]["age"] == seed_demo.PRACTICE_FORM["age"]
+    assert gemini.translated == []                             # English: nothing translated
+    d = client.post(f"/api/interviews/{res.interview_id}/decision", json={"decision": "refer"})
+    assert d.status_code == 201
+
+
+def test_cli_practice_only_needs_no_corpus(client, tmp_path):
+    cmd = [sys.executable, str(config.SCRIPTS_DIR / "seed_demo.py"), "--practice-only",
+           "--csv", str(tmp_path / "missing.csv")]
+    out = subprocess.run(cmd, capture_output=True, text=True)
+    assert out.returncode == 0, out.stderr
+    assert "practice interview" in out.stdout and "demo interview" not in out.stdout

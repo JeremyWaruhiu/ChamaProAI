@@ -24,6 +24,7 @@ export function Assessment({ id }: { id: number }) {
 
   return (
     <Shell title={data ? <>Assessment — <strong>{name}</strong></> : 'Assessment'} interviewId={id} step="assessment"
+           practice={data?.mode === 'practice'}
            aside={a && `Assessed ${formatDateTime(a.created_at)}`}>
       {iv.error && <ErrorNotice doing="Could not load this interview" error={iv.error} onRetry={iv.refresh} />}
       {!data && !iv.error && <Loading what="the assessment" />}
@@ -65,12 +66,21 @@ function AssessmentView({ interview, a, name, onDecided }: {
 
       <DecisionPanel interview={interview} a={a} close={close} name={name} onDecided={onDecided} />
 
-      <p className={styles.audit}>
-        Assessment {a.id} · recorded {formatDateTime(a.created_at)} · classifier {a.model_file}
-        {' '}(<span title={a.model_sha256}>sha256 {a.model_sha256.slice(0, 12)}</span>)
-        {' '}· extraction {a.extraction_model} · stored permanently and cannot be changed
-      </p>
+      <AuditLine a={a} />
     </div>
+  )
+}
+
+/** The per-assessment audit record, as stored. */
+export function AuditLine({ a }: { a: AssessmentT }) {
+  return (
+    <p className={styles.audit}>
+      Assessment {a.id} · recorded {formatDateTime(a.created_at)}
+      {' '}· assessed by {a.assessed_by ?? 'unknown (recorded before sign-in existed)'}
+      {' '}· classifier {a.model_file}
+      {' '}(<span title={a.model_sha256}>sha256 {a.model_sha256.slice(0, 12)}</span>)
+      {' '}· extraction {a.extraction_model} · stored permanently and cannot be changed
+    </p>
   )
 }
 
@@ -189,7 +199,7 @@ function ContributionRow({ c, max, risk }: { c: Contribution; max: number; risk:
 }
 
 function Facts({ a, interviewId }: { a: AssessmentT; interviewId: number }) {
-  const { heard, notStated } = extractedFacts(a.extracted)
+  const { heard, notStated, fromForm } = extractedFacts(a.extracted, a.applicant_form)
   return (
     <section className={`card ${styles.panel}`} aria-label="Extracted facts">
       <div className={styles.factsHead}>
@@ -206,6 +216,12 @@ function Facts({ a, interviewId }: { a: AssessmentT; interviewId: number }) {
       </dl>
       {notStated.length > 0 && (
         <p className={styles.notStated}><strong>Not stated in the interview:</strong> {notStated.join(', ')}.</p>
+      )}
+      {fromForm.length > 0 && (
+        <p className={styles.notStated}>
+          <strong>Entered on the applicant form by the officer:</strong>{' '}
+          {fromForm.map((f) => `${f.label} ${f.value}`).join(', ')}.
+        </p>
       )}
     </section>
   )
@@ -224,6 +240,7 @@ function agrees(risk: string, borderline: boolean, d: DecisionValue): boolean {
 function DecisionPanel({ interview, a, close, name, onDecided }: {
   interview: InterviewState; a: AssessmentT; close: Closeness; name: string; onDecided: () => Promise<void>
 }) {
+  const practice = interview.mode === 'practice'
   return (
     <section className={styles.decision} aria-label="Model recommendation and officer decision">
       <div className={styles.side}>
@@ -233,19 +250,22 @@ function DecisionPanel({ interview, a, close, name, onDecided }: {
         <p className="muted">Advice from the scoring model. It does not decide.</p>
       </div>
       <div className={`${styles.side} ${styles.officer}`}>
-        <p className="eyebrow">Loan officer's decision</p>
+        <p className="eyebrow">Loan officer's decision{practice && ' (practice)'}</p>
         {interview.decision
-          ? <RecordedDecision d={interview.decision} risk={a.risk_class} borderline={close.borderline} />
-          : <DecisionForm interviewId={interview.id} name={name} onDecided={onDecided} />}
+          ? <RecordedDecision d={interview.decision} risk={a.risk_class} borderline={close.borderline} practice={practice} />
+          : <DecisionForm interviewId={interview.id} name={name} practice={practice} onDecided={onDecided} />}
       </div>
     </section>
   )
 }
 
-function RecordedDecision({ d, risk, borderline }: { d: Decision; risk: string; borderline: boolean }) {
+export function RecordedDecision({ d, risk, borderline, practice }: {
+  d: Decision; risk: string; borderline: boolean; practice: boolean
+}) {
   return (
     <>
-      <p className={styles.decided}>{DECISION_LABEL[d.decision]}</p>
+      <p className={styles.decided}>{practice && 'Practice: '}{DECISION_LABEL[d.decision]}</p>
+      {practice && <p className="muted">A practice decision: no loan was applied for and none follows from it.</p>}
       {d.note && <blockquote className={styles.note}>{d.note}</blockquote>}
       <p className="muted">Recorded {formatDateTime(d.created_at)}. A recorded decision cannot be changed.</p>
       {!agrees(risk, borderline, d.decision) && (
@@ -255,7 +275,9 @@ function RecordedDecision({ d, risk, borderline }: { d: Decision; risk: string; 
   )
 }
 
-function DecisionForm({ interviewId, name, onDecided }: { interviewId: number; name: string; onDecided: () => Promise<void> }) {
+function DecisionForm({ interviewId, name, practice, onDecided }: {
+  interviewId: number; name: string; practice: boolean; onDecided: () => Promise<void>
+}) {
   const [choice, setChoice] = useState<DecisionValue | null>(null)
   const [note, setNote] = useState('')
   const [confirming, setConfirming] = useState(false)
@@ -293,7 +315,7 @@ function DecisionForm({ interviewId, name, onDecided }: { interviewId: number; n
                 onChange={(e) => setNote(e.target.value)} />
       {confirming && choice ? (
         <div className={styles.confirm}>
-          <p>Record <strong>{DECISION_LABEL[choice]}</strong> for {name}? A recorded decision cannot be changed.</p>
+          <p>Record <strong>{DECISION_LABEL[choice]}</strong>{practice && ' as a practice decision'} for {name}? A recorded decision cannot be changed.</p>
           <div className={styles.confirmActions}>
             <button className="btn btn-quiet" onClick={() => setConfirming(false)} disabled={saving}>Go back</button>
             <button className="btn btn-primary" onClick={record} disabled={saving}>
@@ -303,7 +325,7 @@ function DecisionForm({ interviewId, name, onDecided }: { interviewId: number; n
         </div>
       ) : (
         <button className="btn btn-primary btn-large" disabled={!choice} onClick={() => setConfirming(true)}>
-          Record decision
+          Record {practice && 'practice '}decision
         </button>
       )}
       {error && <ErrorNotice doing="The decision was not recorded" error={error} onRetry={record} />}

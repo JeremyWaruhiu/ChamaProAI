@@ -48,10 +48,13 @@
 }
 .step[aria-current="step"] .stepNo { background: var(--green-800); border-color: var(--green-800); color: var(--white); }
 
+.practice { background: var(--medium-bg); border-bottom: 2px solid var(--medium-line); color: var(--medium); }
+.practiceInner { max-width: 1120px; margin: 0 auto; padding: 10px 24px; font-size: 1rem; }
+
 .main { max-width: 1120px; margin: 0 auto; padding: 28px 24px 64px; }
 
 @media (max-width: 720px) {
-  .barInner, .stepsInner, .main { padding-left: 16px; padding-right: 16px; }
+  .barInner, .stepsInner, .practiceInner, .main { padding-left: 16px; padding-right: 16px; }
   .stepList { margin-left: 0; }
   .step { padding: 0 10px; font-size: 0.95rem; }
 }

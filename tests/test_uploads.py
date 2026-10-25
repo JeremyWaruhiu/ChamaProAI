@@ -7,7 +7,7 @@ import soundfile as sf
 
 from chamapro import config
 
-from conftest import needs_ffmpeg, uploads, wait_until
+from conftest import FORM, needs_ffmpeg, new_interview, uploads, wait_until
 
 
 def test_health_reports_pipeline(client):
@@ -15,6 +15,10 @@ def test_health_reports_pipeline(client):
     assert h["asr_loaded"] is True
     assert h["asr_model"] == config.ASR_MODEL
     assert h["asr_language"] == config.ASR_LANGUAGE
+    assert (h["asr_engine"], h["asr_device"]) == ("torch", "CPU")     # what the fake loaded as
+    assert h["asr_decoding"] == config.ASR_DECODING == "timestamps"
+    assert h["asr"]["kik"]["loaded"] is True and h["asr"]["kik"]["engine"] == "torch"
+    assert h["asr"]["en"]["language"] == "en"
     assert h["classifier_present"] == config.CLASSIFIER_PATH.exists()
     assert h["api_key_configured"] == bool(config.GEMINI_API_KEY)
     ready = h["classifier_present"] and h["api_key_configured"]
@@ -22,16 +26,46 @@ def test_health_reports_pipeline(client):
 
 
 def test_create_interview(client, state):
-    r = client.post("/api/interviews", json={"applicant_name": "  Wanjiru  "})
+    r = client.post("/api/interviews", json={"applicant_name": "  Wanjiru  ", "applicant": FORM})
     assert r.status_code == 201
     assert r.json() == {"id": r.json()["id"], "status": "open"}
-    assert state(r.json()["id"])["applicant"]["name"] == "Wanjiru"
+    st = state(r.json()["id"])
+    assert st["applicant"] == {"id": st["applicant"]["id"], "name": "Wanjiru", **FORM}
+    assert (st["question_set"], st["language"], st["mode"]) == ("v2", "kik", "live")
 
 
-def test_create_interview_without_body(client, state):
-    r = client.post("/api/interviews")
+def test_v2_interview_needs_the_applicant_form(client):
+    for body in (None, {"applicant_name": "x"}):
+        r = client.post("/api/interviews", json=body)
+        assert r.status_code == 422
+        assert "applicant form" in r.json()["detail"]
+
+
+def test_v1_interview_needs_no_form(client, state):
+    r = client.post("/api/interviews", json={"question_set": "v1"})
     assert r.status_code == 201
-    assert state(r.json()["id"])["applicant"]["name"] is None
+    st = state(r.json()["id"])
+    assert st["question_set"] == "v1" and st["applicant"]["age"] is None
+
+
+@pytest.mark.parametrize("field, bad", [("age", 12), ("age", "forty"), ("sex", "other"),
+                                        ("education", 9), ("education", -1),
+                                        ("marital_status", "engaged")])
+def test_applicant_form_is_validated(client, field, bad):
+    r = client.post("/api/interviews", json={"applicant": {**FORM, field: bad}})
+    assert r.status_code == 422 and field in r.json()["detail"]
+
+
+def test_language_and_mode_are_stored(client, state):
+    iid = new_interview(client, language="en", mode="practice")
+    st = state(iid)
+    assert (st["language"], st["mode"]) == ("en", "practice")
+
+
+def test_upload_outside_the_question_set_is_refused(client, interview, upload):
+    r = upload(interview, 9)                     # v2 has eight questions
+    assert r.status_code == 422
+    assert r.json()["detail"] == "sentence_no: question set v2 has no question 9"
 
 
 def test_upload_returns_202_before_transcription_finishes(client, asr, interview, upload, state):
@@ -69,13 +103,22 @@ def test_audio_is_stored_as_16k_mono_wav(client, audio, interview, upload, state
     wait_until(lambda: state(interview)["counts"]["transcribed"] == 1)
 
 
-def test_responses_carry_domain_and_sort_by_sentence(client, interview, upload, state):
-    for n in (12, 1, 7, 2):
+def test_responses_carry_topic_and_sort_by_sentence(client, interview, upload, state):
+    for n in (8, 1, 6, 2):
         assert upload(interview, n).status_code == 202
     wait_until(lambda: state(interview)["counts"] == {"queued": 0, "transcribing": 0, "transcribed": 4, "failed": 0})
     rs = state(interview)["responses"]
-    assert [x["sentence_no"] for x in rs] == [1, 2, 7, 12]
-    assert [x["domain"] for x in rs] == ["household", "household", "income", "expenditure"]
+    assert [x["sentence_no"] for x in rs] == [1, 2, 6, 8]
+    assert [x["domain"] for x in rs] == ["household", "income", "guarantorship", "chama_borrowing"]
+    assert {x["source"] for x in rs} == {"audio"}
+
+
+def test_v1_responses_carry_the_manifest_domain(client, upload, state):
+    iid = client.post("/api/interviews", json={"question_set": "v1"}).json()["id"]
+    for n in (12, 1):
+        assert upload(iid, n).status_code == 202
+    wait_until(lambda: state(iid)["counts"]["transcribed"] == 2)
+    assert [x["domain"] for x in state(iid)["responses"]] == ["household", "expenditure"]
 
 
 def test_failed_transcription_is_reported(client, asr, interview, upload, state):

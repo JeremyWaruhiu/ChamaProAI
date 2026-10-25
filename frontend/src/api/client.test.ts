@@ -91,3 +91,42 @@ describe('signed-out handling', () => {
     await expect(api.logout()).resolves.toBeNull()
   })
 })
+
+describe('interview requests', () => {
+  afterEach(() => vi.unstubAllGlobals())
+
+  function capture() {
+    const calls: { url: string; init: RequestInit }[] = []
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init: RequestInit) => {
+      calls.push({ url, init })
+      return new Response('{}', { status: 200 })
+    }))
+    return calls
+  }
+
+  it('asks for one question set', async () => {
+    const calls = capture()
+    await api.questions('v2')
+    expect(calls[0].url).toBe('/api/questions?version=v2')
+  })
+
+  it('creates an interview with the applicant form, language and mode', async () => {
+    const calls = capture()
+    await api.createInterview({
+      applicant_name: '  Njeri  ', language: 'en', mode: 'practice',
+      applicant: { age: 38, sex: 'female', education: 4, marital_status: 'married' },
+    })
+    expect(JSON.parse(String(calls[0].init.body))).toEqual({
+      applicant_name: 'Njeri', language: 'en', mode: 'practice',
+      applicant: { age: 38, sex: 'female', education: 4, marital_status: 'married' },
+    })
+  })
+
+  it('sends a typed answer as JSON, trimmed', async () => {
+    const calls = capture()
+    await api.typeResponse(7, 3, '  We keep goats.  ')
+    expect(calls[0].url).toBe('/api/interviews/7/responses/typed')
+    expect(calls[0].init.method).toBe('POST')
+    expect(JSON.parse(String(calls[0].init.body))).toEqual({ sentence_no: 3, text: 'We keep goats.' })
+  })
+})

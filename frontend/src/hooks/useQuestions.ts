@@ -1,26 +1,29 @@
 import { useCallback, useEffect, useState } from 'react'
 import { ApiError, api } from '../api/client'
-import type { Question } from '../api/types'
+import type { Question, QuestionSet } from '../api/types'
 
-let cache: Question[] | null = null
+const cache: Partial<Record<QuestionSet, Question[]>> = {}
 
-/** The 40-question script. Fetched once per page load; it does not change. */
-export function useQuestions() {
-  const [questions, setQuestions] = useState<Question[] | null>(cache)
+/** One question set, in order. Fetched once per page load; it does not change. */
+export function useQuestions(version: QuestionSet | undefined) {
+  const [questions, setQuestions] = useState<Question[] | null>(version ? cache[version] ?? null : null)
   const [error, setError] = useState<ApiError | null>(null)
 
   const load = useCallback(async () => {
+    if (!version) return
     try {
-      cache = await api.questions()
-      setQuestions(cache)
+      const qs = await api.questions(version)
+      cache[version] = qs
+      setQuestions(qs)
       setError(null)
     } catch (e) {
       setError(e as ApiError)
     }
-  }, [])
+  }, [version])
 
-  // oxlint-disable-next-line react/set-state-in-effect -- fetch on mount; state is set after the await
-  useEffect(() => { if (!cache) load() }, [load])
+  // The set is known once the interview has loaded: adopt it from the cache, else fetch it.
+  // oxlint-disable-next-line react/set-state-in-effect -- runs when the set becomes known; a fetch sets state after the await
+  useEffect(() => { if (version && cache[version]) setQuestions(cache[version] ?? null); else load() }, [version, load])
 
   return { questions, error, retry: load }
 }

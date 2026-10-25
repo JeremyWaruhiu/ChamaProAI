@@ -13,7 +13,7 @@ from pathlib import Path
 
 import requests
 from fastapi import (BackgroundTasks, Depends, FastAPI, File, Form,
-                     HTTPException, Request, UploadFile)
+                     HTTPException, Query, Request, UploadFile)
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, Response as HTTPResponse
@@ -37,9 +37,18 @@ log = logging.getLogger("chamapro.api")
 ERRORS = {code: {"model": s.Error} for code in (401, 403, 404, 409, 413, 415, 422, 502, 503)}
 # Every endpoint except /api/health and /api/auth/login needs a signed-in user.
 OFFICER = [Depends(require_officer)]
-QUESTIONS = [s.Question(**q) for q in
-             json.loads(config.QUESTIONS_PATH.read_text(encoding="utf-8"))]
-QUESTIONS_TOTAL = len(QUESTIONS)
+# Every question set, each in order. v1 is the 40-sentence set of the recorded
+# corpus (interviews from before question sets existed); v2 is the current one.
+QUESTION_SETS: dict[str, list[s.Question]] = {}
+for _q in json.loads(config.QUESTIONS_PATH.read_text(encoding="utf-8")):
+    QUESTION_SETS.setdefault(_q["version"], []).append(s.Question(**_q))
+for _qs in QUESTION_SETS.values():
+    _qs.sort(key=lambda q: q.order)
+CURRENT_SET = "v2"
+
+
+def question(iv: Interview, sentence_no: int) -> s.Question | None:
+    return next((q for q in QUESTION_SETS[iv.question_set] if q.order == sentence_no), None)
 
 
 @asynccontextmanager
@@ -122,11 +131,14 @@ def health():
     if config.CLASSIFIER_META_PATH.exists():
         meta = json.loads(config.CLASSIFIER_META_PATH.read_text(encoding="utf-8"))
     key = bool(config.GEMINI_API_KEY)
+    asr = pl.asr_status()
+    kik = asr["kik"]
     return s.Health(status="ok" if present and key and pl.asr_loaded() else "degraded",
                     classifier_present=present, api_key_configured=key,
-                    asr_model=config.ASR_MODEL, asr_language=config.ASR_LANGUAGE,
-                    asr_loaded=pl.asr_loaded(), extraction_model=pl.extraction_model(),
-                    classifier=meta)
+                    asr_model=kik["model"] or config.ASR_MODEL, asr_language=config.ASR_LANGUAGE,
+                    asr_loaded=pl.asr_loaded(), asr_engine=kik["engine"], asr_device=kik["device"],
+                    asr_decoding=config.ASR_DECODING, asr=asr,
+                    extraction_model=pl.extraction_model(), classifier=meta)
 
 
 # --- Sign-in -----------------------------------------------------------------
@@ -218,17 +230,25 @@ RECOMMENDED_DECISION = {"Low": "approve", "Medium": "refer", "High": "decline"}
 
 
 def live_stats(db: Session) -> dict:
-    """Aggregate counts from the database; no row-level data leaves here."""
-    n_assessed = db.scalar(select(func.count(Assessment.id))) or 0
+    """Aggregate counts from the database; no row-level data leaves here.
+    Practice interviews are left out of every figure."""
+    live = Interview.mode == "live"
+    n_assessed = db.scalar(select(func.count(Assessment.id))
+                           .join(Interview, Interview.id == Assessment.interview_id).where(live)) or 0
     dist = dict(db.execute(select(Assessment.risk_class, func.count(Assessment.id))
+                           .join(Interview, Interview.id == Assessment.interview_id).where(live)
                            .group_by(Assessment.risk_class)).all())
-    completeness = db.scalar(select(func.avg(Assessment.extraction_completeness)))
+    completeness = db.scalar(select(func.avg(Assessment.extraction_completeness))
+                             .join(Interview, Interview.id == Assessment.interview_id).where(live))
     pairs = db.execute(select(Assessment.risk_class, Decision.decision)
-                       .join(Decision, Decision.interview_id == Assessment.interview_id)).all()
+                       .join(Decision, Decision.interview_id == Assessment.interview_id)
+                       .join(Interview, Interview.id == Assessment.interview_id).where(live)).all()
     agree = sum(RECOMMENDED_DECISION.get(rc) == d for rc, d in pairs)
     return {
-        "source": "live database",
-        "interview_count": db.scalar(select(func.count(Interview.id))) or 0,
+        "source": "live database; practice interviews excluded",
+        "interview_count": db.scalar(select(func.count(Interview.id)).where(live)) or 0,
+        "practice_interview_count": db.scalar(select(func.count(Interview.id))
+                                              .where(Interview.mode == "practice")) or 0,
         "assessment_count": n_assessed,
         "risk_class_distribution": {**dict.fromkeys(RECOMMENDED_DECISION, 0), **dist},
         "mean_extraction_completeness": None if completeness is None else round(float(completeness), 4),
@@ -256,16 +276,38 @@ def results(db: Session = Depends(get_db)):
 
 
 @app.get("/api/questions", response_model=list[s.Question], responses=ERRORS, dependencies=OFFICER)
-def questions():
-    """The interview script, in sentence order. Kikuyu is "" where not yet supplied."""
-    return QUESTIONS
+def questions(version: s.QuestionSet = Query(CURRENT_SET, description="Question set")):
+    """One question set, in order. text_kik is "" where not yet supplied."""
+    return QUESTION_SETS[version]
+
+
+# FinAccess A21 categories behind the four marital_* features.
+MARITAL_LABEL = {"married": "Married / living with partner", "single": "Single / never married",
+                 "widowed": "Widowed", "divorced": "Divorced / separated"}
+
+
+@app.get("/api/applicant-form", response_model=s.ApplicantFormOptions, responses=ERRORS,
+         dependencies=OFFICER)
+def applicant_form():
+    """The choices on the applicant form, with the codes the classifier was trained on."""
+    sc = pl.score_interview
+    return s.ApplicantFormOptions(
+        sex=[s.Option(value="female", label="Female"), s.Option(value="male", label="Male")],
+        education=[s.Option(value=code, label=label) for label, code in sc.EDU_LADDER.items()],
+        marital_status=[s.Option(value=m, label=MARITAL_LABEL[m]) for m in sc.MARITAL_STATUSES])
 
 
 @app.post("/api/interviews", status_code=201, response_model=s.InterviewCreated,
           responses=ERRORS, dependencies=OFFICER)
 def create_interview(body: s.InterviewCreate | None = None, db: Session = Depends(get_db)):
-    name = (body.applicant_name or "").strip() if body else ""
-    iv = Interview(applicant=Applicant(name=name or None))
+    body = body or s.InterviewCreate()
+    if body.question_set == "v2" and body.applicant is None:
+        raise HTTPException(422, "applicant: the applicant form (age, sex, education, "
+                                 "marital_status) is required for question set v2")
+    name = (body.applicant_name or "").strip()
+    form = body.applicant.model_dump() if body.applicant else {}
+    iv = Interview(applicant=Applicant(name=name or None, **form),
+                   question_set=body.question_set, language=body.language, mode=body.mode)
     db.add(iv)
     db.commit()
     return s.InterviewCreated(id=iv.id, status=iv.status)
@@ -280,7 +322,8 @@ def list_interviews(db: Session = Depends(get_db)):
     counts = (select(Response.interview_id, *(c.label(st) for st, c in per_status.items()))
               .group_by(Response.interview_id).subquery())
     rows = db.execute(
-        select(Interview.id, Interview.created_at, Interview.status, Applicant.name,
+        select(Interview.id, Interview.created_at, Interview.status, Interview.question_set,
+               Interview.language, Interview.mode, Applicant.name,
                Assessment.risk_class, Decision.decision,
                counts.c.queued, counts.c.transcribed, counts.c.failed)
         .join(Applicant, Interview.applicant_id == Applicant.id)
@@ -296,9 +339,10 @@ def list_interviews(db: Session = Depends(get_db)):
             c.queued, c.transcribing = c.queued - 1, 1
         out.append(s.InterviewSummary(
             id=r.id, applicant_name=r.name, created_at=r.created_at, status=r.status,
+            question_set=r.question_set, language=r.language, mode=r.mode,
             responses_recorded=c.queued + c.transcribing + c.transcribed + c.failed,
-            questions_total=QUESTIONS_TOTAL, counts=c, risk_class=r.risk_class,
-            decision=r.decision))
+            questions_total=len(QUESTION_SETS[r.question_set]), counts=c,
+            risk_class=r.risk_class, decision=r.decision))
     return out
 
 
@@ -308,10 +352,7 @@ def upload_response(interview_id: int, background: BackgroundTasks,
                     file: UploadFile = File(...), sentence_no: int = Form(..., ge=1),
                     db: Session = Depends(get_db)):
     iv = get_interview(db, interview_id)
-    require_open(iv)
-    if db.scalar(select(Response.id).where(Response.interview_id == iv.id,
-                                           Response.sentence_no == sentence_no)):
-        raise HTTPException(409, f"sentence {sentence_no} already has a response")
+    q = require_answerable(db, iv, sentence_no)
 
     suffix = Path(file.filename or "").suffix.lower()
     ctype = (file.content_type or "").split(";")[0].strip().lower()
@@ -332,9 +373,8 @@ def upload_response(interview_id: int, background: BackgroundTasks,
         if size == 0:
             raise HTTPException(415, "empty upload")
 
-        r = Response(interview_id=iv.id, sentence_no=sentence_no,
-                     domain=pl.ingest_audio.domain_for(sentence_no) or None,
-                     audio_path="", status="queued")
+        r = Response(interview_id=iv.id, sentence_no=sentence_no, domain=q.topic,
+                     source="audio", audio_path="", status="queued")
         db.add(r)
         db.flush()
         dst = folder / f"response_{r.id}_s{sentence_no:02d}.wav"
@@ -358,6 +398,40 @@ def upload_response(interview_id: int, background: BackgroundTasks,
                             status=r.status)
 
 
+def require_answerable(db: Session, iv: Interview, sentence_no: int) -> s.Question:
+    """The question an answer is for: open interview, in its set, not yet answered."""
+    require_open(iv)
+    q = question(iv, sentence_no)
+    if q is None:
+        raise HTTPException(422, f"sentence_no: question set {iv.question_set} has no question "
+                                 f"{sentence_no}")
+    if db.scalar(select(Response.id).where(Response.interview_id == iv.id,
+                                           Response.sentence_no == sentence_no)):
+        raise HTTPException(409, f"sentence {sentence_no} already has a response")
+    return q
+
+
+@app.post("/api/interviews/{interview_id}/responses/typed", status_code=201,
+          response_model=s.ResponseOut, responses=ERRORS, dependencies=OFFICER)
+def type_response(interview_id: int, body: s.TypedResponse, db: Session = Depends(get_db)):
+    """An answer typed by the officer instead of recorded: no audio, no ASR,
+    ready for review at once."""
+    iv = get_interview(db, interview_id)
+    q = require_answerable(db, iv, body.sentence_no)
+    text = body.text.strip()
+    if not text:
+        raise HTTPException(422, "text: must not be blank")
+    r = Response(interview_id=iv.id, sentence_no=body.sentence_no, domain=q.topic,
+                 source="typed", audio_path="", status="transcribed", transcript=text)
+    db.add(r)
+    try:
+        db.commit()
+    except IntegrityError:  # lost a race for the same sentence_no
+        db.rollback()
+        raise HTTPException(409, f"sentence {body.sentence_no} already has a response")
+    return s.ResponseOut.model_validate(r)
+
+
 @app.get("/api/interviews/{interview_id}", response_model=s.InterviewState,
          responses=ERRORS, dependencies=OFFICER)
 def interview_state(interview_id: int, db: Session = Depends(get_db)):
@@ -370,7 +444,8 @@ def interview_state(interview_id: int, db: Session = Depends(get_db)):
             out.status = "transcribing"
         setattr(counts, out.status, getattr(counts, out.status) + 1)
         responses.append(out)
-    return s.InterviewState(id=iv.id, status=iv.status, created_at=iv.created_at,
+    return s.InterviewState(id=iv.id, status=iv.status, question_set=iv.question_set,
+                            language=iv.language, mode=iv.mode, created_at=iv.created_at,
                             applicant=s.Applicant.model_validate(iv.applicant),
                             counts=counts, responses=responses,
                             assessment=iv.assessment and s.AssessmentOut.model_validate(iv.assessment),
@@ -384,6 +459,8 @@ def response_audio(response_id: int, db: Session = Depends(get_db)):
     r = db.get(Response, response_id)
     if r is None:
         raise HTTPException(404, f"response {response_id} not found")
+    if r.source == "typed":
+        raise HTTPException(404, f"response {response_id} was typed; it has no audio")
     path = Path(r.audio_path) if r.audio_path else None
     if path is None or not path.is_file():
         raise HTTPException(404, f"audio for response {response_id} is missing")
@@ -436,6 +513,14 @@ def delete_response(response_id: int, db: Session = Depends(get_db)):
     return s.ResponseDeleted(**out, was_queued=was_queued)
 
 
+def form_of(ap: Applicant) -> dict | None:
+    """The applicant form as extraction fields, or None if it was never filled
+    (interviews from before the form existed)."""
+    if all(v is None for v in (ap.age, ap.sex, ap.education, ap.marital_status)):
+        return None
+    return pl.score_interview.form_values(ap.age, ap.sex, ap.education, ap.marital_status)
+
+
 @app.post("/api/interviews/{interview_id}/assess", status_code=201,
           response_model=s.AssessmentOut, responses=ERRORS)
 def assess(interview_id: int, db: Session = Depends(get_db),
@@ -454,7 +539,9 @@ def assess(interview_id: int, db: Session = Depends(get_db),
     if not (config.CLASSIFIER_PATH.exists() and config.CLASSIFIER_META_PATH.exists()):
         raise HTTPException(503, "classifier not available; run scripts/train_and_save.py")
 
-    pending = [r for r in usable if r.translated_at is None]
+    # English interviews were answered in English: nothing to translate.
+    english_interview = iv.language == "en"
+    pending = [] if english_interview else [r for r in usable if r.translated_at is None]
     if pending:
         try:
             results = pl.translate_extract.translate_batch(
@@ -470,24 +557,33 @@ def assess(interview_id: int, db: Session = Depends(get_db),
             r.translation, r.signals, r.translated_at = str(d["english"] or ""), [str(x) for x in sig], now
         db.commit()  # keep translations even if extraction fails below
 
-    english = [(r.sentence_no, r.translation or "") for r in usable]
-    if not any(e.strip() for _, e in english):
+    sc = pl.score_interview
+    answers = []
+    for r in usable:
+        q = question(iv, r.sentence_no)
+        answers.append(sc.Answer(r.sentence_no,
+                                 (r.transcript if english_interview else r.translation) or "",
+                                 q.text_en if q else "", tuple(q.features) if q else ()))
+    if not any(a.text.strip() for a in answers):
         raise HTTPException(409, "no response produced an English translation")
+    form = form_of(iv.applicant)
     try:
-        feats = pl.score_interview.extract_features(
-            english, key=config.GEMINI_API_KEY, model=config.GEMINI_MODEL, log=log.info)
+        feats = sc.extract_features(answers, known=sc.FORM_FIELDS if form else (),
+                                    key=config.GEMINI_API_KEY, model=config.GEMINI_MODEL,
+                                    log=log.info)
     except Exception as e:
         raise upstream_error("feature extraction", e)
     if not isinstance(feats, dict):
         raise HTTPException(502, "feature extraction: expected a JSON object")
 
-    scored = pl.score_interview.score(feats, config.CLASSIFIER_PATH, config.CLASSIFIER_META_PATH)
+    scored = sc.score(feats, config.CLASSIFIER_PATH, config.CLASSIFIER_META_PATH, form=form)
     out = scored.assessment
     vector = {c: None if math.isnan(v := float(x)) else v
               for c, x in scored.vector.iloc[0].items()}
     a = Assessment(interview_id=iv.id, risk_class=out["risk_class"],
                    probabilities=out["probabilities"], feature_vector=vector,
                    contributions=out["top_contributions"], extracted=out["extracted"],
+                   applicant_form=out["applicant_form"],
                    extraction_completeness=out["extraction_completeness"],
                    features_populated=out["features_populated"],
                    features_total=out["features_total"],
