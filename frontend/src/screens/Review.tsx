@@ -5,10 +5,12 @@ import { EditedBadge, StatusBadge, TypedBadge } from '../components/Badges'
 import { ErrorNotice, Loading, Notice } from '../components/Notice'
 import { ReplayButton } from '../components/ReplayButton'
 import { Shell } from '../components/Shell'
+import { useHealth } from '../hooks/useHealth'
 import { pending, useInterview } from '../hooks/useInterview'
 import { useQuestions } from '../hooks/useQuestions'
 import { domainLabel } from '../lib/domains'
 import { applicantName, formatDateTime } from '../lib/format'
+import { describeSeconds, realTimeFactor, transcriptionSeconds } from '../lib/pace'
 import { navigate, paths } from '../lib/router'
 import styles from './Review.module.css'
 
@@ -16,7 +18,9 @@ export function Review({ id }: { id: number }) {
   const iv = useInterview(id)
   const qs = useQuestions(iv.data?.question_set)
   const [drafts, setDrafts] = useState<Record<number, string>>({})
+  const health = useHealth()
   const data = iv.data
+  const rtf = data ? realTimeFactor(health, data.language) : null
   const name = applicantName(data?.applicant.name)
 
   const setDraft = (rid: number, text: string | undefined) =>
@@ -50,7 +54,7 @@ export function Review({ id }: { id: number }) {
             </Notice>
           )}
 
-          <Summary interview={data} total={qs.questions?.length ?? data.responses.length} />
+          <Summary interview={data} total={qs.questions?.length ?? data.responses.length} rtf={rtf} />
 
           {data.responses.length === 0 && (
             <div className={`card ${styles.empty}`}>
@@ -62,7 +66,7 @@ export function Review({ id }: { id: number }) {
           <ol className={styles.list}>
             {data.responses.map((r) => (
               <li key={r.id}>
-                <ResponseCard response={r} question={questionFor(r.sentence_no)} english={data.language === 'en'}
+                <ResponseCard response={r} question={questionFor(r.sentence_no)} english={data.language === 'en'} rtf={rtf}
                               readOnly={data.status === 'assessed'} draft={drafts[r.id]}
                               onDraft={(t) => setDraft(r.id, t)} onSaved={iv.refresh} />
               </li>
@@ -78,14 +82,16 @@ export function Review({ id }: { id: number }) {
   )
 }
 
-function Summary({ interview, total }: { interview: InterviewState; total: number }) {
-  const waiting = interview.counts.queued + interview.counts.transcribing
+function Summary({ interview, total, rtf }: { interview: InterviewState; total: number; rtf: number | null }) {
+  const waiting = interview.responses.filter((r) => r.status === 'queued' || r.status === 'transcribing')
   const missing = total - interview.responses.length
+  const eta = rtf === null ? null : transcriptionSeconds(rtf, waiting.map((r) => r.duration_s))
   return (
     <>
-      {waiting > 0 && (
-        <Notice tone="calm" title={`${waiting} ${waiting === 1 ? 'answer is' : 'answers are'} still being transcribed`}>
-          This is expected: each answer takes about 35 seconds. You can review the others meanwhile; this page updates by itself.
+      {waiting.length > 0 && (
+        <Notice tone="calm" title={`${waiting.length} ${waiting.length === 1 ? 'answer is' : 'answers are'} still being transcribed`}>
+          This is expected{eta !== null && <>: {waiting.length === 1 ? 'it' : 'they'} should be ready in {describeSeconds(eta)}</>}.
+          {' '}You can review the others meanwhile; this page updates by itself.
         </Notice>
       )}
       {missing > 0 && interview.status === 'open' && (
@@ -98,10 +104,11 @@ function Summary({ interview, total }: { interview: InterviewState; total: numbe
   )
 }
 
-function ResponseCard({ response: r, question, english, readOnly, draft, onDraft, onSaved }: {
+function ResponseCard({ response: r, question, english, rtf, readOnly, draft, onDraft, onSaved }: {
   response: ResponseOut
   question: Question | undefined
   english: boolean
+  rtf: number | null
   readOnly: boolean
   draft: string | undefined
   onDraft: (text: string | undefined) => void
@@ -147,7 +154,9 @@ function ResponseCard({ response: r, question, english, readOnly, draft, onDraft
 
       {(r.status === 'queued' || r.status === 'transcribing') ? (
         <p className={styles.waiting}>
-          {r.status === 'transcribing' ? 'Being transcribed now — about 35 seconds.' : 'Waiting its turn to be transcribed.'}
+          {r.status === 'transcribing'
+            ? `Being transcribed now${rtf === null ? '' : ` — usually ${describeSeconds(transcriptionSeconds(rtf, [r.duration_s]))}`}.`
+            : 'Waiting its turn to be transcribed.'}
         </p>
       ) : editable ? (
         <>

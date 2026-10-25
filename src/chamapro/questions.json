@@ -390,7 +390,7 @@
     "version": "v2",
     "topic": "income_sources",
     "order": 3,
-    "text_en": "What other ways does your household get money — for example farming, livestock, casual work, a business, or money sent by relatives? How much of it comes from farming?",
+    "text_en": "Which of these ways do you get money from? Tell me all of them: farming crops, keeping animals or fishing; a regular job with a salary; casual or seasonal work; your own business; money from the government or an organisation, such as pesa ya wazee or Inua Jamii; renting out land, a house, rooms or equipment; shares or other investments; a pension; or money from family, friends or your husband or wife, including money they send you. Is there any other way, or none of these? How much of your money comes from farming?",
     "text_kik": "",
     "features": [
       "B3A__1",
@@ -412,7 +412,7 @@
     "version": "v2",
     "topic": "savings_in_kind",
     "order": 4,
-    "text_en": "Apart from money, do you keep savings in other forms, such as livestock, stored grain, land or household goods?",
+    "text_en": "Apart from money, do you keep savings in any of these forms: land, buildings or houses; animals such as cows, goats or chickens; jewellery; something you own online, such as cryptocurrency; or trees you planted to sell later, for timber or fruit?",
     "text_kik": "",
     "features": [
       "F1__1",
@@ -427,7 +427,7 @@
     "version": "v2",
     "topic": "purchases",
     "order": 5,
-    "text_en": "In the last 12 months, have you bought land or a plot, built or improved a house, or bought equipment or animals for your farm or business?",
+    "text_en": "In the last 12 months, did you yourself buy any of these: land; a new house; materials to build or improve a house; machines, vehicles, tools or a building for your business; machines, vehicles or tools for farming or keeping animals; or animals such as cows, goats or chickens?",
     "text_kik": "",
     "features": [
       "B1L__1",

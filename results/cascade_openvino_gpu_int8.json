@@ -1,0 +1,164 @@
+{
+ "generated_at": "2026-10-25T21:36:32+00:00",
+ "generator": "scripts/aggregate_cascade.py over scripts/translate_extract.py --input <asr csv> --out <csv> runs, scored with scripts/score.py",
+ "question": "does the OpenVINO GPU int8 engine (timestamped decoding) cost downstream translation quality against the Paza torch transcripts?",
+ "settings": {
+  "translator": "gemini-3.5-flash",
+  "temperature": 0,
+  "chunk": 10,
+  "prompt": "translate_extract.PROMPT, unchanged",
+  "references": "data/manifest.csv english_ref",
+  "metrics": "sacrebleu corpus chrF++ (word_order=2) and BLEU"
+ },
+ "baseline": {
+  "system": "paza_torch (results/summary.json)",
+  "asr_file": "data/asr_paza.csv",
+  "translation_file": "data/translation_output.csv",
+  "chrf_pp": 47.15,
+  "bleu": 29.67,
+  "by_domain_chrf_pp": {
+   "household": 86.46,
+   "income": 38.55,
+   "expenditure": 41.43,
+   "assets": 29.07,
+   "debt_repayment": 49.72,
+   "sacco_history": 51.93,
+   "chama": 34.85,
+   "intent_planning": 41.34
+  },
+  "note": "translated 2026-10-15 before translate_extract pinned temperature 0 and before .env was last edited, so its Gemini model and sampling are not recorded; the paza_torch_rerun rows re-translate the same transcripts under this file's settings as a like-for-like control"
+ },
+ "runs": {
+  "openvino_gpu_int8_timestamps": {
+   "asr_file": "data/asr_benchmark/openvino_gpu_timestamps.csv",
+   "repeats": [
+    {
+     "translation_file": "data/translation_output_ov_gpu_int8_r1.csv",
+     "corpus": {
+      "n": 40,
+      "translated": 32,
+      "chrf++": 46.81,
+      "bleu": 27.65
+     },
+     "by_domain_chrf_pp": {
+      "household": 76.33,
+      "income": 44.49,
+      "expenditure": 53.63,
+      "assets": 32.75,
+      "debt_repayment": 45.49,
+      "sacco_history": 52.88,
+      "chama": 15.98,
+      "intent_planning": 44.5
+     },
+     "by_domain_bleu": {
+      "household": 59.99,
+      "income": 24.29,
+      "expenditure": 28.37,
+      "assets": 13.32,
+      "debt_repayment": 11.37,
+      "sacco_history": 25.08,
+      "chama": 4.98,
+      "intent_planning": 14.42
+     }
+    },
+    {
+     "translation_file": "data/translation_output_ov_gpu_int8_r2.csv",
+     "corpus": {
+      "n": 40,
+      "translated": 33,
+      "chrf++": 46.93,
+      "bleu": 27.07
+     },
+     "by_domain_chrf_pp": {
+      "household": 80.72,
+      "income": 52.3,
+      "expenditure": 50.13,
+      "assets": 29.8,
+      "debt_repayment": 39.64,
+      "sacco_history": 54.26,
+      "chama": 14.78,
+      "intent_planning": 43.72
+     },
+     "by_domain_bleu": {
+      "household": 68.95,
+      "income": 18.29,
+      "expenditure": 18.98,
+      "assets": 11.75,
+      "debt_repayment": 11.13,
+      "sacco_history": 28.23,
+      "chama": 4.03,
+      "intent_planning": 14.83
+     }
+    }
+   ],
+   "mean_chrf_pp": 46.87,
+   "mean_bleu": 27.36
+  },
+  "paza_torch_rerun": {
+   "asr_file": "data/asr_paza.csv",
+   "repeats": [
+    {
+     "translation_file": "data/translation_output_paza_rerun_r1.csv",
+     "corpus": {
+      "n": 40,
+      "translated": 32,
+      "chrf++": 47.7,
+      "bleu": 30.19
+     },
+     "by_domain_chrf_pp": {
+      "household": 86.17,
+      "income": 44.14,
+      "expenditure": 38.52,
+      "assets": 24.88,
+      "debt_repayment": 48.75,
+      "sacco_history": 52.98,
+      "chama": 34.85,
+      "intent_planning": 44.57
+     },
+     "by_domain_bleu": {
+      "household": 77.22,
+      "income": 23.25,
+      "expenditure": 15.64,
+      "assets": 9.14,
+      "debt_repayment": 22.44,
+      "sacco_history": 25.64,
+      "chama": 17.91,
+      "intent_planning": 16.6
+     }
+    },
+    {
+     "translation_file": "data/translation_output_paza_rerun_r2.csv",
+     "corpus": {
+      "n": 40,
+      "translated": 31,
+      "chrf++": 46.04,
+      "bleu": 30.44
+     },
+     "by_domain_chrf_pp": {
+      "household": 86.17,
+      "income": 37.12,
+      "expenditure": 41.21,
+      "assets": 24.88,
+      "debt_repayment": 49.48,
+      "sacco_history": 51.94,
+      "chama": 30.33,
+      "intent_planning": 39.74
+     },
+     "by_domain_bleu": {
+      "household": 77.33,
+      "income": 21.09,
+      "expenditure": 26.88,
+      "assets": 9.14,
+      "debt_repayment": 22.87,
+      "sacco_history": 27.22,
+      "chama": 15.64,
+      "intent_planning": 13.8
+     }
+    }
+   ],
+   "mean_chrf_pp": 46.87,
+   "mean_bleu": 30.32
+  }
+ },
+ "validation": "one speaker, 40 scripted sentences of fictional worksheet content; per-domain figures rest on 5 sentences each and are indicative only"
+}

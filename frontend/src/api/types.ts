@@ -16,6 +16,22 @@ export interface AuthConfig {
   google_client_id: string | null // null: Google sign-in not configured
 }
 
+export interface AsrStatus {
+  loaded: boolean
+  engine: string | null // openvino | torch, as actually loaded after any fallback
+  device: string | null // GPU | CPU, as actually loaded after any fallback
+  model: string | null
+  language: string
+  error: string | null
+}
+
+/** GET /api/health; the dashboard reads only the speech engine from it. */
+export interface Health {
+  status: 'ok' | 'degraded'
+  asr_decoding: string
+  asr: Record<Language, AsrStatus> // English loads on first use
+}
+
 /** The signed-in user (GET /api/auth/me). */
 export interface Me {
   username: string

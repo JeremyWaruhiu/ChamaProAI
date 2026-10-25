@@ -5,16 +5,17 @@ import { StatusBadge, TypedBadge } from '../components/Badges'
 import { ErrorNotice, Loading, Notice } from '../components/Notice'
 import { ReplayButton } from '../components/ReplayButton'
 import { Shell } from '../components/Shell'
+import { useHealth } from '../hooks/useHealth'
 import { useInterview } from '../hooks/useInterview'
 import { useQuestions } from '../hooks/useQuestions'
 import { extensionFor, recordingSupported, useRecorder } from '../hooks/useRecorder'
 import { domainLabel, topicsOf } from '../lib/domains'
 import { applicantName, formatClock } from '../lib/format'
+import { describeSeconds, realTimeFactor, transcriptionSeconds } from '../lib/pace'
 import { paths } from '../lib/router'
 import styles from './Recording.module.css'
 
 const MAX_BYTES = 25 * 1024 * 1024
-const SECONDS_PER_CLIP = 35
 
 export function Recording({ id, question }: { id: number; question: number | null }) {
   const iv = useInterview(id)
@@ -256,6 +257,7 @@ function AnswerPanel({ interview, q, onChange }: { interview: InterviewState; q:
 function ResponseStatus({ interview, response: r, readOnly, lang, onReRecord }: {
   interview: InterviewState; response: ResponseOut; readOnly: boolean; lang: string; onReRecord: (r: ResponseOut) => void
 }) {
+  const rtf = realTimeFactor(useHealth(), interview.language)
   let message
   if (r.source === 'typed') {
     message = (
@@ -263,14 +265,18 @@ function ResponseStatus({ interview, response: r, readOnly, lang, onReRecord }: 
         {!readOnly && <span className="muted"> You can correct this on the review screen.</span>}</p>
     )
   } else if (r.status === 'queued') {
-    const ahead = interview.responses.filter((x) => x.id < r.id && (x.status === 'queued' || x.status === 'transcribing')).length
-    const minutes = Math.max(1, Math.round(((ahead + 1) * SECONDS_PER_CLIP) / 60))
+    const ahead = interview.responses.filter((x) => x.id < r.id && (x.status === 'queued' || x.status === 'transcribing'))
+    const eta = rtf === null ? null : transcriptionSeconds(rtf, [...ahead, r].map((x) => x.duration_s))
     message = (
-      <p>Waiting its turn to be transcribed{ahead > 0 && <> — {ahead} {ahead === 1 ? 'answer' : 'answers'} ahead</>}.
-        {' '}Ready in about {minutes} {minutes === 1 ? 'minute' : 'minutes'}. You can carry on with the next question.</p>
+      <p>Waiting its turn to be transcribed{ahead.length > 0 && <> — {ahead.length} {ahead.length === 1 ? 'answer' : 'answers'} ahead</>}.
+        {eta !== null && <> Usually ready in {describeSeconds(eta)}.</>} You can carry on with the next question.</p>
     )
   } else if (r.status === 'transcribing') {
-    message = <p>Being transcribed now. This usually takes about {SECONDS_PER_CLIP} seconds. You can carry on with the next question.</p>
+    message = (
+      <p>Being transcribed now.
+        {rtf !== null && <> This usually takes {describeSeconds(transcriptionSeconds(rtf, [r.duration_s]))}.</>}
+        {' '}You can carry on with the next question.</p>
+    )
   } else if (r.status === 'transcribed') {
     message = r.transcript?.trim()
       ? <p>Heard: <span className={styles.heard} lang={lang}>“{r.transcript}”</span>{!readOnly && <span className="muted"> You can correct this on the review screen.</span>}</p>

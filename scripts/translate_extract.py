@@ -109,6 +109,9 @@ def main():
     ap.add_argument("--limit", type=int, default=0)
     ap.add_argument("--chunk", type=int, default=10,
                     help="responses per request; 0 = all in one")
+    ap.add_argument("--input", type=Path, default=Path("data/asr_output.csv"),
+                    help="ASR CSV with id, sentence_no and hypothesis (--source asr)")
+    ap.add_argument("--out", type=Path, default=OUT)
     a = ap.parse_args()
 
     try:
@@ -117,8 +120,8 @@ def main():
         sys.exit(str(e))
 
     if a.source == "asr":
-        src = Path("data/asr_output.csv")
-        if not src.exists(): sys.exit("run transcribe.py first")
+        src = a.input
+        if not src.exists(): sys.exit(f"missing {src}; run transcribe.py first")
         rows = [(r["sentence_no"], r["hypothesis"], r["id"])
                 for r in csv.DictReader(src.open(newline="", encoding="utf-8"))]
     else:
@@ -136,8 +139,8 @@ def main():
                               key=key, model=model, skip_failed=True)
     by_n = {str(d["n"]): d for d in results}
 
-    OUT.parent.mkdir(parents=True, exist_ok=True)
-    with OUT.open("w", newline="", encoding="utf-8") as fh:
+    a.out.parent.mkdir(parents=True, exist_ok=True)
+    with a.out.open("w", newline="", encoding="utf-8") as fh:
         w = csv.DictWriter(fh, fieldnames=["id","sentence_no","kikuyu_in","english_out","signals"])
         w.writeheader()
         for n, t, cid in rows:
@@ -145,7 +148,7 @@ def main():
             w.writerow({"id": cid, "sentence_no": n, "kikuyu_in": t,
                         "english_out": d.get("english", ""),
                         "signals": "; ".join(d.get("signals", []))})
-    print(f"\n{len(by_n)}/{len(rows)} translated in {time.time()-t0:.0f}s -> {OUT}")
+    print(f"\n{len(by_n)}/{len(rows)} translated in {time.time()-t0:.0f}s -> {a.out}")
 
 
 if __name__ == "__main__":

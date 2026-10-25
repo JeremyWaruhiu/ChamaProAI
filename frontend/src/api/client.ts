@@ -1,6 +1,6 @@
 import type {
   ApplicantFormOptions, Assessment, Decision, DecisionValue, InterviewCreate, InterviewState,
-  InterviewSummary, AuthConfig, Me, Question, QuestionSet, ResponseOut, ResponseQueued, Results,
+  InterviewSummary, AuthConfig, Health, Me, Question, QuestionSet, ResponseOut, ResponseQueued, Results,
 } from './types'
 
 /** No request may leave the dashboard waiting longer than this. */
@@ -86,6 +86,7 @@ const json = (method: string, body: unknown): RequestInit => ({
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 
 export const api = {
+  health: () => request<Health>('/health'),
   me: () => request<Me>('/auth/me'),
   login: (username: string, password: string) =>
     request<Me>('/auth/login', json('POST', { username: username.trim(), password })),

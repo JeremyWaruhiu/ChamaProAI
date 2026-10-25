@@ -314,6 +314,34 @@ To isolate translation quality from transcription error, run
 `translate_extract.py --source ref`, which reads `kikuyu_ref` from the manifest
 instead of the ASR output.
 
+### Cascade quality by ASR engine
+
+Whether the OpenVINO GPU int8 transcripts cost translation quality. Each ASR
+output is translated twice; the Paza torch transcripts are re-translated as a
+control, because the committed Paza figures predate pinning the translator's
+temperature to 0. Only the worksheet's fictional content is sent to Gemini.
+
+    python scripts/translate_extract.py --input data/asr_benchmark/openvino_gpu_timestamps.csv --out data/translation_output_ov_gpu_int8_r1.csv
+    python scripts/translate_extract.py --input data/asr_paza.csv --out data/translation_output_paza_rerun_r1.csv
+    # repeat both with _r2, then:
+    python scripts/aggregate_cascade.py
+
+`aggregate_cascade.py` scores the four translations with `score.py` and writes
+only aggregates to `results/cascade_openvino_gpu_int8.json`; translations stay
+in `data/` (gitignored). It records `GEMINI_MODEL` from `.env` as the
+translator (`--translator` to override). Results (`gemini-3.5-flash`, mean of
+two repeats):
+
+| Transcripts                            | chrF++ |  BLEU |
+|----------------------------------------|-------:|------:|
+| Paza torch, committed figures          |  47.15 | 29.67 |
+| Paza torch, re-translated              |  46.87 | 30.32 |
+| OpenVINO GPU int8, timestamped         |  46.87 | 27.36 |
+
+The two control repeats differ by 1.7 chrF++, as much as any engine effect.
+Per domain, chama drops sharply on GPU int8 (32.59 to 15.38 chrF++) while
+income and expenditure rise; five sentences per domain make these indicative only.
+
 ### Running the API
 
     uvicorn chamapro.api.main:app --reload --reload-dir src --reload-dir scripts
@@ -457,9 +485,10 @@ a password or with Google.
 - Feature extraction requires connectivity; capture and typed entry do not.
 - Question set v2 has no Kikuyu wording yet (`text_kik` is ""); the dashboard
   shows the English until a native speaker supplies it.
-- v2 question 4 asks about stored grain and household goods, which have no
-  classifier feature; jewellery, digital assets and agroforestry (F1__3-5)
-  are recorded only if the applicant mentions them.
+- v2 questions 3-5 name exactly the FinAccess options behind their flags
+  (B3A__1-11, F1__1-5, B1L__1-6). The codebook does not define F1__4
+  "Digital non-financial assets"; the question gives cryptocurrency as the
+  example, which is this project's reading of the label.
 
 ## Running the full system for a demo
 
