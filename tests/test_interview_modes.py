@@ -7,9 +7,10 @@ from sqlalchemy import create_engine, text
 
 from chamapro import config
 from chamapro.api import pipeline as pl
-from chamapro.api.db import Base, init_db
+from chamapro.api.db import init_db
 
 from conftest import FORM, needs_classifier, new_interview, wait_until
+from legacy_schema import make_legacy_db
 
 
 def typed(client, interview_id, n, words):
@@ -207,8 +208,8 @@ NEW_COLUMNS = {"interviews": ["question_set", "language", "mode"],
 
 
 def test_migration_keeps_existing_rows(tmp_path):
+    make_legacy_db(tmp_path / "old.db")
     engine = create_engine(f"sqlite:///{tmp_path / 'old.db'}")
-    Base.metadata.create_all(engine)
     with engine.begin() as c:                   # back to the schema before this change
         for table, cols in NEW_COLUMNS.items():
             for col in cols:

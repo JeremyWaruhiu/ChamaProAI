@@ -28,7 +28,8 @@ from .db import AuthSession, SessionLocal, User, normalise_email, utcnow
 log = logging.getLogger("chamapro.auth")
 
 COOKIE = "chamapro_session"
-ROLES = ("officer", "admin")
+ROLES = ("admin", "officer", "member")
+STAFF_ROLES = ("admin", "officer")
 BAD_LOGIN = "incorrect username or password"
 
 # scrypt cost: 16 MiB of memory per hash, about 50 ms on a laptop.
@@ -211,9 +212,16 @@ def current_user(request: Request) -> User:
 
 
 def require_officer(user: User = Depends(current_user)) -> User:
-    """Officers and admins: the interview, response, assessment and decision endpoints."""
-    if user.role not in ROLES:
+    """Officers and admins: every staff endpoint. Members are refused."""
+    if user.role not in STAFF_ROLES:
         raise HTTPException(403, "your account has no role that allows this")
+    return user
+
+
+def require_member(user: User = Depends(current_user)) -> User:
+    """A member's own self-service endpoints (/api/me/...)."""
+    if user.role != "member":
+        raise HTTPException(403, "members only")
     return user
 
 

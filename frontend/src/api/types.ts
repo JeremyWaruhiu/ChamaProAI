@@ -3,7 +3,8 @@
 export type ResponseStatus = 'queued' | 'transcribing' | 'transcribed' | 'failed'
 export type InterviewStatus = 'open' | 'assessed'
 export type DecisionValue = 'approve' | 'decline' | 'refer'
-export type Role = 'officer' | 'admin'
+export type Outcome = 'approve' | 'approve_with_guarantor' | 'approve_reduced' | 'refer' | 'decline'
+export type Role = 'officer' | 'admin' | 'member'
 export type QuestionSet = 'v1' | 'v2'
 export type Language = 'kik' | 'en'
 export type Mode = 'live' | 'practice'
@@ -142,8 +143,13 @@ export interface Assessment {
 }
 
 export interface Decision {
-  decision: DecisionValue
-  note: string | null
+  decision: DecisionValue // approve | decline | refer, on every decision
+  outcome?: Outcome // equal to decision on decisions made before outcomes existed
+  approved_amount_kes?: number | null
+  guarantors_required?: number | null
+  note: string | null // same as officer_notes
+  officer_notes?: string | null // never shown to members
+  member_message?: string | null
   decided_by?: string | null
   created_at: string
 }
@@ -252,6 +258,15 @@ export interface LiveStats {
   risk_class_distribution: Record<string, number>
   mean_extraction_completeness: number | null
   decision_agreement: { rule: string; decisions: number; agreements: number; rate: number | null }
+  // The SACCO rule (savings x 3, two guarantors, six months) against the model, live applications only.
+  rule_agreement?: {
+    rule: string
+    applications: number
+    agreements: number
+    divergences: number
+    undetermined: number
+    rate: number | null
+  }
 }
 
 export interface Results {

@@ -1,5 +1,6 @@
 """Sign-in, sessions, roles and the login rate limit."""
 import hashlib
+import re
 import secrets
 import subprocess
 import sys
@@ -14,7 +15,7 @@ from chamapro.api import auth
 from chamapro.api.db import AuthSession, Decision, SessionLocal, User, utcnow
 from chamapro.api.main import app
 
-from conftest import BASE_URL, PASSWORDS, add_user, needs_classifier, signed_in
+from conftest import BASE_URL, PASSWORDS, add_user, api_operations, needs_classifier, signed_in
 
 LOGIN = "/api/auth/login"
 
@@ -168,16 +169,12 @@ PUBLIC = {("GET", "/api/health"), ("POST", "/api/auth/login"), ("POST", "/api/au
 
 
 def api_routes():
-    for r in app.routes:
-        path = getattr(r, "path", "")
-        for m in getattr(r, "methods", set()) - {"HEAD", "OPTIONS"}:
-            if path.startswith("/api/") and (m, path) not in PUBLIC:
-                yield m, path
+    return ((m, path) for m, path in api_operations() if (m, path) not in PUBLIC)
 
 
 @pytest.mark.parametrize("method,path", sorted(api_routes()))
 def test_protected_endpoints_need_sign_in(anon_client, method, path):
-    url = path.replace("{interview_id}", "1").replace("{response_id}", "1")
+    url = re.sub(r"\{[a-z_]+\}", "1", path)
     r = anon_client.request(method, url)
     assert r.status_code == 401, f"{method} {path} -> {r.status_code}"
 
@@ -265,6 +262,24 @@ def test_create_user_script(client):
 
     again = run_create_user(name, stdin=f"{pw}\n{pw}\n")
     assert again.returncode != 0 and "already exists" in again.stderr
+
+
+def test_create_user_script_links_a_member(client):
+    from conftest import new_member
+    mid, no, _ = new_member(login=False)
+    name, pw = "mem_" + secrets.token_hex(4), secrets.token_urlsafe(16)
+    r = run_create_user(name, "--role", "member", "--member-no", no, stdin=f"{pw}\n{pw}\n")
+    assert r.returncode == 0, r.stderr
+    assert f"for member {no}" in r.stdout
+    c = TestClient(app, base_url=BASE_URL)
+    assert c.post("/api/auth/login", json={"username": name, "password": pw}).status_code == 200
+    assert c.get("/api/me/applications").json() == []                    # linked, no applications
+    taken = run_create_user("mem_" + secrets.token_hex(4), "--role", "member", "--member-no", no,
+                            stdin=f"{pw}\n{pw}\n")
+    assert taken.returncode != 0 and "already has a login" in taken.stderr
+    officer = run_create_user("off_" + secrets.token_hex(4), "--member-no", no,
+                              stdin=f"{pw}\n{pw}\n")
+    assert officer.returncode != 0 and "only for --role member" in officer.stderr
 
 
 def test_create_user_rejects_mismatch_and_short_passwords(client):

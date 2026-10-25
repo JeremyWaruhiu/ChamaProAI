@@ -39,6 +39,9 @@ fastapi>=0.115
 uvicorn[standard]>=0.30
 python-multipart         # multipart audio uploads
 sqlalchemy>=2.0
+alembic>=1.13           # schema migrations (src/chamapro/migrations)
+psycopg[binary]>=3.2    # PostgreSQL driver: Supabase via DATABASE_URL
+supabase>=2.10          # audio in a private Supabase bucket (STORAGE_BACKEND=supabase)
 google-auth>=2.30       # verifies Google sign-in ID tokens
 
 # --- Tests ---

@@ -357,7 +357,9 @@ model once (about 15 s for the OpenVINO GPU export, a minute for torch on
 CPU); the English model loads the first time an English answer is
 transcribed. State lives in `data/chamapro.db` (SQLite) and
 uploaded audio in `data/uploads/<interview_id>/`; both are gitignored. Optional
-`CHAMAPRO_DB` and `CHAMAPRO_UPLOADS` move them elsewhere.
+`CHAMAPRO_DB` and `CHAMAPRO_UPLOADS` move them elsewhere. `DATABASE_URL` and
+`STORAGE_BACKEND=supabase` move both to Supabase instead; see
+[Switching to Supabase](#switching-to-supabase).
 
 | Method | Path                               | Purpose                                         |
 |--------|------------------------------------|-------------------------------------------------|
@@ -372,7 +374,23 @@ uploaded audio in `data/uploads/<interview_id>/`; both are gitignored. Optional
 | DELETE | `/api/responses/{id}`              | discard a clip so its sentence can be re-recorded; 409 while it is being transcribed |
 | GET    | `/api/responses/{id}/audio`        | the stored 16 kHz clip, for replay              |
 | POST   | `/api/interviews/{id}/assess`      | translate (Kikuyu only), extract, score; stores the assessment |
-| POST   | `/api/interviews/{id}/decision`    | the officer's decision `{decision: approve\|decline\|refer, note?}`, after assessment, once |
+| POST   | `/api/interviews/{id}/decision`    | the officer's decision, after assessment, once: as for applications below; `{decision: approve\|decline\|refer, note?}` still works |
+| GET    | `/api/members?q=`                  | members, searched by name or member number (staff) |
+| POST   | `/api/members`                     | a member `{member_no, full_name, phone?, joined_on}`; no national ID is stored |
+| GET/PATCH/DELETE | `/api/members/{id}`      | read, correct, or delete a member without applications |
+| POST   | `/api/applications`                | a loan application `{member_id, amount_requested_kes, purpose, term_months, sacco_savings_kes, interview_id?}` |
+| GET    | `/api/applications?status=&member_id=` | applications, newest first |
+| GET    | `/api/applications/{id}`           | detail: member, interview, assessment, decision, guarantors, timeline and the SACCO rule comparator |
+| PUT    | `/api/applications/{id}/interview` | link an interview `{interview_id}`, until it is assessed |
+| POST   | `/api/applications/{id}/decision`  | `{outcome: approve\|approve_with_guarantor\|approve_reduced\|refer\|decline, approved_amount_kes?, guarantors_required?, officer_notes?, member_message?}` |
+| POST   | `/api/guarantors/{id}/verify`, `/reject` | the officer reviews one guarantor `{reason?}` |
+| GET    | `/api/me/applications`             | a member's own applications (members only) |
+| GET    | `/api/me/applications/{id}`        | status timeline, outcome, message and three plain-language reasons |
+| POST   | `/api/me/applications/{id}/guarantors` | `{guarantors: [{full_name, member_no, phone, relationship, amount_guaranteed_kes}]}`, when asked for |
+| GET/POST | `/api/admin/users`               | list users; create `{username, password, role, email?, member_id?}` (admin) |
+| POST   | `/api/admin/users/{id}/deactivate`, `/activate` | (admin) |
+| PUT    | `/api/admin/users/{id}/password`, `/role`, `/google-email`, `/member` | reset a password, change role, link a Google email or a member record (admin) |
+| GET    | `/api/admin/audit?actor_user_id=&action=&entity=&entity_id=&since=&until=` | the audit log, newest first (admin) |
 | GET    | `/api/health`                      | classifier, API key, ASR engine/device/model per language (no sign-in needed) |
 | POST   | `/api/auth/login`                  | `{username, password}`; sets the session cookie, returns `{username, role}` |
 | POST   | `/api/auth/google`                 | `{credential}` (Google ID token); signs in the linked user; 404 when not configured |
@@ -382,9 +400,15 @@ uploaded audio in `data/uploads/<interview_id>/`; both are gitignored. Optional
 | GET    | `/api/results`                     | model and evaluation summary plus live stats, practice interviews excluded (admin only) |
 
 Every endpoint except `/api/health`, `/api/auth/config` and the sign-in endpoints needs a signed-in
-user: 401 without one, 403 for an officer on an admin-only endpoint. Officers
-and admins may use the interview, response, assessment and decision endpoints;
-only admins may read `/api/results`. Sign-in sets an HttpOnly, SameSite=Strict
+user: 401 without one, 403 for the wrong role. There are three roles. Officers
+and admins (staff) may use the interview, response, assessment, decision,
+member, application and guarantor endpoints; only admins may read
+`/api/results` and use `/api/admin/...`. Members may use only `/api/me/...`
+and see only the applications of the member record linked to their login;
+another member's application is a 404. A member never sees probabilities, the
+risk class, feature names or the officer's notes, only the status, the
+outcome, the officer's message to them and three plain-language reasons from
+the top SHAP factors (age, sex and marital status are never given as reasons). Sign-in sets an HttpOnly, SameSite=Strict
 session cookie that lasts 8 hours (Secure except on localhost;
 `CHAMAPRO_COOKIE_SECURE=1` or `0` overrides). Five failed sign-ins for one
 username within 15 minutes lock it out for the rest of that window (429).
@@ -395,10 +419,36 @@ rows from before sign-in existed keep a null there.
 An assessment is written once and never changed: it stores the exact feature
 vector the classifier saw, the probabilities, SHAP contributions and the
 classifier's filename and SHA-256. The officer's decision is a separate record,
-written once after the assessment. SQLite triggers reject any UPDATE or DELETE
-on the `assessments` and `decisions` tables. Once an interview is assessed, its
+written once after the assessment. Database triggers reject any UPDATE or
+DELETE on the `assessments` and `decisions` tables, and on the append-only
+`audit_log`, on SQLite and on PostgreSQL alike (PostgreSQL also refuses
+TRUNCATE). Once an interview is assessed, its
 responses can no longer be added, edited or deleted. Clips are transcribed one
 at a time, in the background.
+
+**Loan applications.** An application belongs to a member and, once linked,
+to one interview; its status follows the interview (`draft`,
+`interview_pending`, `interview_complete`, `assessed`) and then the decision:
+`approve` and `approve_reduced` (an amount below the request) make it
+`approved`, `decline` makes it `declined`, `refer` makes it `decided`, and
+`approve_with_guarantor` makes it `guarantor_required` with
+`guarantors_required` (default 2). The member then submits exactly that many
+guarantors (`guarantor_submitted`); the officer verifies or rejects each, and
+the application is `approved` once enough are verified (a rejection sends it
+back to `guarantor_required` for a replacement). Every application with an
+assessment carries the **SACCO rule comparator** (Chapter 5), computed live
+and never stored in the assessment: the amount at most 3 x `sacco_savings_kes`,
+at least 2 guarantors (`pending` until submitted, never failed before), at
+least 6 months from the member's `joined_on` to the application, each with
+its result and whether it agrees with the model (Low = approve, High = decline;
+Medium is a referral, so `undetermined`). Practice interviews get it too;
+`/api/results` counts only live ones.
+
+**Audit log.** Every create, status change, decision, guarantor action and
+user change writes an `audit_log` row (actor, action, entity, id, details) in
+the same transaction as the change. Details hold ids, statuses, amounts and
+field names, never names, phone numbers, notes or passwords: the log cannot be
+erased, so it must not hold personal data that may later have to be.
 
 **Interview options.** An interview's `language` is `kik` (Kikuyu answers,
 transcribed by Paza and translated to English before extraction) or `en`
@@ -408,9 +458,25 @@ works the same way, but every dashboard screen of it shows a practice banner,
 its decision is labelled practice, and it is left out of every live figure
 on the Model & Evaluation page. Any answer can be typed instead of recorded.
 
-The database is migrated in place at startup: existing interviews become
-`v1`, `kik`, `live`, existing responses `audio`, and nothing else changes
-(ADD COLUMN only, so the immutability triggers are untouched).
+**Migrations.** The schema is owned by Alembic (`src/chamapro/migrations`,
+`alembic.ini`). `0001` is the baseline: it creates a fresh database, or adopts
+one made before Alembic by adding only what is missing (existing interviews
+become `v1`, `kik`, `live`, responses `audio`). `0002` adds members, loan
+applications, guarantors and the audit log, and adds the new decision columns
+with ADD COLUMN only: existing decisions keep every value, read with
+`outcome` equal to their `decision`, and no immutability trigger fires or is
+dropped.
+
+    alembic upgrade head            # the database in DATABASE_URL, else data/chamapro.db
+    alembic current
+
+A SQLite database is also upgraded when the API (or any script) starts. If it
+already holds tables, it is first copied to
+`data/chamapro.db.pre-<revision>-<time>.bak`, and the upgrade runs in one
+transaction, so a failure leaves it as it was. PostgreSQL is never migrated
+implicitly: the API refuses to start until `alembic upgrade head` has been run.
+Note that `uvicorn --reload` restarts on every change under `src/`, so pulling
+a new migration upgrades the database at the next reload.
 
 ### Users
 
@@ -426,6 +492,13 @@ Then add each loan officer (the role defaults to `officer`):
 
 Passwords must be at least 10 characters. The script creates the database
 tables if they do not exist yet, so it can run before the API has started.
+
+A member's login (`--role member --member-no M-0412`) sees only that member's
+own applications. Once an admin exists, users can also be managed through
+`/api/admin/users`: create, deactivate, reset a password, change a role, link
+a Google email or a member record. An admin cannot deactivate or demote
+themselves; deactivating, resetting or changing a role ends that user's
+sessions.
 
 ### Sign in with Google (optional)
 
@@ -474,6 +547,59 @@ keys). It requires `email_verified` and checks the audience and issuer, and it
 shares the password login's session, cookie, 8-hour expiry and rate limit (5
 failures per email per 15 minutes). Each session records whether it began with
 a password or with Google.
+
+### Switching to Supabase
+
+The code runs unchanged on Supabase Postgres; only the environment changes.
+Keep these values in `.env` on the server, never in the repository or the
+frontend.
+
+1. **Database.** In the Supabase dashboard, *Connect* → **Session pooler**,
+   copy the connection string and set it, with the database password filled in:
+
+       DATABASE_URL=postgresql://postgres.<project-ref>:<password>@aws-0-<region>.pooler.supabase.com:5432/postgres
+
+   The session pooler (port 5432) suits a long-running API server and works on
+   IPv4 networks; the direct connection needs IPv6, and the transaction pooler
+   (port 6543) breaks the prepared statements psycopg uses. A plain
+   `postgresql://` URL is pointed at the psycopg 3 driver automatically.
+
+2. **Schema.** Create the tables, triggers and row-level security:
+
+       alembic upgrade head
+
+   Run it again after every pull that adds a migration; the API refuses to
+   start on an out-of-date PostgreSQL schema rather than migrating it itself.
+   Every table gets row-level security with no policies, so Supabase's Data
+   API (the anon and authenticated keys) can read nothing; the backend
+   connects as the table owner and is not affected. To move existing SQLite
+   data across, copy the rows after the schema exists (for example with
+   `pgloader`); the migration does not do it.
+
+3. **Audio.** In *Storage*, create a bucket named `interview-audio` (or set
+   `SUPABASE_BUCKET`) and leave **Public bucket off**. Then:
+
+       STORAGE_BACKEND=supabase
+       SUPABASE_URL=https://<project-ref>.supabase.co
+       SUPABASE_SERVICE_ROLE_KEY=<service_role or secret key, Project Settings → API Keys>
+       SUPABASE_SIGNED_URL_SECONDS=120        # optional
+
+   Uploads are converted locally as before, stored in the bucket, and replayed
+   through a redirect to a signed URL that expires after
+   `SUPABASE_SIGNED_URL_SECONDS`. Clips recorded before the switch stay on disk
+   and still replay.
+
+4. **The service-role key.** It bypasses every access rule in the project.
+   It is read by the backend only (`chamapro.config`) and never sent to a
+   browser: never put it in the frontend, in a `VITE_` variable, in a commit,
+   in a log or in a screenshot. If it leaks, rotate it in the Supabase
+   dashboard at once.
+
+The test suite stays on SQLite and never touches the network.
+`tests/test_postgres.py` checks the migrations, triggers and row-level
+security on a real PostgreSQL server you point it at with
+`CHAMAPRO_TEST_POSTGRES_URL` (it creates and drops its own scratch database,
+so never point it at production).
 
 ### Known limitations
 
@@ -539,6 +665,12 @@ A demo run:
   the background while you move to the next question; any answer can be
   typed instead.
 
+- Sign in as **demo.officer** (password printed by `seed_demo.py`) to see two
+  loan applications for fictional members: Grace's is approved, Peter's needs
+  two guarantors. Sign in as **demo.peter** to add them through
+  `/api/me/applications/{id}/guarantors` (the dashboard has no member screens
+  yet; use http://localhost:8000/docs), then verify them as the officer.
+
 Run `seed_demo.py` again before the next demo. An assessed demo cannot be
 changed, so the script then starts a fresh one. See
 [frontend/README.md](frontend/README.md) for more on the dashboard.
@@ -556,5 +688,16 @@ in and all eight answers typed; `--practice-only` creates just that one, for
 a machine without the audio corpus. Takes about a second and needs no model.
 Safe to re-run: it changes nothing if both are complete, restores any
 response deleted for re-recording, and starts a fresh one once the previous
-one has been assessed. Audio is copied into `data/uploads/`, so re-recording
-in the dashboard never touches the corpus.
+one has been assessed. Audio is copied into `data/uploads/` (or the Supabase
+bucket), so re-recording in the dashboard never touches the corpus.
+
+It also creates demo accounts: one loan officer (`demo.officer`) and two
+fictional members (`demo.grace`, `demo.peter`), each with a member record and
+a loan application on a typed English practice interview. With the classifier
+in `models/` both are assessed by the real classifier on fixed features (no
+Gemini, no network; `extraction_model` says so) and decided by the demo
+officer: one approved, one requiring two guarantors. Practice mode keeps these
+fictional people out of the live statistics. The passwords are random, printed
+once to the terminal and written nowhere; a re-run leaves existing logins and
+their passwords alone (an admin can reset them). `--no-accounts` skips all of
+this. Run it against a demo database, not the branch's real one.

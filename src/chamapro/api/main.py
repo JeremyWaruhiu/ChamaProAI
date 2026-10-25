@@ -16,45 +16,38 @@ from fastapi import (BackgroundTasks, Depends, FastAPI, File, Form,
                      HTTPException, Query, Request, UploadFile)
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse, Response as HTTPResponse
+from fastapi.responses import (FileResponse, JSONResponse, RedirectResponse,
+                               Response as HTTPResponse)
 from sqlalchemy import case, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from chamapro import config
 
-from . import auth
+from . import admin, audit, auth, comparator, loans, storage
 from . import pipeline as pl
 from . import schemas as s
 from .auth import require_admin, require_officer
-from .db import (Applicant, Assessment, Decision, Interview, Response, SessionLocal,
-                 User, init_db, utcnow)
+from .comparator import RECOMMENDED_DECISION
+from .db import (Applicant, Assessment, Decision, Interview, LoanApplication, Response,
+                 User, get_db, init_db, utcnow)
+from .questions import CURRENT_SET, QUESTION_SETS, question
 
 if not logging.getLogger().handlers:
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
 log = logging.getLogger("chamapro.api")
 
 ERRORS = {code: {"model": s.Error} for code in (401, 403, 404, 409, 413, 415, 422, 502, 503)}
-# Every endpoint except /api/health and /api/auth/login needs a signed-in user.
+# Every endpoint except /api/health and /api/auth/login needs a signed-in user;
+# staff endpoints refuse members.
 OFFICER = [Depends(require_officer)]
-# Every question set, each in order. v1 is the 40-sentence set of the recorded
-# corpus (interviews from before question sets existed); v2 is the current one.
-QUESTION_SETS: dict[str, list[s.Question]] = {}
-for _q in json.loads(config.QUESTIONS_PATH.read_text(encoding="utf-8")):
-    QUESTION_SETS.setdefault(_q["version"], []).append(s.Question(**_q))
-for _qs in QUESTION_SETS.values():
-    _qs.sort(key=lambda q: q.order)
-CURRENT_SET = "v2"
-
-
-def question(iv: Interview, sentence_no: int) -> s.Question | None:
-    return next((q for q in QUESTION_SETS[iv.question_set] if q.order == sentence_no), None)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_db()
     config.UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
+    storage.backend()      # fail at startup, not on the first upload, if misconfigured
     pl.load_asr()
     pl.start_worker()
     yield
@@ -66,6 +59,8 @@ app = FastAPI(title="ChamaPro AI", version="0.1.0", lifespan=lifespan,
 app.add_middleware(CORSMiddleware,
                    allow_origin_regex=r"https?://(localhost|127\.0\.0\.1)(:\d+)?",
                    allow_methods=["*"], allow_headers=["*"])
+app.include_router(loans.router)
+app.include_router(admin.router)
 
 
 # --- Errors: always {"detail": "<string>"} -----------------------------------
@@ -83,11 +78,6 @@ async def _validation(request: Request, exc: RequestValidationError):
 async def _unhandled(request: Request, exc: Exception):
     log.exception("unhandled error on %s %s", request.method, request.url.path)
     return JSONResponse(status_code=500, content={"detail": "internal server error"})
-
-
-def get_db():
-    with SessionLocal() as db:
-        yield db
 
 
 def get_interview(db: Session, interview_id: int) -> Interview:
@@ -225,10 +215,6 @@ def me(user: User = Depends(auth.current_user)):
     return s.Me.model_validate(user)
 
 
-# The officer decision each model risk class recommends (RISK_MEANING in the dashboard).
-RECOMMENDED_DECISION = {"Low": "approve", "Medium": "refer", "High": "decline"}
-
-
 def live_stats(db: Session) -> dict:
     """Aggregate counts from the database; no row-level data leaves here.
     Practice interviews are left out of every figure."""
@@ -244,6 +230,11 @@ def live_stats(db: Session) -> dict:
                        .join(Decision, Decision.interview_id == Assessment.interview_id)
                        .join(Interview, Interview.id == Assessment.interview_id).where(live)).all()
     agree = sum(RECOMMENDED_DECISION.get(rc) == d for rc, d in pairs)
+    apps = db.scalars(select(LoanApplication)
+                      .join(Interview, Interview.id == LoanApplication.interview_id)
+                      .join(Assessment, Assessment.interview_id == Interview.id).where(live)).all()
+    rule = [loans.comparator_of(a).agreement for a in apps]
+    compared = rule.count("agree") + rule.count("diverge")
     return {
         "source": "live database; practice interviews excluded",
         "interview_count": db.scalar(select(func.count(Interview.id)).where(live)) or 0,
@@ -257,6 +248,14 @@ def live_stats(db: Session) -> dict:
             "decisions": len(pairs),
             "agreements": agree,
             "rate": round(agree / len(pairs), 4) if pairs else None,
+        },
+        "rule_agreement": {
+            "rule": comparator.RULE,
+            "applications": len(rule),
+            "agreements": rule.count("agree"),
+            "divergences": rule.count("diverge"),
+            "undetermined": rule.count("undetermined"),
+            "rate": round(rule.count("agree") / compared, 4) if compared else None,
         },
     }
 
@@ -298,8 +297,9 @@ def applicant_form():
 
 
 @app.post("/api/interviews", status_code=201, response_model=s.InterviewCreated,
-          responses=ERRORS, dependencies=OFFICER)
-def create_interview(body: s.InterviewCreate | None = None, db: Session = Depends(get_db)):
+          responses=ERRORS)
+def create_interview(body: s.InterviewCreate | None = None, db: Session = Depends(get_db),
+                     user: User = Depends(require_officer)):
     body = body or s.InterviewCreate()
     if body.question_set == "v2" and body.applicant is None:
         raise HTTPException(422, "applicant: the applicant form (age, sex, education, "
@@ -309,6 +309,9 @@ def create_interview(body: s.InterviewCreate | None = None, db: Session = Depend
     iv = Interview(applicant=Applicant(name=name or None, **form),
                    question_set=body.question_set, language=body.language, mode=body.mode)
     db.add(iv)
+    db.flush()
+    audit.record(db, user, "interview.create", "interview", iv.id,
+                 question_set=iv.question_set, language=iv.language, mode=iv.mode)
     db.commit()
     return s.InterviewCreated(id=iv.id, status=iv.status)
 
@@ -347,10 +350,10 @@ def list_interviews(db: Session = Depends(get_db)):
 
 
 @app.post("/api/interviews/{interview_id}/responses", status_code=202,
-          response_model=s.ResponseQueued, responses=ERRORS, dependencies=OFFICER)
+          response_model=s.ResponseQueued, responses=ERRORS)
 def upload_response(interview_id: int, background: BackgroundTasks,
                     file: UploadFile = File(...), sentence_no: int = Form(..., ge=1),
-                    db: Session = Depends(get_db)):
+                    db: Session = Depends(get_db), user: User = Depends(require_officer)):
     iv = get_interview(db, interview_id)
     q = require_answerable(db, iv, sentence_no)
 
@@ -377,18 +380,32 @@ def upload_response(interview_id: int, background: BackgroundTasks,
                      source="audio", audio_path="", status="queued")
         db.add(r)
         db.flush()
-        dst = folder / f"response_{r.id}_s{sentence_no:02d}.wav"
+        key = storage.clip_key(iv.id, r.id, sentence_no)
+        dst = config.UPLOADS_DIR / key      # converted here; the backend keeps it from here
         try:
             r.duration_s = pl.convert_upload(incoming, dst)
         except pl.NotAudio as e:
             db.rollback()
             raise HTTPException(415, str(e))
-        r.audio_path = str(dst)
+        store = storage.backend()
+        try:
+            r.audio_path = ref = store.save(dst, key)
+        except Exception:
+            db.rollback()
+            dst.unlink(missing_ok=True)
+            log.exception("could not store audio for interview %s sentence %s", iv.id, sentence_no)
+            raise HTTPException(503, "audio storage is unavailable; try again")
+        audit.record(db, user, "response.create", "response", r.id, interview_id=iv.id,
+                     sentence_no=sentence_no, source="audio")
+        loans.sync_with_interview(db, iv, user)
         try:
             db.commit()
         except IntegrityError:  # lost a race for the same sentence_no
             db.rollback()
-            dst.unlink(missing_ok=True)
+            try:
+                store.delete(ref)
+            except Exception:  # an orphan clip is harmless; the 409 is what matters
+                log.exception("could not remove %s", ref)
             raise HTTPException(409, f"sentence {sentence_no} already has a response")
     finally:
         incoming.unlink(missing_ok=True)
@@ -412,8 +429,9 @@ def require_answerable(db: Session, iv: Interview, sentence_no: int) -> s.Questi
 
 
 @app.post("/api/interviews/{interview_id}/responses/typed", status_code=201,
-          response_model=s.ResponseOut, responses=ERRORS, dependencies=OFFICER)
-def type_response(interview_id: int, body: s.TypedResponse, db: Session = Depends(get_db)):
+          response_model=s.ResponseOut, responses=ERRORS)
+def type_response(interview_id: int, body: s.TypedResponse, db: Session = Depends(get_db),
+                  user: User = Depends(require_officer)):
     """An answer typed by the officer instead of recorded: no audio, no ASR,
     ready for review at once."""
     iv = get_interview(db, interview_id)
@@ -423,8 +441,12 @@ def type_response(interview_id: int, body: s.TypedResponse, db: Session = Depend
         raise HTTPException(422, "text: must not be blank")
     r = Response(interview_id=iv.id, sentence_no=body.sentence_no, domain=q.topic,
                  source="typed", audio_path="", status="transcribed", transcript=text)
-    db.add(r)
     try:
+        db.add(r)
+        db.flush()
+        audit.record(db, user, "response.create", "response", r.id, interview_id=iv.id,
+                     sentence_no=body.sentence_no, source="typed")
+        loans.sync_with_interview(db, iv, user)
         db.commit()
     except IntegrityError:  # lost a race for the same sentence_no
         db.rollback()
@@ -448,29 +470,54 @@ def interview_state(interview_id: int, db: Session = Depends(get_db)):
                             language=iv.language, mode=iv.mode, created_at=iv.created_at,
                             applicant=s.Applicant.model_validate(iv.applicant),
                             counts=counts, responses=responses,
-                            assessment=iv.assessment and s.AssessmentOut.model_validate(iv.assessment),
-                            decision=iv.decision and s.DecisionOut.model_validate(iv.decision))
+                            assessment=assessment_out(iv),
+                            decision=iv.decision and s.DecisionOut.model_validate(iv.decision),
+                            application_id=iv.application and iv.application.id)
+
+
+def assessment_out(iv: Interview) -> s.AssessmentOut | None:
+    """The stored assessment, with the SACCO rule beside it when the interview
+    belongs to a loan application."""
+    if iv.assessment is None:
+        return None
+    out = s.AssessmentOut.model_validate(iv.assessment)
+    if iv.application is not None:
+        out.comparator = loans.comparator_of(iv.application)
+    return out
 
 
 @app.get("/api/responses/{response_id}/audio", response_class=FileResponse,
-         responses={200: {"content": {"audio/wav": {}}}, **ERRORS}, dependencies=OFFICER)
+         responses={200: {"content": {"audio/wav": {}}},
+                    307: {"description": "Supabase storage: a short-lived signed URL"}, **ERRORS},
+         dependencies=OFFICER)
 def response_audio(response_id: int, db: Session = Depends(get_db)):
-    """The stored 16 kHz clip, for replay. Readable after assessment too."""
+    """The stored 16 kHz clip, for replay. Readable after assessment too.
+    With Supabase storage, a redirect to a signed URL that soon expires."""
     r = db.get(Response, response_id)
     if r is None:
         raise HTTPException(404, f"response {response_id} not found")
     if r.source == "typed":
         raise HTTPException(404, f"response {response_id} was typed; it has no audio")
-    path = Path(r.audio_path) if r.audio_path else None
-    if path is None or not path.is_file():
+    if not r.audio_path:
+        raise HTTPException(404, f"audio for response {response_id} is missing")
+    store = storage.for_ref(r.audio_path)
+    try:
+        url = store.signed_url(r.audio_path)
+    except Exception:
+        log.exception("could not sign the audio URL for response %s", response_id)
+        raise HTTPException(503, "audio storage is unavailable; try again")
+    if url is not None:
+        return RedirectResponse(url, status_code=307)
+    path = store.local_path(r.audio_path)
+    if not path.is_file():
         raise HTTPException(404, f"audio for response {response_id} is missing")
     return FileResponse(path, media_type="audio/wav",
                         filename=f"interview{r.interview_id}_s{r.sentence_no:02d}.wav")
 
 
-@app.patch("/api/responses/{response_id}", response_model=s.ResponseOut, responses=ERRORS,
-           dependencies=OFFICER)
-def edit_transcript(response_id: int, body: s.TranscriptEdit, db: Session = Depends(get_db)):
+@app.patch("/api/responses/{response_id}", response_model=s.ResponseOut, responses=ERRORS)
+def edit_transcript(response_id: int, body: s.TranscriptEdit, db: Session = Depends(get_db),
+                    user: User = Depends(require_officer)):
     r = db.get(Response, response_id)
     if r is None:
         raise HTTPException(404, f"response {response_id} not found")
@@ -485,30 +532,37 @@ def edit_transcript(response_id: int, body: s.TranscriptEdit, db: Session = Depe
     r.status, r.error = "transcribed", None
     # the old translation described the old text; assess will redo it
     r.translation, r.signals, r.translated_at = None, None, None
+    audit.record(db, user, "response.edit", "response", r.id, interview_id=r.interview_id,
+                 sentence_no=r.sentence_no)
     db.commit()
     return s.ResponseOut.model_validate(r)
 
 
 @app.delete("/api/responses/{response_id}", response_model=s.ResponseDeleted,
-            responses=ERRORS, dependencies=OFFICER)
-def delete_response(response_id: int, db: Session = Depends(get_db)):
+            responses=ERRORS)
+def delete_response(response_id: int, db: Session = Depends(get_db),
+                    user: User = Depends(require_officer)):
     r = db.get(Response, response_id)
     if r is None:
         raise HTTPException(404, f"response {response_id} not found")
     require_open(r.interview)
     out = dict(id=r.id, interview_id=r.interview_id, sentence_no=r.sentence_no)
-    audio = Path(r.audio_path) if r.audio_path else None
+    iv, audio = r.interview, r.audio_path
     try:
         with pl.withheld(r.id) as was_queued:
             db.delete(r)
+            db.flush()
+            audit.record(db, user, "response.delete", "response", out["id"],
+                         interview_id=out["interview_id"], sentence_no=out["sentence_no"])
+            loans.sync_with_interview(db, iv, user)
             db.commit()
     except pl.TranscriptionBusy:
         raise HTTPException(409, f"response {response_id} is being transcribed right now; "
                                  "retry in a few seconds", headers={"Retry-After": "10"})
     if audio:
         try:
-            audio.unlink(missing_ok=True)
-        except OSError:  # the row is gone either way; an orphan file is harmless
+            storage.for_ref(audio).delete(audio)
+        except Exception:  # the row is gone either way; an orphan file is harmless
             log.exception("could not remove %s", audio)
     return s.ResponseDeleted(**out, was_queued=was_queued)
 
@@ -580,7 +634,7 @@ def assess(interview_id: int, db: Session = Depends(get_db),
     out = scored.assessment
     vector = {c: None if math.isnan(v := float(x)) else v
               for c, x in scored.vector.iloc[0].items()}
-    a = Assessment(interview_id=iv.id, risk_class=out["risk_class"],
+    a = Assessment(interview=iv, risk_class=out["risk_class"],
                    probabilities=out["probabilities"], feature_vector=vector,
                    contributions=out["top_contributions"], extracted=out["extracted"],
                    applicant_form=out["applicant_form"],
@@ -594,30 +648,23 @@ def assess(interview_id: int, db: Session = Depends(get_db),
     db.add(a)
     iv.status = "assessed"
     try:
+        db.flush()
+        audit.record(db, user, "assessment.create", "assessment", a.id, interview_id=iv.id,
+                     risk_class=a.risk_class)
+        loans.sync_with_interview(db, iv, user)
         db.commit()
     except IntegrityError:  # a concurrent assess won
         db.rollback()
         raise HTTPException(409, f"interview {iv.id} is already assessed; its record is immutable")
-    return s.AssessmentOut.model_validate(a)
+    return assessment_out(iv)
 
 
 @app.post("/api/interviews/{interview_id}/decision", status_code=201,
           response_model=s.DecisionOut, responses=ERRORS)
 def record_decision(interview_id: int, body: s.DecisionCreate, db: Session = Depends(get_db),
                     user: User = Depends(require_officer)):
-    """Record the officer's decision. Only after assessment, and only once."""
-    iv = get_interview(db, interview_id)
-    if iv.assessment is None:
-        raise HTTPException(409, f"interview {iv.id} has no assessment yet; "
-                                 "the decision is recorded after the officer has seen it")
-    if iv.decision is not None:
-        raise HTTPException(409, f"interview {iv.id} already has a decision; it is immutable")
-    d = Decision(interview_id=iv.id, decision=body.decision,
-                 note=(body.note or "").strip() or None, decided_by=user.username)
-    db.add(d)
-    try:
-        db.commit()
-    except IntegrityError:  # a concurrent request recorded one first
-        db.rollback()
-        raise HTTPException(409, f"interview {iv.id} already has a decision; it is immutable")
+    """Record the officer's decision. Only after assessment, and only once.
+    An interview with a loan application moves the application too (the
+    same as POST /api/applications/{id}/decision)."""
+    d = loans.decide(db, get_interview(db, interview_id), body, user)
     return s.DecisionOut.model_validate(d)

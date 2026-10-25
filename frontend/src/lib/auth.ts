@@ -13,7 +13,11 @@ export function useAuth(): AuthState {
   return useContext(AuthContext)
 }
 
-export const ROLE_LABEL: Record<Me['role'], string> = { officer: 'Loan officer', admin: 'Administrator' }
+export const ROLE_LABEL: Record<Me['role'], string> = {
+  officer: 'Loan officer',
+  admin: 'Administrator',
+  member: 'Member',
+}
 
 /** Where to go after signing in: an in-app route, never back to the login page. */
 export function safeNext(next: string | null | undefined): string {

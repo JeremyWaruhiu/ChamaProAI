@@ -6,7 +6,13 @@ import pytest
 
 import transcribe  # scripts/ is on sys.path via chamapro.api.pipeline
 
-from conftest import FakeASR, wait_until
+from conftest import REAL_LOAD_ASR, FakeASR, wait_until
+
+
+@pytest.fixture(autouse=True)
+def real_loader(monkeypatch):
+    """The session client swaps load_asr for a fake; these tests test the real one."""
+    monkeypatch.setattr(transcribe, "load_asr", REAL_LOAD_ASR)
 
 
 @pytest.fixture

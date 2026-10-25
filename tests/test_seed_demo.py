@@ -1,5 +1,6 @@
 """scripts/seed_demo.py: a complete demo interview without running Whisper."""
 import csv
+import re
 import subprocess
 import sys
 import uuid
@@ -7,11 +8,13 @@ import uuid
 import numpy as np
 import pytest
 import soundfile as sf
+from fastapi.testclient import TestClient
 
 import seed_demo  # scripts/ is on sys.path via chamapro.api.pipeline
 from chamapro import config
+from chamapro.api.main import app
 
-from conftest import needs_classifier, uploads
+from conftest import BASE_URL, needs_classifier, uploads
 
 
 @pytest.fixture
@@ -214,3 +217,81 @@ def test_cli_practice_only_needs_no_corpus(client, tmp_path):
     out = subprocess.run(cmd, capture_output=True, text=True)
     assert out.returncode == 0, out.stderr
     assert "practice interview" in out.stdout and "demo interview" not in out.stdout
+
+
+# --- Demo accounts and loan applications -------------------------------------------
+
+def accounts(tag):
+    """seed_demo's demo people with names unique to this test (tests share a database)."""
+    members = []
+    for spec in seed_demo.MEMBERS:
+        members.append({**spec, "login": f"{spec['login']}.{tag}",
+                        "member_no": f"{spec['member_no']}-{tag}"})
+    return f"demo.officer.{tag}", members
+
+
+def test_accounts_are_fictional():
+    for spec in seed_demo.MEMBERS:
+        assert "(fictional)" in spec["full_name"]
+        assert "id_number" not in spec and "national_id" not in spec
+
+
+@needs_classifier
+def test_seed_accounts_creates_logins_and_decided_applications(client, admin_client, capsys):
+    officer, members = accounts(uuid.uuid4().hex[:6])
+    res = seed_demo.seed_accounts(officer, members)
+
+    assert set(res.passwords) == {officer, *(m["login"] for m in members)}
+    assert all(len(pw) >= 10 for pw in res.passwords.values())
+    statuses = {no: status for no, _, status, new in res.applications}
+    assert statuses == {members[0]["member_no"]: "approved",
+                        members[1]["member_no"]: "guarantor_required"}
+
+    grace = TestClient(app, base_url=BASE_URL)
+    assert grace.post("/api/auth/login", json={"username": members[0]["login"],
+                                               "password": res.passwords[members[0]["login"]]}
+                      ).status_code == 200
+    (mine,) = grace.get("/api/me/applications").json()
+    detail = grace.get(f"/api/me/applications/{mine['id']}").json()
+    assert detail["status"] == "approved" and detail["approved_amount_kes"] == 40000
+    assert len(detail["reasons"]) == 3 and "Demo record" not in str(detail)
+
+    app_id = res.applications[1][1]
+    staff = client.get(f"/api/applications/{app_id}").json()
+    assert staff["interview"]["mode"] == "practice"                 # out of live statistics
+    assert staff["assessment"]["extraction_model"] == seed_demo.SEED_EXTRACTION
+    assert staff["decision"]["decided_by"] == officer
+    assert staff["comparator"]["conditions"][1]["result"] == "pending"
+    st = client.get(f"/api/interviews/{staff['interview_id']}").json()
+    assert st["counts"]["transcribed"] == 8 and st["applicant"]["age"] == 35
+
+
+@needs_classifier
+def test_seed_accounts_is_idempotent_and_keeps_passwords(client):
+    officer, members = accounts(uuid.uuid4().hex[:6])
+    first = seed_demo.seed_accounts(officer, members)
+    again = seed_demo.seed_accounts(officer, members)
+    assert again.passwords == {} and set(again.existing) == set(first.passwords)
+    assert [(a[1], a[3]) for a in again.applications] == [(a[1], False) for a in first.applications]
+
+
+def test_seed_accounts_without_classifier_waits_for_the_dashboard(client, monkeypatch, tmp_path):
+    monkeypatch.setattr(config, "CLASSIFIER_PATH", tmp_path / "missing.joblib")
+    officer, members = accounts(uuid.uuid4().hex[:6])
+    res = seed_demo.seed_accounts(officer, members)
+    assert not res.assessed
+    assert {status for _, _, status, _ in res.applications} == {"interview_complete"}
+
+
+def test_passwords_are_printed_once_and_never_written(client, tmp_path):
+    cmd = [sys.executable, str(config.SCRIPTS_DIR / "seed_demo.py"), "--practice-only"]
+    first = subprocess.run(cmd, capture_output=True, text=True, cwd=tmp_path)
+    second = subprocess.run(cmd, capture_output=True, text=True, cwd=tmp_path)
+    assert first.returncode == 0, first.stderr
+    assert "shown once and not saved" in first.stdout or "already exists" in first.stdout
+    assert "already exists; password unchanged" in second.stdout
+    assert list(tmp_path.iterdir()) == []                          # nothing written to cwd
+    stored = b"".join(p.read_bytes() for p in config.DB_PATH.parent.glob(config.DB_PATH.name + "*"))
+    for pw in re.findall(r"^  demo\.\S+\s+(\S+)$", first.stdout, flags=re.M):
+        assert pw not in second.stdout
+        assert pw.encode() not in stored                            # only its scrypt hash is

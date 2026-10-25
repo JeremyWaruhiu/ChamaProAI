@@ -16,6 +16,7 @@ from pathlib import Path
 
 from sqlalchemy import select
 
+from chamapro.api import audit
 from chamapro.api.db import SessionLocal, User, init_db
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -38,10 +39,14 @@ def main() -> None:
             sys.exit(f"no user {a.username!r}; create it first with scripts/create_user.py")
         if a.clear:
             user.email = None
+            audit.record(db, None, "user.google_email", "user", user.id, linked=False,
+                         via="link_google.py")
             db.commit()
             print(f"unlinked Google sign-in from {user.username!r}")
         elif a.email:
             user.email = check_email(db, a.email, user.username)
+            audit.record(db, None, "user.google_email", "user", user.id, linked=True,
+                         via="link_google.py")
             db.commit()
             print(f"linked {user.username!r} ({user.role}) to Google account {user.email}")
         else:

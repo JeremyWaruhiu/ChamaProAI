@@ -67,8 +67,34 @@ RESULTS_SUMMARY_PATH = PROJECT_ROOT / "results" / "summary.json"
 
 # --- API ---------------------------------------------------------------------
 DB_PATH = Path(os.getenv("CHAMAPRO_DB") or DATA_DIR / "chamapro.db")
+
+
+def _database_url(value: str | None) -> str:
+    """SQLAlchemy URL for the database. Unset means the SQLite file at DB_PATH.
+    A plain postgres:// or postgresql:// URL (as Supabase shows it) is pointed
+    at the psycopg 3 driver, the one in requirements.txt."""
+    if not value:
+        return f"sqlite:///{DB_PATH}"
+    for prefix in ("postgres://", "postgresql://"):
+        if value.startswith(prefix):
+            return "postgresql+psycopg://" + value[len(prefix):]
+    return value
+
+
+# SQLite now; Supabase Postgres by setting this to the session pooler string.
+DATABASE_URL: str = _database_url(os.getenv("DATABASE_URL"))
 UPLOADS_DIR = Path(os.getenv("CHAMAPRO_UPLOADS") or DATA_DIR / "uploads")
 MAX_UPLOAD_BYTES = 25 * 1024 * 1024
+
+# --- Audio storage -----------------------------------------------------------
+# local keeps clips in UPLOADS_DIR; supabase puts them in a private bucket and
+# replays them through short-lived signed URLs. The service-role key bypasses
+# row-level security: it is read here, on the server, and never sent to a browser.
+STORAGE_BACKEND: str = (os.getenv("STORAGE_BACKEND") or "local").lower()   # local | supabase
+SUPABASE_URL: str | None = os.getenv("SUPABASE_URL") or None
+SUPABASE_SERVICE_ROLE_KEY: str | None = os.getenv("SUPABASE_SERVICE_ROLE_KEY") or None
+SUPABASE_BUCKET: str = os.getenv("SUPABASE_BUCKET") or "interview-audio"
+SUPABASE_SIGNED_URL_SECONDS: int = int(os.getenv("SUPABASE_SIGNED_URL_SECONDS") or 120)
 
 # --- Sign-in -----------------------------------------------------------------
 SESSION_HOURS = 8

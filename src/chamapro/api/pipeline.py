@@ -27,6 +27,7 @@ import score_interview  # noqa: E402
 import transcribe  # noqa: E402
 import translate_extract  # noqa: E402
 
+from . import storage  # noqa: E402
 from .db import Response, SessionLocal, utcnow  # noqa: E402
 
 log = logging.getLogger("chamapro.api")
@@ -138,14 +139,16 @@ def transcribe_response(response_id: int) -> None:
         r = db.get(Response, response_id)
         if r is None or r.status != "queued":
             return
-        path, duration, language = r.audio_path, r.duration_s, r.interview.language
+        ref, duration, language = r.audio_path, r.duration_s, r.interview.language
 
+    store = storage.for_ref(ref)
     try:
         asr = english_asr() if language == "en" else _asr
         if asr is None:
             raise RuntimeError("ASR model not loaded")
-        out = transcribe.transcribe_clip(path, asr.pipe, ASR_LANGUAGES[language],
-                                         duration=duration, **asr_settings())
+        out = transcribe.transcribe_clip(str(store.local_path(ref)), asr.pipe,
+                                         ASR_LANGUAGES[language], duration=duration,
+                                         **asr_settings())
     except Exception as e:
         log.exception("transcription failed for response %s", response_id)
         update = {"status": "failed", "error": f"{type(e).__name__}: {e}"}
@@ -154,6 +157,11 @@ def transcribe_response(response_id: int) -> None:
         update = {"status": "transcribed", "error": None, "transcript": out["text"],
                   "transcript_asr": out["text"], "asr_seconds": out["seconds"],
                   "asr_model": asr.label, "transcribed_at": utcnow()}
+    finally:
+        try:
+            store.release(ref)
+        except Exception:  # a stale cache file is harmless
+            log.exception("could not release the local copy of response %s", response_id)
 
     with SessionLocal() as db:
         r = db.get(Response, response_id)

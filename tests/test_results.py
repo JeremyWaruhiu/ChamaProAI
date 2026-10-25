@@ -92,3 +92,20 @@ def test_live_stats_on_empty_database_are_null_not_zero():
     assert live["interview_count"] == 0 and live["assessment_count"] == 0
     assert live["mean_extraction_completeness"] is None
     assert live["decision_agreement"]["rate"] is None
+    assert live["rule_agreement"]["applications"] == 0 and live["rule_agreement"]["rate"] is None
+
+
+def test_rule_agreement_counts_live_applications_only(admin_client, summary_path):
+    from conftest import assessed, new_application, new_member
+    write_summary(summary_path)
+    before = admin_client.get("/api/results").json()["live"]["rule_agreement"]
+    mid, _, _ = new_member(login=False)
+    new_application(admin_client, mid, assessed(admin_client, "Low"))                  # agree
+    new_application(admin_client, mid, assessed(admin_client, "Low"), amount=10 ** 6)  # diverge
+    new_application(admin_client, mid, assessed(admin_client, "Medium"))               # undetermined
+    new_application(admin_client, mid, assessed(admin_client, "Low", mode="practice"))  # left out
+    after = admin_client.get("/api/results").json()["live"]["rule_agreement"]
+    assert after["applications"] - before["applications"] == 3
+    assert (after["agreements"] - before["agreements"], after["divergences"] - before["divergences"],
+            after["undetermined"] - before["undetermined"]) == (1, 1, 1)
+    assert 0 <= after["rate"] <= 1 and "3 x savings" in after["rule"]

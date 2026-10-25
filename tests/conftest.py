@@ -7,7 +7,8 @@ Tests that score with the real classifier are marked needs_classifier and
 skip when models/classifier.joblib is absent.
 
 `client` is signed in as an officer; `admin_client` as an admin; `anon_client`
-not at all. Test passwords are random per run; none is stored anywhere.
+not at all; new_member() makes a member record with its own signed-in login.
+Test passwords are random per run; none is stored anywhere.
 """
 import json
 import os
@@ -18,6 +19,7 @@ import subprocess
 import tempfile
 import threading
 import time
+from datetime import date
 from pathlib import Path
 
 # Must precede any chamapro import: config reads these once at import time.
@@ -34,7 +36,8 @@ from fastapi.testclient import TestClient  # noqa: E402
 from chamapro import config  # noqa: E402
 from chamapro.api import auth  # noqa: E402
 from chamapro.api import pipeline as pl  # noqa: E402
-from chamapro.api.db import Assessment, Interview, SessionLocal, User  # noqa: E402
+from chamapro.api import loans  # noqa: E402
+from chamapro.api.db import Assessment, Interview, Member, SessionLocal, User  # noqa: E402
 from chamapro.api.main import app  # noqa: E402
 
 needs_classifier = pytest.mark.skipif(
@@ -52,6 +55,16 @@ def wait_until(predicate, timeout=10.0):
             return
         time.sleep(0.02)
     raise AssertionError("condition not met within timeout")
+
+
+def api_operations():
+    """(METHOD, path) of every /api endpoint. From the OpenAPI schema, which
+    includes routers mounted with include_router (app.routes does not list
+    their routes individually)."""
+    for path, ops in app.openapi()["paths"].items():
+        for method in ops:
+            if path.startswith("/api/"):
+                yield method.upper(), path
 
 
 def worker_idle():
@@ -153,11 +166,16 @@ def add_user(username, password, role="officer", active=True):
 
 
 def signed_in(username):
-    """A new client (no lifespan; the session client owns that) signed in as username."""
+    """A new client (no lifespan; the session client owns that) signed in as username.
+    Not a fixture, so this is the place that may request a sign-in."""
     c = TestClient(app, base_url=BASE_URL)
     r = c.post("/api/auth/login", json={"username": username, "password": PASSWORDS[username]})
     assert r.status_code == 200, r.text
     return c
+
+
+# The real loader, for tests of the loader itself (test_asr_engine.py).
+REAL_LOAD_ASR = pl.transcribe.load_asr
 
 
 @pytest.fixture(scope="session")
@@ -302,3 +320,70 @@ def assessed_interview(ready_interview):
         iv.status = "assessed"
         db.commit()
     return ready_interview
+
+
+# --- Members and loan applications ---------------------------------------------
+
+# Top SHAP contributions as the classifier stores them, for a Medium assessment.
+CONTRIBUTIONS = [{"feature": "B3A__1", "value": 1.0, "shap": -0.21},
+                 {"feature": "is_female", "value": 1.0, "shap": 0.19},
+                 {"feature": "log_monthly_income", "value": 9.8, "shap": -0.12},
+                 {"feature": "E3B__3", "value": 1.0, "shap": 0.08},
+                 {"feature": "age", "value": 42.0, "shap": 0.05}]
+
+
+def new_member(joined_on="2020-01-01", login=True):
+    """(member id, member_no, signed-in client or None) for a fresh member."""
+    no = "T-" + secrets.token_hex(4).upper()
+    with SessionLocal() as db:
+        user = None
+        if login:
+            name = "m_" + secrets.token_hex(4)
+            PASSWORDS[name] = secrets.token_urlsafe(16)
+            user = User(username=name, password_hash=auth.hash_password(PASSWORDS[name]),
+                        role="member")
+            db.add(user)
+            db.flush()
+        m = Member(member_no=no, full_name=f"Fictional {no}", phone="0712345678",
+                   joined_on=date.fromisoformat(joined_on),
+                   user_id=user.id if user else None)
+        db.add(m)
+        db.commit()
+        return m.id, no, signed_in(user.username) if user else None
+
+
+def assessed(client, risk_class="Medium", contributions=None, mode="live"):
+    """A v2 interview with one typed answer and an assessment written straight
+    to the database (no classifier, no Gemini), so its application can be decided."""
+    iid = new_interview(client, mode=mode)
+    r = client.post(f"/api/interviews/{iid}/responses/typed",
+                    json={"sentence_no": 1, "text": "Five of us at home."})
+    assert r.status_code == 201, r.text
+    with SessionLocal() as db:
+        iv = db.get(Interview, iid)
+        db.add(Assessment(
+            interview=iv, risk_class=risk_class,
+            probabilities={"Low": 0.2, "Medium": 0.5, "High": 0.3},
+            feature_vector={"B3A__1": 1.0}, contributions=contributions or CONTRIBUTIONS,
+            extracted={}, extraction_completeness=0.5, features_populated=1, features_total=2,
+            features_not_extractable=[], extraction_model="fake-gemini",
+            model_file="classifier.joblib", model_sha256="0" * 64))
+        iv.status = "assessed"
+        loans.sync_with_interview(db, iv, None)
+        db.commit()
+    return iid
+
+
+def new_application(client, member_id, interview_id=None, amount=30000, savings=15000, **extra):
+    body = {"member_id": member_id, "amount_requested_kes": amount, "purpose": "Dairy cow",
+            "term_months": 12, "sacco_savings_kes": savings, **extra}
+    if interview_id is not None:
+        body["interview_id"] = interview_id
+    r = client.post("/api/applications", json=body)
+    assert r.status_code == 201, r.text
+    return r.json()
+
+
+def guarantor(n=1, amount=10000):
+    return {"full_name": f"Guarantor {n}", "member_no": f"G-{secrets.token_hex(3)}",
+            "phone": "0722000111", "relationship": "chama member", "amount_guaranteed_kes": amount}
