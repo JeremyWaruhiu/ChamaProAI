@@ -1,0 +1,33 @@
+.kpis { display: grid; gap: var(--space-4); grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); margin-bottom: var(--space-5); }
+.grid { display: grid; gap: var(--space-5); grid-template-columns: repeat(auto-fit, minmax(min(100%, 420px), 1fr)); margin-bottom: var(--space-5); }
+
+.bars { display: grid; gap: var(--space-3); margin: var(--space-3) 0 0; padding: 0; list-style: none; }
+.bars li { display: grid; grid-template-columns: minmax(120px, 190px) 1fr 40px; align-items: center; gap: var(--space-3); }
+.barLabel { font-size: var(--text-base); }
+.barTrack { height: 14px; border-radius: var(--radius-pill); background: var(--surface-sunken); overflow: hidden; }
+.barFill { display: block; height: 100%; border-radius: var(--radius-pill); }
+.barValue { text-align: right; font-weight: 650; }
+.low { background: var(--low); }
+.medium { background: var(--ochre-500); }
+.high { background: var(--high); }
+.model { background: var(--green-600); }
+@media (max-width: 520px) {
+  .bars li { grid-template-columns: 1fr auto; }
+  .barTrack { grid-column: 1 / -1; grid-row: 2; }
+}
+
+.rings { display: flex; flex-wrap: wrap; gap: var(--space-6); margin-bottom: var(--space-3); }
+.ring { display: flex; align-items: center; gap: var(--space-3); margin: 0; }
+.ring figcaption { display: grid; gap: 2px; max-width: 18ch; }
+.ringValue { font: 600 17px var(--font-display); fill: var(--ink); }
+
+.speech { display: grid; gap: var(--space-4); justify-items: start; }
+.speech > * { width: 100%; }
+.speech > :first-child { width: auto; }
+.engine { display: grid; gap: var(--space-1); }
+.engineTitle { display: flex; align-items: center; gap: var(--space-2); font-weight: 680; }
+.mono { font-family: var(--font-mono); font-size: var(--text-sm); overflow-wrap: anywhere; }
+
+.activity { display: grid; gap: var(--space-3); margin: 0; padding: 0; list-style: none; }
+.activityItem { display: flex; gap: var(--space-3); align-items: flex-start; }
+.activityDot { flex: none; width: 10px; height: 10px; margin-top: 7px; border-radius: 50%; background: var(--clay-500); box-shadow: 0 0 0 4px var(--clay-100); }

@@ -1,6 +1,7 @@
 import type { Language, MaritalStatus, Sex } from '../api/types'
+import { t } from '../strings'
 
-/** The new-interview form as typed, before it becomes an InterviewCreate. */
+/** The applicant form as typed, before it becomes an InterviewCreate. */
 export type Draft = {
   name: string
   age: string
@@ -13,13 +14,20 @@ export type Draft = {
 
 export const EMPTY_DRAFT: Draft = { name: '', age: '', sex: '', education: '', marital: '', language: 'kik', practice: false }
 
+export type ApplicantField = 'age' | 'sex' | 'education' | 'marital'
+
+/** Whether each required field is filled; the order is the form's. */
+export function applicantProblems(d: Pick<Draft, ApplicantField>): ApplicantField[] {
+  const age = Number(d.age)
+  return ([
+    !(d.age.trim() && Number.isInteger(age) && age >= 16 && age <= 110) && 'age',
+    !d.sex && 'sex',
+    d.education === '' && 'education',
+    !d.marital && 'marital',
+  ] as const).filter((x): x is ApplicantField => !!x)
+}
+
 /** What is still missing from the applicant form, in plain words; [] when complete. */
 export function missingFields(d: Draft): string[] {
-  const age = Number(d.age)
-  return [
-    !(d.age.trim() && Number.isInteger(age) && age >= 16 && age <= 110) && 'age (16 to 110)',
-    !d.sex && 'sex',
-    d.education === '' && 'highest education',
-    !d.marital && 'marital status',
-  ].filter((x): x is string => !!x)
+  return applicantProblems(d).map((f) => t.applicant.missing[f])
 }

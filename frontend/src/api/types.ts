@@ -26,11 +26,14 @@ export interface AsrStatus {
   error: string | null
 }
 
-/** GET /api/health; the dashboard reads only the speech engine from it. */
+/** GET /api/health: the speech engine actually in use, and what is configured. */
 export interface Health {
   status: 'ok' | 'degraded'
   asr_decoding: string
   asr: Record<Language, AsrStatus> // English loads on first use
+  classifier_present?: boolean
+  api_key_configured?: boolean
+  extraction_model?: string
 }
 
 /** The signed-in user (GET /api/auth/me). */
@@ -140,6 +143,7 @@ export interface Assessment {
   model_sha256: string
   assessed_by?: string | null // null on assessments made before sign-in existed
   created_at: string
+  comparator?: Comparator | null // the SACCO rule, when the interview has a loan application
 }
 
 export interface Decision {
@@ -171,6 +175,7 @@ export interface InterviewState {
   responses: ResponseOut[]
   assessment: Assessment | null
   decision: Decision | null
+  application_id?: number | null // its loan application; null for interviews without one
 }
 
 export interface ResponseQueued {
@@ -279,4 +284,212 @@ export interface Results {
   shap?: ShapSummary
   asr?: AsrComparison
   live: LiveStats
+}
+
+// --- Your own account ---------------------------------------------------------
+
+/** GET /api/auth/profile */
+export interface Profile {
+  username: string
+  role: Role
+  email: string | null // the Google account linked for sign-in
+  google_sign_in_available: boolean
+  member: { member_no: string; full_name: string } | null
+  signed_in_with: string | null // password | google, this session
+  active_sessions: number
+  created_at: string
+}
+
+// --- Members, applications, guarantors -----------------------------------------
+
+export type ApplicationStatus = 'draft' | 'interview_pending' | 'interview_complete' | 'assessed'
+  | 'decided' | 'guarantor_required' | 'guarantor_submitted' | 'approved' | 'declined'
+export type GuarantorStatus = 'pending' | 'verified' | 'rejected'
+export type ConditionResult = 'pass' | 'fail' | 'pending'
+export type Agreement = 'agree' | 'diverge' | 'pending' | 'undetermined'
+
+export interface Member {
+  id: number
+  member_no: string
+  full_name: string
+  phone: string | null
+  joined_on: string // YYYY-MM-DD
+  user_id: number | null
+  created_at: string
+}
+
+export interface MemberCreate {
+  member_no: string
+  full_name: string
+  phone: string | null
+  joined_on: string
+}
+
+export interface ApplicationCreate {
+  member_id: number
+  amount_requested_kes: number
+  purpose: string
+  term_months: number
+  sacco_savings_kes: number
+  interview_id?: number
+}
+
+export interface RuleCondition {
+  name: 'savings_multiple' | 'guarantors' | 'tenure'
+  label: string
+  result: ConditionResult
+  detail: string
+  agreement: Agreement
+}
+
+/** The SACCO's own rule, computed live beside the model (never stored with it). */
+export interface Comparator {
+  rule: string
+  max_borrowable_kes: number
+  amount_requested_kes: number
+  tenure_months: number
+  verified_guarantors: number
+  conditions: RuleCondition[]
+  result: ConditionResult
+  rule_recommendation: 'approve' | 'approve_with_guarantors' | 'decline'
+  model_recommendation: DecisionValue | null
+  agreement: Agreement
+  mode: Mode
+}
+
+export interface TimelineEntry {
+  status: ApplicationStatus
+  label: string
+  at: string
+}
+
+export interface Guarantor {
+  id: number
+  full_name: string
+  member_no: string
+  phone: string
+  relationship: string
+  amount_guaranteed_kes: number
+  status: GuarantorStatus
+  submitted_at: string
+  verified_by: string | null
+  verified_at: string | null
+}
+
+export interface ApplicationSummary {
+  id: number
+  member_id: number
+  member_no: string
+  member_name: string
+  amount_requested_kes: number
+  term_months: number
+  status: ApplicationStatus
+  interview_id: number | null
+  mode?: Mode | null // its interview's mode; null before it has one
+  risk_class: string | null
+  outcome: Outcome | null
+  created_at: string
+  updated_at: string
+}
+
+export interface ApplicationDetail extends ApplicationSummary {
+  purpose: string
+  sacco_savings_kes: number
+  created_by: string
+  member: Member
+  interview: { id: number; status: InterviewStatus; question_set: QuestionSet; language: Language; mode: Mode; created_at: string } | null
+  assessment: Assessment | null
+  decision: Decision | null
+  comparator: Comparator | null
+  guarantors: Guarantor[]
+  timeline: TimelineEntry[]
+}
+
+/** POST .../decision: `outcome` is the decision; the rest depend on it. */
+export interface DecisionCreate {
+  outcome: Outcome
+  approved_amount_kes?: number
+  guarantors_required?: number
+  officer_notes?: string | null
+  member_message?: string | null
+}
+
+// --- A member's own view: never probabilities, risk class or officer notes -------
+
+export interface GuarantorIn {
+  full_name: string
+  member_no: string
+  phone: string
+  relationship: string
+  amount_guaranteed_kes: number
+}
+
+export interface MyGuarantor extends GuarantorIn {
+  status: GuarantorStatus
+  submitted_at: string
+}
+
+export interface MyApplicationSummary {
+  id: number
+  amount_requested_kes: number
+  purpose: string
+  term_months: number
+  status: ApplicationStatus
+  status_label: string
+  mode?: Mode
+  created_at: string
+  updated_at: string
+}
+
+export interface MyApplication extends MyApplicationSummary {
+  timeline: TimelineEntry[]
+  outcome: Outcome | null
+  approved_amount_kes: number | null
+  guarantors_required: number | null
+  guarantors_still_needed: number
+  member_message: string | null
+  reasons: string[]
+  guarantors: MyGuarantor[]
+}
+
+// --- Administration ----------------------------------------------------------------
+
+export interface UserOut {
+  id: number
+  username: string
+  role: Role
+  email: string | null
+  is_active: boolean
+  created_at: string
+  member_id: number | null
+  member_no: string | null
+}
+
+export interface UserCreate {
+  username: string
+  password: string
+  role: Role
+  email: string | null
+  member_id: number | null
+}
+
+export interface AuditEntry {
+  id: number
+  actor_user_id: number | null
+  actor: string | null // null for shell scripts
+  action: string
+  entity: string
+  entity_id: number | null
+  details: Record<string, unknown>
+  created_at: string
+}
+
+export interface AuditFilter {
+  actor_user_id?: number
+  action?: string // exact, or a prefix ending in "."
+  entity?: string
+  since?: string
+  until?: string
+  limit?: number
+  offset?: number
 }

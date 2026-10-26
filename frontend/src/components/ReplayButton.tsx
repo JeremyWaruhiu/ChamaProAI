@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { api } from '../api/client'
+import { t } from '../strings'
+import { Icon } from './Icon'
 
 /** Play back a stored answer. One large toggle, as in Figure 4.10. */
 export function ReplayButton({ responseId, className = 'btn btn-secondary' }: { responseId: number; className?: string }) {
@@ -33,8 +35,8 @@ export function ReplayButton({ responseId, className = 'btn btn-secondary' }: { 
 
   return (
     <button type="button" className={className} onClick={toggle} aria-pressed={playing}
-            title={failed ? 'The recording could not be played' : undefined}>
-      <span aria-hidden>{playing ? '■' : '▶'}</span> {playing ? 'Stop' : failed ? 'Replay (unavailable)' : 'Replay'}
+            title={failed ? t.replay.failed : undefined}>
+      <Icon name={playing ? 'stop' : 'play'} size={18} /> {playing ? t.replay.stop : failed ? t.replay.unavailable : t.replay.play}
     </button>
   )
 }

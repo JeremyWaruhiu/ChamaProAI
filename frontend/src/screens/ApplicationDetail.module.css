@@ -1,0 +1,15 @@
+.back { display: inline-flex; align-items: center; gap: var(--space-1); text-decoration: none; }
+.grid { display: grid; gap: var(--space-5); grid-template-columns: minmax(0, 2fr) minmax(280px, 1fr); align-items: start; }
+.main, .aside { display: grid; gap: var(--space-5); min-width: 0; }
+@media (max-width: 960px) { .grid { grid-template-columns: 1fr; } }
+
+.badges { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); }
+.decision { display: grid; gap: var(--space-3); }
+.interview { display: grid; gap: var(--space-3); }
+.waiting { display: flex; align-items: center; gap: var(--space-2); margin-bottom: var(--space-3); color: var(--medium); font-weight: 600; }
+
+.guarantors { display: grid; gap: var(--space-3); margin: 0; padding: 0; list-style: none; }
+.guarantor { display: grid; gap: var(--space-2); padding: var(--space-4); border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface-2); }
+.gHead { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--space-3); }
+.gName { font-weight: 680; }
+.gActions { display: flex; flex-wrap: wrap; gap: var(--space-2); margin-top: var(--space-1); }

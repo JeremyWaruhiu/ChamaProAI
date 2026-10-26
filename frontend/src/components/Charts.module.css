@@ -9,7 +9,7 @@
 .cmHead { font-weight: 650; color: var(--ink-2); align-self: center; text-align: center; padding: 4px 8px; }
 .cmCell {
   display: flex; flex-direction: column; align-items: center; justify-content: center;
-  min-height: 64px; border-radius: 4px; border: 1px solid var(--line); color: var(--ink);
+  min-height: 64px; border-radius: var(--radius-sm); border: 1px solid var(--line); color: var(--ink);
 }
 .cmCell small { font-size: 0.75rem; opacity: 0.85; }
 .cmDark { color: var(--white); }
@@ -18,8 +18,8 @@
 .hbars { display: grid; gap: 8px; }
 .hbar { display: grid; grid-template-columns: minmax(110px, 180px) 1fr minmax(70px, auto); align-items: center; gap: 12px; }
 .hbarLabel { font-size: 0.9rem; overflow-wrap: anywhere; }
-.hbarTrack { height: 18px; border-radius: 3px; background: var(--green-50); border: 1px solid var(--green-100); overflow: hidden; }
-.hbarFill { display: block; height: 100%; }
+.hbarTrack { height: 14px; border-radius: var(--radius-pill); background: var(--surface-sunken); overflow: hidden; }
+.hbarFill { display: block; height: 100%; border-radius: var(--radius-pill); }
 .hbarValue { font-variant-numeric: tabular-nums; font-size: 0.9rem; text-align: right; }
 .model { background: var(--green-600); }
 .baseline { background: var(--wait); }
@@ -34,9 +34,9 @@
 .legend i { display: inline-block; width: 12px; height: 12px; border-radius: 2px; margin-right: 6px; vertical-align: -1px; }
 
 /* Stat tiles */
-.stat { display: flex; flex-direction: column; gap: 2px; padding: 12px 16px; background: var(--green-50); border-radius: var(--radius); }
+.stat { display: flex; flex-direction: column; gap: 2px; padding: 12px 16px; background: var(--surface-2); border: 1px solid var(--line); border-radius: var(--radius); }
 .statLabel { color: var(--ink-3); font-size: 0.8rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; }
-.statValue { font-size: 1.35rem; font-weight: 700; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.statValue { font-family: var(--font-display); font-size: 1.5rem; font-weight: 600; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
 
 @media (max-width: 600px) {
   .hbar { grid-template-columns: 1fr auto; }

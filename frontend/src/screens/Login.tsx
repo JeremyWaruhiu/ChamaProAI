@@ -1,8 +1,16 @@
-import { useEffect, useRef, useState, type FormEvent, type Ref } from 'react'
+import { m } from 'motion/react'
+import { useEffect, useRef, useState, type FormEvent, type ReactNode, type Ref } from 'react'
 import { ApiError, api } from '../api/client'
 import type { Me } from '../api/types'
+import { Brand } from '../components/Brand'
+import { Icon } from '../components/Icon'
 import { GOOGLE_NOT_ENABLED, googleStatusFor, mountGoogleButton, type GoogleStatus } from '../lib/google'
+import { fadeUp, useReducedMotion } from '../lib/motion'
+import { paths } from '../lib/router'
+import { t } from '../strings'
 import styles from './Login.module.css'
+
+const T = t.login
 
 /** API messages are lower-case fragments; the form shows them as a sentence. */
 function sentence(message: string): string {
@@ -66,7 +74,7 @@ export function Login({ onSignedIn }: { onSignedIn: (me: Me) => void }) {
     e.preventDefault()
     if (busy || googleBusy) return
     if (!username.trim() || !password) {
-      setError('Enter your username and password.')
+      setError(T.enterBoth)
       ;(username.trim() ? passRef : userRef).current?.focus()
       return
     }
@@ -87,12 +95,39 @@ export function Login({ onSignedIn }: { onSignedIn: (me: Me) => void }) {
   }
 
   return (
-    <LoginForm username={username} password={password} shown={shown} busy={busy} error={error}
-               userRef={userRef} passRef={passRef}
-               onUsername={setUsername} onPassword={setPassword}
-               onToggle={() => setShown((v) => !v)} onSubmit={submit}
-               google={google} googleRef={googleRef} googleBusy={googleBusy} googleError={googleError}
-               onGooglePlaceholder={() => setGoogleError(GOOGLE_NOT_ENABLED)} />
+    <LoginPage>
+      <LoginForm username={username} password={password} shown={shown} busy={busy} error={error}
+                 userRef={userRef} passRef={passRef}
+                 onUsername={setUsername} onPassword={setPassword}
+                 onToggle={() => setShown((v) => !v)} onSubmit={submit}
+                 google={google} googleRef={googleRef} googleBusy={googleBusy} googleError={googleError}
+                 onGooglePlaceholder={() => setGoogleError(GOOGLE_NOT_ENABLED)} />
+    </LoginPage>
+  )
+}
+
+/** The page around the form: the brand panel beside it (above it on a phone). */
+function LoginPage({ children }: { children: ReactNode }) {
+  const reduced = useReducedMotion()
+  return (
+    <div className={styles.page}>
+      <aside className={styles.panel}>
+        <a href={paths.landing()} className={styles.brandLink} aria-label={T.backHome}><Brand onDark /></a>
+        <div className={styles.panelText}>
+          <h2 className={`display ${styles.panelTitle}`}>{T.asideTitle}</h2>
+          <p className={styles.panelBody}>{T.asideBody}</p>
+        </div>
+        <ul className={styles.panelPoints} aria-hidden>
+          <li><Icon name="mic" size={18} /> {t.landing.steps[0].title}</li>
+          <li><Icon name="wave" size={18} /> {t.landing.steps[1].title}</li>
+          <li><Icon name="scale" size={18} /> {t.landing.steps[3].title}</li>
+        </ul>
+      </aside>
+      <main className={styles.main}>
+        <m.div className={styles.formWrap} {...fadeUp(reduced)}>{children}</m.div>
+        <a href={paths.landing()} className={styles.back}><Icon name="arrowLeft" size={16} /> {T.backHome}</a>
+      </main>
+    </div>
   )
 }
 
@@ -123,20 +158,16 @@ export function LoginForm({
 }: FormProps) {
   const invalid = error ? true : undefined
   return (
-    <div className={styles.page}>
-      <header className={styles.bar}>
-        <span className={styles.brand}>ChamaPro AI</span>
-      </header>
-      <main className={styles.main}>
         <div className={`card ${styles.card}`}>
           <div className={styles.intro}>
-            <h1 id="login-title" className={styles.title}>ChamaPro AI</h1>
-            <p className={styles.tagline}>SACCO credit assessment from Kikuyu loan interviews</p>
+            <p className="eyebrow">{T.welcome}</p>
+            <h1 id="login-title" className={`display ${styles.title}`}>{t.app.name}</h1>
+            <p className={styles.tagline}>{t.app.tagline}</p>
           </div>
 
           <form className={styles.form} onSubmit={onSubmit} noValidate aria-labelledby="login-title">
             <div className={styles.field}>
-              <label className={styles.label} htmlFor="login-username">Username</label>
+              <label className={styles.label} htmlFor="login-username">{T.username}</label>
               <input id="login-username" ref={userRef} className="input" name="username" type="text"
                      autoComplete="username" autoCapitalize="none" autoCorrect="off" spellCheck={false}
                      required maxLength={64} value={username} readOnly={busy}
@@ -145,7 +176,7 @@ export function LoginForm({
             </div>
 
             <div className={styles.field}>
-              <label className={styles.label} htmlFor="login-password">Password</label>
+              <label className={styles.label} htmlFor="login-password">{T.password}</label>
               <div className={styles.passwordRow}>
                 <input id="login-password" ref={passRef} className={`input ${styles.passwordInput}`} name="password"
                        type={shown ? 'text' : 'password'} autoComplete="current-password"
@@ -154,8 +185,8 @@ export function LoginForm({
                        onChange={(e) => onPassword(e.target.value)} />
                 <button type="button" className={styles.toggle} onClick={onToggle}
                         aria-controls="login-password" aria-pressed={shown}
-                        aria-label={shown ? 'Hide password' : 'Show password'}>
-                  {shown ? 'Hide' : 'Show'}
+                        aria-label={shown ? T.hidePassword : T.showPassword}>
+                  {shown ? T.hide : T.show}
                 </button>
               </div>
             </div>
@@ -167,32 +198,30 @@ export function LoginForm({
             <button type="submit" className="btn btn-primary btn-large btn-block"
                     aria-disabled={busy || googleBusy || undefined} aria-busy={busy || undefined}>
               {busy && <span className="spinner" aria-hidden />}
-              {busy ? 'Signing in…' : 'Sign in'}
+              {busy ? T.signingIn : T.signIn}
             </button>
           </form>
 
           {google !== 'off' && (
-            <section className={styles.google} aria-label="Sign in with Google">
-              <div className={styles.divider}><span>or</span></div>
+            <section className={styles.google} aria-label={T.google}>
+              <div className={styles.divider}><span>{T.or}</span></div>
               {google === 'disabled' ? <GooglePlaceholder onClick={onGooglePlaceholder} /> : (
                 /* Google Identity Services renders its own branded button here. */
                 <div id="google-signin" ref={googleRef} className={styles.googleButton}
                      hidden={google === 'unavailable'} aria-busy={google === 'loading' || googleBusy || undefined} />
               )}
               {google === 'unavailable' && (
-                <p className={styles.help}>Google sign-in could not load. Use your username and password.</p>
+                <p className={styles.help}>{T.googleUnavailable}</p>
               )}
               {googleBusy && (
-                <p className={styles.status} role="status"><span className="spinner" aria-hidden /> Signing in with Google…</p>
+                <p className={styles.status} role="status"><span className="spinner" aria-hidden /> {T.googleSigningIn}</p>
               )}
               <p id="google-error" className={styles.error} role="alert">{googleError}</p>
             </section>
           )}
 
-          <p className={styles.help}>Accounts are created by your SACCO administrator.</p>
+          <p className={styles.help}>{T.help}</p>
         </div>
-      </main>
-    </div>
   )
 }
 
@@ -206,7 +235,7 @@ export function GooglePlaceholder({ onClick }: { onClick?: () => void }) {
     <button type="button" className="btn btn-secondary btn-block"
             aria-describedby="google-error" onClick={onClick}>
       <span className={styles.gMark} aria-hidden>G</span>
-      Sign in with Google
+      {T.google}
     </button>
   )
 }

@@ -1,0 +1,74 @@
+/* Member portal: phone first, one column. */
+
+.list { display: grid; gap: var(--space-4); margin: 0; padding: 0; list-style: none; }
+
+.appCard {
+  display: grid; gap: var(--space-3); padding: var(--space-5); color: var(--ink); text-decoration: none;
+  transition: border-color var(--dur-fast), box-shadow var(--dur-fast);
+}
+.appCard:hover { border-color: var(--green-300); box-shadow: var(--shadow); color: var(--ink); }
+.appTop { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--space-3); }
+.appTitle { font-size: var(--text-lg); font-weight: 680; }
+.chev { flex: none; color: var(--ink-3); margin-top: 4px; }
+.badges { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+
+.dots { display: grid; grid-template-columns: repeat(6, 1fr); gap: 4px; margin: var(--space-1) 0 0; padding: 0; list-style: none; }
+.dots li { height: 6px; border-radius: var(--radius-pill); background: var(--surface-sunken); }
+.dot-done { background: var(--green-600) !important; }
+.dot-current { background: var(--clay-500) !important; }
+.dot-failed { background: var(--high) !important; }
+.dot-skipped { background: repeating-linear-gradient(90deg, var(--line-strong) 0 4px, transparent 4px 8px) !important; }
+.dotsLabel { color: var(--ink-3); font-size: var(--text-sm); }
+
+.detail { display: grid; gap: var(--space-4); }
+.back { display: inline-flex; align-items: center; gap: var(--space-1); justify-self: start; min-height: 40px; font-weight: 620; text-decoration: none; }
+.head { display: grid; gap: var(--space-2); }
+.title { font-size: var(--text-2xl); color: var(--green-900); }
+.practice {
+  display: flex; gap: var(--space-2); align-items: flex-start; padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--practice-line); border-radius: var(--radius); background: var(--practice-bg); color: var(--practice);
+}
+.practice svg { flex: none; margin-top: 3px; }
+
+.message { display: grid; gap: var(--space-1); margin-top: var(--space-4); padding: var(--space-4); border-radius: var(--radius); background: var(--green-50); border-left: 4px solid var(--green-600); }
+.messageLabel { display: flex; align-items: center; gap: var(--space-2); color: var(--green-800); font-size: var(--text-sm); font-weight: 700; }
+.reasons { display: grid; gap: var(--space-2); margin: var(--space-3) 0 0; padding-left: var(--space-5); }
+
+.cta {
+  display: grid; gap: var(--space-5); padding: var(--space-5);
+  border: 2px solid var(--clay-500); border-radius: var(--radius-lg); background: var(--clay-50); box-shadow: var(--shadow);
+}
+.ctaHead { display: flex; gap: var(--space-3); align-items: flex-start; }
+.ctaIcon { display: grid; place-items: center; flex: none; width: 48px; height: 48px; border-radius: 50%; background: var(--clay-600); color: var(--white); }
+.ctaTitle { font-family: var(--font-display); font-size: var(--text-xl); font-weight: 600; color: var(--clay-800); }
+
+.gForm { display: grid; gap: var(--space-5); }
+.gFieldset {
+  display: grid; gap: var(--space-4); margin: 0; padding: var(--space-4); min-width: 0;
+  border: 1px solid var(--clay-200); border-radius: var(--radius); background: var(--surface);
+}
+.gLegend { padding: 0 var(--space-2); font-weight: 700; color: var(--clay-800); }
+.summary {
+  display: flex; align-items: center; gap: var(--space-2); padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--high-line); border-radius: var(--radius); background: var(--high-bg); color: var(--high); font-weight: 650;
+}
+
+.done {
+  display: flex; gap: var(--space-4); align-items: center; padding: var(--space-5);
+  border: 1px solid var(--low-line); border-radius: var(--radius-lg); background: var(--low-bg);
+}
+.doneIcon { display: grid; place-items: center; flex: none; width: 52px; height: 52px; border-radius: 50%; background: var(--low); color: var(--white); }
+.doneTitle { font-size: var(--text-lg); font-weight: 700; color: var(--low); }
+
+.guarantors { display: grid; gap: var(--space-2); margin: 0; padding: 0; list-style: none; }
+.guarantor {
+  display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-2);
+  padding: var(--space-3) 0; border-bottom: 1px solid var(--line);
+}
+.guarantor:last-child { border-bottom: 0; }
+.gName { font-weight: 650; }
+
+@media (min-width: 640px) {
+  .gFieldset { grid-template-columns: 1fr 1fr; }
+  .gLegend { grid-column: 1 / -1; }
+}

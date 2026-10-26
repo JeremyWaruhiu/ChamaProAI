@@ -1,5 +1,6 @@
 import { ApiError } from '../api/client'
 import type { AuthConfig, Me } from '../api/types'
+import { t } from '../strings'
 
 // "Sign in with Google" through Google Identity Services (GIS). The button is
 // the one GIS renders, as Google's branding guidelines require; this module
@@ -50,7 +51,7 @@ declare global {
 export type GoogleStatus = 'off' | 'disabled' | 'loading' | 'ready' | 'unavailable'
 
 /** Shown when the placeholder button is pressed. */
-export const GOOGLE_NOT_ENABLED = 'Google sign-in is not set up yet. Sign in with your username and password.'
+export const GOOGLE_NOT_ENABLED = t.login.googleNotEnabled
 
 export function googleStatusFor(config: AuthConfig | null): GoogleStatus {
   if (!config) return 'off'
@@ -128,7 +129,7 @@ export async function mountGoogleButton(o: GoogleButtonOptions): Promise<void> {
       try {
         o.onSignedIn(await o.signIn(credential))
       } catch (e) {
-        o.onError(e instanceof ApiError ? e : new ApiError(0, 'Google sign-in failed; try again.'))
+        o.onError(e instanceof ApiError ? e : new ApiError(0, t.login.googleFailed))
         o.onBusy?.(false)
       }
     },

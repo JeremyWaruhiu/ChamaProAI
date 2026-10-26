@@ -1,90 +1,104 @@
+import { AnimatePresence, m } from 'motion/react'
 import { useRef, useState, type ChangeEvent } from 'react'
 import { ApiError, api } from '../api/client'
 import type { InterviewState, Question, ResponseOut } from '../api/types'
 import { StatusBadge, TypedBadge } from '../components/Badges'
-import { ErrorNotice, Loading, Notice } from '../components/Notice'
+import { Icon } from '../components/Icon'
+import { ErrorNotice, Notice } from '../components/Notice'
 import { ReplayButton } from '../components/ReplayButton'
 import { Shell } from '../components/Shell'
+import { SkeletonPage } from '../components/ui'
 import { useHealth } from '../hooks/useHealth'
 import { useInterview } from '../hooks/useInterview'
 import { useQuestions } from '../hooks/useQuestions'
 import { extensionFor, recordingSupported, useRecorder } from '../hooks/useRecorder'
 import { domainLabel, topicsOf } from '../lib/domains'
 import { applicantName, formatClock } from '../lib/format'
+import { fade, fadeUp, useReducedMotion } from '../lib/motion'
 import { describeSeconds, realTimeFactor, transcriptionSeconds } from '../lib/pace'
 import { paths } from '../lib/router'
+import { firstUnanswered } from '../lib/selectors'
+import { t } from '../strings'
 import styles from './Recording.module.css'
 
+const R = t.runner
 const MAX_BYTES = 25 * 1024 * 1024
 
 export function Recording({ id, question }: { id: number; question: number | null }) {
   const iv = useInterview(id)
   const qs = useQuestions(iv.data?.question_set)
+  const reduced = useReducedMotion()
   const name = applicantName(iv.data?.applicant.name)
 
   const loading = (!iv.data && !iv.error) || (!!iv.data && !qs.questions && !qs.error)
   const questions = qs.questions ?? []
-  const n = question ?? firstUnanswered(questions, iv.data) ?? 1
+  const resumeAt = firstUnanswered(questions, iv.data)
+  const n = question ?? resumeAt ?? 1
   const q = questions.find((x) => x.order === n)
   const total = questions.length
   const topics = topicsOf(questions)
-  const topic = q ? topics.findIndex((t) => t.key === q.topic) : -1
+  const topic = q ? topics.findIndex((tp) => tp.key === q.topic) : -1
 
   return (
-    <Shell title={iv.data ? <>Interview — <strong>{name}</strong></> : 'Interview'} interviewId={id} step="record"
-           practice={iv.data?.mode === 'practice'}
-           aside={topic >= 0 && topics.length > 1 && topics.length < questions.length
-             && `Topic ${topic + 1} of ${topics.length}`}>
-      {iv.error && <ErrorNotice doing="Could not load this interview" error={iv.error} onRetry={iv.refresh} />}
-      {qs.error && <ErrorNotice doing="Could not load the interview questions" error={qs.error} onRetry={qs.retry} />}
-      {loading && <Loading what="the interview" />}
+    <Shell title={iv.data ? R.titleFor(name) : R.title} interviewId={id} step="record"
+           applicationId={iv.data?.application_id} practice={iv.data?.mode === 'practice'}
+           aside={topic >= 0 && topics.length > 1 && topics.length < questions.length && R.topicOf(topic + 1, topics.length)}>
+      {iv.error && <ErrorNotice doing={R.loadFailed} error={iv.error} onRetry={iv.refresh} />}
+      {qs.error && <ErrorNotice doing={R.questionsFailed} error={qs.error} onRetry={qs.retry} />}
+      {loading && <SkeletonPage what={R.title} />}
 
       {iv.data && q && (
         <div className={styles.layout}>
-          <p className="eyebrow">Question {n} of {total} — {domainLabel(q.topic)}</p>
-          <QuestionCard q={q} english={iv.data.language === 'en'} />
-
-          {/* key: a new question starts with a fresh recorder and no stale messages */}
-          <AnswerPanel key={n} interview={iv.data} q={q} onChange={iv.refresh} />
-
           <Progress interview={iv.data} questions={questions} current={n} />
 
-          <nav className={styles.nav} aria-label="Questions">
-            {n > 1 ? <a className="btn btn-secondary" href={paths.record(id, n - 1)}>‹ Previous</a> : <span />}
+          {question === null && resumeAt !== undefined && resumeAt > 1 && (
+            <p className={styles.resumed} role="status"><Icon name="info" size={18} /> {R.resumed(resumeAt)}</p>
+          )}
+
+          <AnimatePresence mode="wait" initial={false}>
+            <m.div key={n} className={styles.stage} {...fadeUp(reduced, 0, 10)}>
+              <QuestionCard q={q} n={n} total={total} english={iv.data.language === 'en'} />
+              {/* key: a new question starts with a fresh recorder and no stale messages */}
+              <AnswerPanel key={n} interview={iv.data} q={q} onChange={iv.refresh} />
+            </m.div>
+          </AnimatePresence>
+
+          <nav className={styles.nav} aria-label={R.questions}>
+            {n > 1
+              ? <a className="btn btn-secondary btn-large" href={paths.record(id, n - 1)}><Icon name="arrowLeft" /> {R.previous}</a>
+              : <span />}
             {n < total
-              ? <a className="btn btn-primary btn-large" href={paths.record(id, n + 1)}>Next question ›</a>
-              : <a className="btn btn-primary btn-large" href={paths.review(id)}>Review transcripts ›</a>}
+              ? <a className="btn btn-primary btn-large" href={paths.record(id, n + 1)}>{R.nextQuestion} <Icon name="arrowRight" /></a>
+              : <a className="btn btn-primary btn-large" href={paths.review(id)}>{R.toReview} <Icon name="arrowRight" /></a>}
           </nav>
         </div>
       )}
       {iv.data && qs.questions && !q && (
-        <Notice tone="warning" title={`There is no question ${n}`}
-                action={<a className="btn btn-secondary" href={paths.record(id, 1)}>Go to question 1</a>} />
+        <Notice tone="warning" title={R.noQuestion(n)}
+                action={<a className="btn btn-secondary" href={paths.record(id, 1)}>{R.goToFirst}</a>} />
       )}
     </Shell>
   )
 }
 
-function firstUnanswered(questions: Question[], iv: InterviewState | null): number | undefined {
-  if (!iv) return undefined
-  const done = new Set(iv.responses.map((r) => r.sentence_no))
-  return questions.find((q) => !done.has(q.order))?.order
-}
-
 /** Kikuyu with an English gloss where the Kikuyu exists; English alone otherwise. */
-function QuestionCard({ q, english }: { q: Question; english: boolean }) {
+function QuestionCard({ q, n, total, english }: { q: Question; n: number; total: number; english: boolean }) {
   const kikuyu = english ? '' : q.text_kik.trim()
   return (
-    <div className={`card ${styles.question}`}>
+    <section className={`card ${styles.question}`} aria-labelledby="question-text">
+      <p className={styles.questionMeta}>
+        <span className={styles.questionNo}>{R.questionOf(n, total)}</span>
+        <span className={styles.topic}>{domainLabel(q.topic)}</span>
+      </p>
       {kikuyu ? (
         <>
-          <p className={styles.primary} lang="ki">“{kikuyu}”</p>
+          <h2 id="question-text" className={styles.primary} lang="ki">“{kikuyu}”</h2>
           <p className={styles.gloss} lang="en">{q.text_en}</p>
         </>
       ) : (
-        <p className={styles.primary} lang="en">{q.text_en}</p>
+        <h2 id="question-text" className={styles.primary} lang="en">{q.text_en}</h2>
       )}
-    </div>
+    </section>
   )
 }
 
@@ -92,6 +106,7 @@ type Busy = null | 'uploading' | 'deleting' | 'saving'
 
 function AnswerPanel({ interview, q, onChange }: { interview: InterviewState; q: Question; onChange: () => Promise<void> }) {
   const rec = useRecorder()
+  const reduced = useReducedMotion()
   const [busy, setBusy] = useState<Busy>(null)
   const [waitingFor, setWaitingFor] = useState<number | null>(null)
   const [error, setError] = useState<{ doing: string; error: ApiError; retry?: () => void } | null>(null)
@@ -105,7 +120,7 @@ function AnswerPanel({ interview, q, onChange }: { interview: InterviewState; q:
 
   async function upload(audio: Blob, filename: string) {
     if (audio.size > MAX_BYTES) {
-      setError({ doing: 'This recording is too large', error: new ApiError(413, 'Recordings must be under 25 MB. Record a shorter answer.') })
+      setError({ doing: R.tooLarge, error: new ApiError(413, R.tooLargeBody) })
       return
     }
     setBusy('uploading')
@@ -114,7 +129,7 @@ function AnswerPanel({ interview, q, onChange }: { interview: InterviewState; q:
       await api.uploadResponse(interview.id, q.order, audio, filename)
       await onChange()
     } catch (e) {
-      setError({ doing: 'The recording was not saved', error: e as ApiError, retry: () => upload(audio, filename) })
+      setError({ doing: R.notSaved, error: e as ApiError, retry: () => upload(audio, filename) })
     } finally {
       setBusy(null)
     }
@@ -123,7 +138,7 @@ function AnswerPanel({ interview, q, onChange }: { interview: InterviewState; q:
   async function stopAndSave() {
     const blob = await rec.stop()
     if (!blob) {
-      setError({ doing: 'Nothing was recorded', error: new ApiError(0, 'The microphone produced no sound. Try again.') })
+      setError({ doing: R.nothingRecorded, error: new ApiError(0, R.nothingRecordedBody) })
       return
     }
     await upload(blob, `answer-${q.order}.${extensionFor(blob.type)}`)
@@ -138,7 +153,7 @@ function AnswerPanel({ interview, q, onChange }: { interview: InterviewState; q:
       setTyping(false)
       setTyped('')
     } catch (e) {
-      setError({ doing: 'The typed answer was not saved', error: e as ApiError, retry: saveTyped })
+      setError({ doing: R.typedNotSaved, error: e as ApiError, retry: saveTyped })
     } finally {
       setBusy(null)
     }
@@ -157,100 +172,120 @@ function AnswerPanel({ interview, q, onChange }: { interview: InterviewState; q:
       await api.deleteResponse(r.id, (s) => setWaitingFor(s))
       await onChange()
     } catch (e) {
-      setError({ doing: 'Could not remove the old recording', error: e as ApiError, retry: () => reRecord(r) })
+      setError({ doing: R.removeFailed, error: e as ApiError, retry: () => reRecord(r) })
     } finally {
       setBusy(null)
       setWaitingFor(null)
     }
   }
 
-  const uploadControl = (
-    <>
+  const idleActions = (
+    <div className={styles.secondary}>
+      <button type="button" className="btn btn-secondary" onClick={() => setTyping(true)}
+              disabled={busy !== null || rec.state !== 'idle'}>
+        <Icon name="keyboard" /> {R.type}
+      </button>
       <input ref={fileInput} type="file" accept="audio/*" className="visually-hidden"
              onChange={chooseFile} tabIndex={-1} aria-hidden />
-      <button type="button" className="btn btn-secondary" onClick={() => fileInput.current?.click()}
+      <button type="button" className="btn btn-quiet" onClick={() => fileInput.current?.click()}
               disabled={busy !== null || rec.state !== 'idle'}>
-        Upload a recording
+        <Icon name="upload" /> {R.upload}
       </button>
-    </>
+    </div>
   )
 
   let body
+  let key: string
   if (busy === 'uploading') {
-    body = <p className={styles.line}><span className="spinner" aria-hidden /> Saving the recording…</p>
+    key = 'uploading'
+    body = <p className={styles.line}><span className="spinner" aria-hidden /> {R.saving}</p>
   } else if (typing && !response && !readOnly) {
+    key = 'typing'
     body = (
       <div className={styles.typed}>
-        <label className="field-label" htmlFor={`typed${q.order}`}>
-          Type what the applicant said{interview.language === 'en' ? '' : ', in Kikuyu'}
-        </label>
-        <textarea id={`typed${q.order}`} className="textarea" lang={lang} rows={3} maxLength={5000}
+        <label className="field-label" htmlFor={`typed${q.order}`}>{R.typeLabel(interview.language !== 'en')}</label>
+        <textarea id={`typed${q.order}`} className="textarea" lang={lang} rows={4} maxLength={5000}
                   value={typed} disabled={busy === 'saving'} autoFocus
                   onChange={(e) => setTyped(e.target.value)} />
         <div className={styles.actions}>
-          <button className="btn btn-primary btn-large" onClick={saveTyped}
-                  disabled={busy === 'saving' || !typed.trim()}>
-            {busy === 'saving' && <span className="spinner" aria-hidden />} Save typed answer
+          <button className="btn btn-primary btn-large" onClick={saveTyped} disabled={busy === 'saving' || !typed.trim()}>
+            {busy === 'saving' && <span className="spinner" aria-hidden />} {R.saveTyped}
           </button>
-          <button className="btn btn-quiet" onClick={() => setTyping(false)} disabled={busy === 'saving'}>Cancel</button>
+          <button className="btn btn-quiet" onClick={() => setTyping(false)} disabled={busy === 'saving'}>{t.common.cancel}</button>
         </div>
       </div>
     )
   } else if (busy === 'deleting') {
-    body = (
-      <p className={styles.line}>
-        <span className="spinner" aria-hidden />
-        {waitingFor
-          ? 'This answer is being transcribed right now. The old recording will be removed as soon as that finishes, usually within a minute.'
-          : 'Removing the old recording…'}
-      </p>
-    )
+    key = 'deleting'
+    body = <p className={styles.line}><span className="spinner" aria-hidden /> {waitingFor ? R.waitingRemove : R.removing}</p>
   } else if (rec.state === 'recording') {
+    key = 'recording'
     body = (
-      <div className={styles.recording}>
+      <div className={styles.recorder}>
+        <button type="button" className={`${styles.recButton} ${styles.recLive}`} onClick={stopAndSave}
+                aria-label={R.stopAndSave}>
+          <Icon name="stop" size={34} />
+        </button>
         <p className={styles.live} aria-live="polite">
-          <span className={styles.dot} aria-hidden /> Recording <span className={styles.clock}>{formatClock(rec.elapsed)}</span>
+          <span className={styles.dot} aria-hidden /> {R.recording} <span className={`${styles.clock} num`}>{formatClock(rec.elapsed)}</span>
         </p>
+        <LevelMeter level={rec.level} />
         <div className={styles.actions}>
-          <button className="btn btn-primary btn-large" onClick={stopAndSave}>■ Stop and save</button>
-          <button className="btn btn-quiet" onClick={rec.cancel}>Cancel</button>
+          <button className="btn btn-primary" onClick={stopAndSave}><Icon name="stop" /> {R.stopAndSave}</button>
+          <button className="btn btn-quiet" onClick={rec.cancel}>{t.common.cancel}</button>
         </div>
       </div>
     )
   } else if (response) {
+    key = `response-${response.id}-${response.status}`
     body = <ResponseStatus interview={interview} response={response} readOnly={readOnly} lang={lang} onReRecord={reRecord} />
   } else if (readOnly) {
-    body = <p className="muted">No answer was recorded for this question.</p>
+    key = 'none'
+    body = <p className="muted">{R.noAnswer}</p>
   } else {
+    key = 'idle'
     body = (
-      <div className={styles.empty}>
-        <p className="muted">Ask the question, then press <strong>Record answer</strong> while the applicant replies, or type the answer instead.</p>
-        <div className={styles.actions}>
-          {recordingSupported() && (
-            <button className="btn btn-primary btn-large" onClick={rec.start} disabled={rec.state === 'starting'}>
-              {rec.state === 'starting' ? <span className="spinner" aria-hidden /> : <span className={styles.recIcon} aria-hidden />}
-              Record answer
+      <div className={styles.recorder}>
+        <p className={styles.instructions}>{R.askThen}</p>
+        {recordingSupported() ? (
+          <>
+            <button type="button" className={styles.recButton} onClick={rec.start} disabled={rec.state === 'starting'}
+                    aria-describedby="rec-hint">
+              {rec.state === 'starting' ? <span className="spinner" aria-hidden /> : <Icon name="mic" size={36} />}
+              <span className="visually-hidden">{R.record}</span>
             </button>
-          )}
-          {uploadControl}
-          <button type="button" className="btn btn-secondary" onClick={() => setTyping(true)}
-                  disabled={busy !== null || rec.state !== 'idle'}>
-            Type the answer
-          </button>
-        </div>
-        {!recordingSupported() && (
-          <p className="muted">This browser cannot record from the microphone. Upload a recording instead.</p>
+            <p className={styles.recLabel}>{rec.state === 'starting' ? R.starting : R.record}</p>
+            <p id="rec-hint" className="subtle small">{R.recordHint}</p>
+          </>
+        ) : (
+          <p className="muted">{R.noMic}</p>
         )}
+        {idleActions}
       </div>
     )
   }
 
   return (
-    <section className={`card ${styles.answer}`} aria-label="Answer">
-      {body}
+    <section className={`card ${styles.answer}`} aria-label={R.answer}>
+      <AnimatePresence mode="wait" initial={false}>
+        <m.div key={key} {...fade(reduced)}>{body}</m.div>
+      </AnimatePresence>
       {rec.error && <Notice tone="warning">{rec.error}</Notice>}
       {error && <ErrorNotice doing={error.doing} error={error.error} onRetry={error.retry} />}
     </section>
+  )
+}
+
+/** Twenty segments that light up with the microphone's level. */
+export function LevelMeter({ level, segments = 20 }: { level: number; segments?: number }) {
+  const lit = Math.round(Math.max(0, Math.min(1, level)) * segments)
+  return (
+    <div className={styles.meter} role="meter" aria-label={R.level} aria-valuemin={0} aria-valuemax={100}
+         aria-valuenow={Math.round(level * 100)}>
+      {Array.from({ length: segments }, (_, i) => (
+        <span key={i} className={i < lit ? (i >= segments * 0.85 ? styles.segHot : styles.segOn) : undefined} />
+      ))}
+    </div>
   )
 }
 
@@ -261,28 +296,25 @@ function ResponseStatus({ interview, response: r, readOnly, lang, onReRecord }: 
   let message
   if (r.source === 'typed') {
     message = (
-      <p>Typed: <span className={styles.heard} lang={lang}>“{r.transcript}”</span>
-        {!readOnly && <span className="muted"> You can correct this on the review screen.</span>}</p>
+      <p>{R.typed} <span className={styles.heard} lang={lang}>“{r.transcript}”</span>
+        {!readOnly && <span className="muted">{R.canCorrect}</span>}</p>
     )
   } else if (r.status === 'queued') {
     const ahead = interview.responses.filter((x) => x.id < r.id && (x.status === 'queued' || x.status === 'transcribing'))
     const eta = rtf === null ? null : transcriptionSeconds(rtf, [...ahead, r].map((x) => x.duration_s))
-    message = (
-      <p>Waiting its turn to be transcribed{ahead.length > 0 && <> — {ahead.length} {ahead.length === 1 ? 'answer' : 'answers'} ahead</>}.
-        {eta !== null && <> Usually ready in {describeSeconds(eta)}.</>} You can carry on with the next question.</p>
-    )
+    message = <p>{R.queued(ahead.length)}{eta !== null && R.usuallyReady(describeSeconds(eta))}{R.carryOn}</p>
   } else if (r.status === 'transcribing') {
     message = (
-      <p>Being transcribed now.
-        {rtf !== null && <> This usually takes {describeSeconds(transcriptionSeconds(rtf, [r.duration_s]))}.</>}
-        {' '}You can carry on with the next question.</p>
+      <p>{R.transcribing}
+        {rtf !== null && R.usuallyTakes(describeSeconds(transcriptionSeconds(rtf, [r.duration_s])))}
+        {R.carryOn}</p>
     )
   } else if (r.status === 'transcribed') {
     message = r.transcript?.trim()
-      ? <p>Heard: <span className={styles.heard} lang={lang}>“{r.transcript}”</span>{!readOnly && <span className="muted"> You can correct this on the review screen.</span>}</p>
-      : <p className="muted">No words were recognised in this recording. Listen to it, then record again or type the answer on the review screen.</p>
+      ? <p>{R.heard} <span className={styles.heard} lang={lang}>“{r.transcript}”</span>{!readOnly && <span className="muted">{R.canCorrect}</span>}</p>
+      : <p className="muted">{R.noWords}</p>
   } else {
-    message = <p>This answer could not be transcribed. Record it again, or type what the applicant said on the review screen.</p>
+    message = <p>{R.failed}</p>
   }
 
   return (
@@ -296,7 +328,7 @@ function ResponseStatus({ interview, response: r, readOnly, lang, onReRecord }: 
         {r.source === 'audio' && <ReplayButton responseId={r.id} />}
         {!readOnly && (
           <button className="btn btn-secondary" onClick={() => onReRecord(r)}>
-            {r.source === 'typed' ? 'Remove and answer again' : 'Re-record'}
+            {r.source === 'typed' ? R.removeTyped : R.reRecord}
           </button>
         )}
       </div>
@@ -311,54 +343,62 @@ function Progress({ interview, questions, current }: { interview: InterviewState
   const recorded = interview.responses.length
   const waiting = interview.counts.queued + interview.counts.transcribing
   // v1 groups 40 questions into 8 domains; v2 asks one question per topic, so
-  // topic segments would say nothing the question buttons do not.
+  // the chips are the questions themselves.
   const grouped = topics.length < questions.length
-  const pills = grouped ? questions.filter((q) => q.topic === currentTopic) : questions
+  const chips = grouped ? questions.filter((q) => q.topic === currentTopic) : questions
+  const index = questions.findIndex((q) => q.order === current)
 
   return (
-    <section className={styles.progress} aria-label="Progress">
+    <section className={styles.progress} aria-label={R.progressLabel(recorded, questions.length)}>
+      <div className={styles.progressHead}>
+        <p className={styles.progressTitle}>{R.questionOf(index + 1, questions.length)}</p>
+        <p className="subtle small">{R.progressLabel(recorded, questions.length)}{waiting > 0 && R.beingTranscribed(waiting)}</p>
+      </div>
+      <div className={styles.bar} aria-hidden>
+        <span className={styles.barDone} style={{ width: `${(100 * recorded) / questions.length}%` }} />
+        <span className={styles.barHere} style={{ left: `${(100 * index) / questions.length}%`, width: `${100 / questions.length}%` }} />
+      </div>
       {grouped && (
-        <>
-          <p className="eyebrow">Progress through the {topics.length} interview domains</p>
-          <ol className={styles.segments}>
-            {topics.map((d) => {
-              const dq = questions.filter((q) => q.topic === d.key)
-              const done = dq.filter((q) => byNo.has(q.order)).length
-              const target = dq.find((q) => !byNo.has(q.order)) ?? dq[0]
-              return (
-                <li key={d.key}>
-                  <a href={target ? paths.record(interview.id, target.order) : undefined}
-                     className={styles.segment} aria-current={d.key === currentTopic ? 'true' : undefined}
-                     title={`${d.label}: ${done} of ${dq.length} recorded`}>
-                    <span className={styles.track}><span style={{ width: `${dq.length ? (100 * done) / dq.length : 0}%` }} /></span>
-                    <span className={styles.segLabel}>{d.label}</span>
-                  </a>
-                </li>
-              )
-            })}
-          </ol>
-        </>
-      )}
-      <div className={styles.progressFoot}>
-        <p><strong>{recorded} of {questions.length}</strong> answers recorded
-          {waiting > 0 && <span className="muted"> · {waiting} being transcribed</span>}</p>
-        <ol className={styles.pills} aria-label={grouped ? `Questions in ${domainLabel(currentTopic)}` : 'Questions'}>
-          {pills.map((q) => {
-            const r = byNo.get(q.order)
-            const state = r ? (r.status === 'failed' ? 'failed' : r.status === 'transcribed' ? 'done' : 'waiting') : 'none'
+        <ol className={styles.segments} aria-label={R.domains(topics.length)}>
+          {topics.map((d) => {
+            const dq = questions.filter((q) => q.topic === d.key)
+            const done = dq.filter((q) => byNo.has(q.order)).length
+            const target = dq.find((q) => !byNo.has(q.order)) ?? dq[0]
             return (
-              <li key={q.order}>
-                <a href={paths.record(interview.id, q.order)} className={`${styles.pill} ${styles[state]}`}
-                   aria-current={q.order === current ? 'true' : undefined}
-                   title={domainLabel(q.topic)}
-                   aria-label={`Question ${q.order}, ${domainLabel(q.topic)}${r ? `, ${r.source === 'typed' ? 'typed' : r.status}` : ', not answered'}`}>
-                  {q.order}
+              <li key={d.key}>
+                <a href={target ? paths.record(interview.id, target.order) : undefined}
+                   className={styles.segment} aria-current={d.key === currentTopic ? 'true' : undefined}
+                   title={R.segment(d.label, done, dq.length)}>
+                  <span className={styles.track}><span style={{ width: `${dq.length ? (100 * done) / dq.length : 0}%` }} /></span>
+                  <span className={styles.segLabel}>{d.label}</span>
                 </a>
               </li>
             )
           })}
         </ol>
-      </div>
+      )}
+      <ol className={styles.chips} aria-label={grouped ? R.questionsIn(domainLabel(currentTopic)) : R.questions}>
+        {chips.map((q) => {
+          const r = byNo.get(q.order)
+          const state = r ? (r.status === 'failed' ? 'failed' : r.status === 'transcribed' ? 'done' : 'waiting') : 'none'
+          const said = r ? (r.source === 'typed' ? t.status.typed : t.status[r.status]) : R.notAnswered
+          return (
+            <li key={q.order}>
+              <a href={paths.record(interview.id, q.order)} className={`${styles.chip} ${styles[state]}`}
+                 aria-current={q.order === current ? 'step' : undefined}
+                 title={`${domainLabel(q.topic)} · ${said}`}
+                 aria-label={R.pillLabel(q.order, domainLabel(q.topic), said.toLowerCase())}>
+                <span className={styles.chipNo}>{q.order}</span>
+                <span className={styles.chipIcon} aria-hidden>
+                  {state === 'done' && <Icon name="check" size={12} />}
+                  {state === 'failed' && <Icon name="alert" size={12} />}
+                  {state === 'waiting' && <span className={styles.chipPulse} />}
+                </span>
+              </a>
+            </li>
+          )
+        })}
+      </ol>
     </section>
   )
 }

@@ -1,7 +1,11 @@
 import type {
-  ApplicantFormOptions, Assessment, Decision, DecisionValue, InterviewCreate, InterviewState,
-  InterviewSummary, AuthConfig, Health, Me, Question, QuestionSet, ResponseOut, ResponseQueued, Results,
+  ApplicantFormOptions, ApplicationCreate, ApplicationDetail, ApplicationStatus, ApplicationSummary,
+  Assessment, AuditEntry, AuditFilter, AuthConfig, Decision, DecisionCreate, Guarantor, GuarantorIn,
+  Health, InterviewCreate, InterviewState, InterviewSummary, Me, Member, MemberCreate, MyApplication,
+  MyApplicationSummary, Profile, Question, QuestionSet, ResponseOut, ResponseQueued, Results, Role,
+  UserCreate, UserOut,
 } from './types'
+import { t } from '../strings'
 
 /** No request may leave the dashboard waiting longer than this. */
 export const REQUEST_TIMEOUT_MS = 15_000
@@ -41,8 +45,7 @@ async function request<T>(path: string, init?: RequestInit, timeoutMs = REQUEST_
     return await send<T>(path, { ...init, signal: ctrl.signal })
   } catch (e) {
     if (ctrl.signal.aborted) {
-      throw new ApiError(0, `The ChamaPro server did not answer within ${timeoutMs / 1000} seconds. `
-        + 'Check that it is running, then retry.', null, true)
+      throw new ApiError(0, t.api.timedOut(timeoutMs / 1000), null, true)
     }
     throw e
   } finally {
@@ -55,7 +58,7 @@ async function send<T>(path: string, init: RequestInit): Promise<T> {
   try {
     res = await fetch(`/api${path}`, init)
   } catch {
-    throw new ApiError(0, 'Cannot reach the ChamaPro server. Check that it is running, then try again.')
+    throw new ApiError(0, t.api.unreachable)
   }
   if (!res.ok) {
     let detail = `${res.status} ${res.statusText}`
@@ -65,7 +68,7 @@ async function send<T>(path: string, init: RequestInit): Promise<T> {
     } catch {
       // not JSON (e.g. the proxy could not reach the backend); keep the status line
       if (res.status === 502 || res.status === 504) {
-        detail = 'The ChamaPro server is not responding. Check that it is running.'
+        detail = t.api.notResponding
       }
     }
     const ra = Number(res.headers.get('Retry-After'))
@@ -85,12 +88,26 @@ const json = (method: string, body: unknown): RequestInit => ({
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 
+/** ?a=1&b=x from the defined, non-empty values only. */
+export function query(params: Record<string, string | number | null | undefined>): string {
+  const q = new URLSearchParams()
+  for (const [k, v] of Object.entries(params)) {
+    if (v !== undefined && v !== null && v !== '') q.set(k, String(v))
+  }
+  const out = q.toString()
+  return out ? `?${out}` : ''
+}
+
 export const api = {
   health: () => request<Health>('/health'),
   me: () => request<Me>('/auth/me'),
   login: (username: string, password: string) =>
     request<Me>('/auth/login', json('POST', { username: username.trim(), password })),
   logout: () => request<null>('/auth/logout', { method: 'POST' }),
+  logoutAll: () => request<null>('/auth/logout-all', { method: 'POST' }),
+  profile: () => request<Profile>('/auth/profile'),
+  changePassword: (current: string, next: string) =>
+    request<null>('/auth/password', json('POST', { current_password: current, new_password: next })),
   authConfig: () => request<AuthConfig>('/auth/config'),
   googleLogin: (credential: string) => request<Me>('/auth/google', json('POST', { credential })),
   questions: (version: QuestionSet) => request<Question[]>(`/questions?version=${version}`),
@@ -134,9 +151,42 @@ export const api = {
     request<ResponseOut>(`/responses/${responseId}`, json('PATCH', { transcript })),
   assess: (interviewId: number) =>
     request<Assessment>(`/interviews/${interviewId}/assess`, { method: 'POST' }, ASSESS_TIMEOUT_MS),
-  decide: (interviewId: number, decision: DecisionValue, note: string) =>
-    request<Decision>(`/interviews/${interviewId}/decision`,
-      json('POST', { decision, note: note.trim() || null })),
+  /** The officer's decision on an interview; moves its loan application too, if it has one. */
+  decide: (interviewId: number, body: DecisionCreate) =>
+    request<Decision>(`/interviews/${interviewId}/decision`, json('POST', body)),
   audioUrl: (responseId: number) => `/api/responses/${responseId}/audio`,
   results: () => request<Results>('/results'),
+
+  // members and loan applications (staff)
+  members: (q?: string, limit = 50) => request<Member[]>(`/members${query({ q: q?.trim(), limit })}`),
+  member: (id: number) => request<Member>(`/members/${id}`),
+  createMember: (body: MemberCreate) => request<Member>('/members', json('POST', body)),
+  applications: (filter: { status?: ApplicationStatus; member_id?: number; limit?: number } = {}) =>
+    request<ApplicationSummary[]>(`/applications${query(filter)}`),
+  application: (id: number) => request<ApplicationDetail>(`/applications/${id}`),
+  createApplication: (body: ApplicationCreate) =>
+    request<ApplicationDetail>('/applications', json('POST', body)),
+  verifyGuarantor: (id: number) => request<Guarantor>(`/guarantors/${id}/verify`, { method: 'POST' }),
+  rejectGuarantor: (id: number, reason: string) =>
+    request<Guarantor>(`/guarantors/${id}/reject`, json('POST', { reason: reason.trim() || null })),
+
+  // a member's own applications
+  myApplications: () => request<MyApplicationSummary[]>('/me/applications'),
+  myApplication: (id: number) => request<MyApplication>(`/me/applications/${id}`),
+  submitGuarantors: (id: number, guarantors: GuarantorIn[]) =>
+    request<MyApplication>(`/me/applications/${id}/guarantors`, json('POST', { guarantors })),
+
+  // administration
+  users: () => request<UserOut[]>('/admin/users'),
+  createUser: (body: UserCreate) => request<UserOut>('/admin/users', json('POST', body)),
+  setUserActive: (id: number, active: boolean) =>
+    request<UserOut>(`/admin/users/${id}/${active ? 'activate' : 'deactivate'}`, { method: 'POST' }),
+  resetPassword: (id: number, password: string) =>
+    request<UserOut>(`/admin/users/${id}/password`, json('PUT', { password })),
+  changeRole: (id: number, role: Role) => request<UserOut>(`/admin/users/${id}/role`, json('PUT', { role })),
+  linkGoogle: (id: number, email: string | null) =>
+    request<UserOut>(`/admin/users/${id}/google-email`, json('PUT', { email: email?.trim() || null })),
+  linkMember: (id: number, memberId: number | null) =>
+    request<UserOut>(`/admin/users/${id}/member`, json('PUT', { member_id: memberId })),
+  audit: (filter: AuditFilter = {}) => request<AuditEntry[]>(`/admin/audit${query({ ...filter })}`),
 }

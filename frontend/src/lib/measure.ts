@@ -1,6 +1,8 @@
 // A null metric is "not yet measured": never shown or drawn as 0.
 
-export const NOT_MEASURED = 'not yet measured'
+import { t } from '../strings'
+
+export const NOT_MEASURED = t.charts.notMeasured
 
 export function isMeasured(v: number | null | undefined): v is number {
   return typeof v === 'number' && Number.isFinite(v)

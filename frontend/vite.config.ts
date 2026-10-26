@@ -1,3 +1,4 @@
+/// <reference types="vitest/config" />
 import react from '@vitejs/plugin-react'
 import { defineConfig } from 'vite'
 
@@ -10,4 +11,6 @@ export default defineConfig({
     port: 5173,
     proxy: { '/api': 'http://localhost:8000' },
   },
+  // The reduced-motion test reads the global stylesheet; other CSS stays stubbed in tests.
+  test: { css: { include: [/index\.css/] } },
 })

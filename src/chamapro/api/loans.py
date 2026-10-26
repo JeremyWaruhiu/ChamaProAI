@@ -183,6 +183,7 @@ def summary(app: LoanApplication) -> s.ApplicationSummary:
         id=app.id, member_id=app.member_id, member_no=app.member.member_no,
         member_name=app.member.full_name, amount_requested_kes=app.amount_requested_kes,
         term_months=app.term_months, status=app.status, interview_id=app.interview_id,
+        mode=iv.mode if iv else None,
         risk_class=iv.assessment.risk_class if iv and iv.assessment else None,
         outcome=iv.decision.effective_outcome if iv and iv.decision else None,
         created_at=app.created_at, updated_at=app.updated_at)
@@ -213,6 +214,11 @@ def detail(db: Session, app: LoanApplication) -> s.ApplicationDetail:
         guarantors=[guarantor_out(g) for g in app.guarantors], timeline=timeline(db, app))
 
 
+def mode_of(app: LoanApplication) -> str:
+    """practice when its interview is; an application without one yet is live."""
+    return app.interview.mode if app.interview else "live"
+
+
 def counting(app: LoanApplication) -> int:
     """Guarantors that still count towards the requirement."""
     return sum(g.status in ("pending", "verified") for g in app.guarantors)
@@ -237,7 +243,8 @@ def my_view(db: Session, app: LoanApplication) -> s.MyApplication:
     return s.MyApplication(
         id=app.id, amount_requested_kes=app.amount_requested_kes, purpose=app.purpose,
         term_months=app.term_months, status=app.status,
-        status_label=member_text.STATUS_LABEL[app.status], created_at=app.created_at,
+        status_label=member_text.STATUS_LABEL[app.status], mode=mode_of(app),
+        created_at=app.created_at,
         updated_at=app.updated_at, timeline=timeline(db, app), outcome=outcome,
         approved_amount_kes=d.approved_amount_kes if d else None,
         guarantors_required=d.guarantors_required if d else None,
@@ -447,7 +454,8 @@ def my_applications(db: Session = Depends(get_db), user: User = Depends(require_
     return [s.MyApplicationSummary(id=a.id, amount_requested_kes=a.amount_requested_kes,
                                    purpose=a.purpose, term_months=a.term_months, status=a.status,
                                    status_label=member_text.STATUS_LABEL[a.status],
-                                   created_at=a.created_at, updated_at=a.updated_at)
+                                   mode=mode_of(a), created_at=a.created_at,
+                                   updated_at=a.updated_at)
             for a in apps]
 
 

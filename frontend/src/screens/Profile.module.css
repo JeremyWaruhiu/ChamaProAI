@@ -1,0 +1,12 @@
+.grid { display: grid; gap: var(--space-5); grid-template-columns: repeat(auto-fit, minmax(min(100%, 380px), 1fr)); align-items: start; }
+.stack { display: grid; gap: var(--space-5); }
+.who { display: flex; align-items: center; gap: var(--space-4); margin-bottom: var(--space-4); }
+.avatar {
+  display: grid; place-items: center; flex: none; width: 56px; height: 56px; border-radius: 50%;
+  background: var(--clay-100); color: var(--clay-800); font-family: var(--font-display); font-size: var(--text-xl); font-weight: 600;
+}
+.name { font-size: var(--text-lg); font-weight: 680; margin-bottom: 4px; }
+.google { display: inline-flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); }
+.form { display: grid; gap: var(--space-4); margin-top: var(--space-4); justify-items: stretch; }
+.form > button { justify-self: start; }
+.spaced { margin-top: var(--space-4); }

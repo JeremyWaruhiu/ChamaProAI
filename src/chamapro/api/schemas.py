@@ -245,6 +245,28 @@ class Me(ORM):
     role: Role
 
 
+class ProfileMember(BaseModel):
+    member_no: str
+    full_name: str
+
+
+class Profile(BaseModel):
+    """The signed-in user's own account (GET /api/auth/profile)."""
+    username: str
+    role: Role
+    email: str | None = Field(description="The Google account linked for sign-in, if any")
+    google_sign_in_available: bool = Field(description="False when the server has no Google client ID")
+    member: ProfileMember | None = Field(description="Member logins: the member record linked")
+    signed_in_with: str | None = Field(description="password | google, for this session")
+    active_sessions: int = Field(description="Signed-in browsers, this one included")
+    created_at: datetime
+
+
+class PasswordChange(BaseModel):
+    current_password: str = Field(min_length=1, max_length=1024)
+    new_password: str = Field(min_length=10, max_length=1024)
+
+
 class Applicant(ORM):
     id: int
     name: str | None
@@ -467,6 +489,7 @@ class ApplicationSummary(BaseModel):
     term_months: int
     status: ApplicationStatus
     interview_id: int | None
+    mode: Mode | None = Field(default=None, description="Its interview's mode; null before it has one")
     risk_class: str | None
     outcome: Outcome | None
     created_at: datetime
@@ -505,6 +528,7 @@ class MyApplicationSummary(BaseModel):
     term_months: int
     status: ApplicationStatus
     status_label: str
+    mode: Mode = Field(default="live", description="practice: a training record, no real loan")
     created_at: datetime
     updated_at: datetime
 

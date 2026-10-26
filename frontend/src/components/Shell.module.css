@@ -1,60 +1,48 @@
-.bar { background: var(--green-800); color: var(--white); }
+.shell { display: grid; gap: var(--space-5); }
 
-.barInner {
-  display: flex; align-items: center; justify-content: space-between; gap: 16px;
-  max-width: 1120px; margin: 0 auto; padding: 16px 24px; min-height: 64px;
+.steps {
+  display: flex; align-items: center; justify-content: space-between; gap: var(--space-3) var(--space-5); flex-wrap: wrap;
 }
-
-.title { font-size: 1.25rem; font-weight: 500; letter-spacing: 0.01em; }
-.title strong { font-weight: 700; }
-.aside { font-size: 1rem; opacity: 0.92; white-space: nowrap; }
-.barInner { flex-wrap: wrap; }
-.barEnd { display: flex; align-items: center; gap: 12px 24px; flex-wrap: wrap; justify-content: flex-end; }
-
-.user { display: flex; align-items: center; gap: 12px; }
-.userName { display: flex; flex-direction: column; line-height: 1.2; font-weight: 650; text-align: right; }
-.role { font-size: 0.8rem; font-weight: 500; opacity: 0.9; }
-.signOut {
-  min-height: 44px; padding: 0 16px; font-size: 0.95rem;
-  background: transparent; border-color: rgb(255 255 255 / 70%); color: var(--white);
-}
-.signOut:hover { background: rgb(255 255 255 / 12%); border-color: var(--white); }
-
-.steps { background: var(--white); border-bottom: 1px solid var(--line); }
-
-.stepsInner {
-  display: flex; align-items: center; gap: 12px 24px; flex-wrap: wrap;
-  max-width: 1120px; margin: 0 auto; padding: 6px 24px;
-}
-
 .back {
-  display: inline-flex; align-items: center; min-height: 48px; padding: 0 4px;
-  color: var(--green-700); font-weight: 600; text-decoration: none;
+  display: inline-flex; align-items: center; gap: var(--space-2); min-height: 44px;
+  color: var(--green-700); font-weight: 620; text-decoration: none;
 }
 .back:hover { text-decoration: underline; }
 
-.stepList { display: flex; gap: 6px; margin: 0 0 0 auto; padding: 0; list-style: none; flex-wrap: wrap; }
-
+.stepList {
+  display: flex; gap: 4px; margin: 0; padding: 4px; list-style: none; flex-wrap: wrap;
+  border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface);
+}
 .step {
-  display: inline-flex; align-items: center; gap: 10px; min-height: 48px; padding: 0 14px;
-  border-radius: var(--radius); color: var(--ink-2); font-weight: 600; text-decoration: none;
+  display: inline-flex; align-items: center; gap: var(--space-2); min-height: 40px; padding: 0 var(--space-3);
+  border-radius: var(--radius-sm); color: var(--ink-2); font-size: var(--text-base); font-weight: 620; text-decoration: none;
+  transition: background-color var(--dur-fast), color var(--dur-fast);
 }
 .step:hover { background: var(--green-50); color: var(--green-800); }
-.step[aria-current="step"] { background: var(--green-100); color: var(--green-800); }
-
+.step[aria-current="step"] { background: var(--green-800); color: var(--white); }
 .stepNo {
-  display: inline-grid; place-items: center; width: 28px; height: 28px; border-radius: 50%;
-  border: 2px solid currentColor; font-size: 0.85rem;
+  display: inline-grid; place-items: center; width: 22px; height: 22px; border-radius: 50%;
+  border: 1.5px solid currentColor; font-size: var(--text-xs);
 }
-.step[aria-current="step"] .stepNo { background: var(--green-800); border-color: var(--green-800); color: var(--white); }
 
-.practice { background: var(--medium-bg); border-bottom: 2px solid var(--medium-line); color: var(--medium); }
-.practiceInner { max-width: 1120px; margin: 0 auto; padding: 10px 24px; font-size: 1rem; }
+.head { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-2) var(--space-3); }
+.title { font-size: var(--text-2xl); }
+.title strong { font-weight: 600; color: var(--green-800); }
+.aside { margin-left: auto; color: var(--ink-2); font-size: var(--text-base); }
 
-.main { max-width: 1120px; margin: 0 auto; padding: 28px 24px 64px; }
+.practice {
+  display: flex; align-items: flex-start; gap: var(--space-3);
+  padding: var(--space-3) var(--space-4); border: 1px solid var(--practice-line); border-radius: var(--radius);
+  background: var(--practice-bg); color: var(--practice); font-size: var(--text-base);
+}
+.practice svg { flex: none; margin-top: 3px; }
+.practice p { color: var(--ink); }
+.practice strong { color: var(--practice); }
+
+.body { display: grid; gap: var(--space-5); min-width: 0; }
 
 @media (max-width: 720px) {
-  .barInner, .stepsInner, .practiceInner, .main { padding-left: 16px; padding-right: 16px; }
-  .stepList { margin-left: 0; }
-  .step { padding: 0 10px; font-size: 0.95rem; }
+  .title { font-size: var(--text-xl); }
+  .stepList { width: 100%; }
+  .step { flex: 1; justify-content: center; padding: 0 var(--space-2); font-size: var(--text-sm); }
 }

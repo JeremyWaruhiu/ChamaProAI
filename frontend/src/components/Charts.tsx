@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react'
 import { NOT_MEASURED, fmt, isMeasured, pct } from '../lib/measure'
+import { t } from '../strings'
 import styles from './Charts.module.css'
 
 // Plain CSS/SVG charts for the read-only results page. No chart dependency.
@@ -13,8 +14,8 @@ export function Value({ v, digits = 3, percent = false }: { v: number | null | u
 export function Caption({ source, validation }: { source?: string; validation?: string }) {
   return (
     <p className={styles.caption}>
-      <strong>Source:</strong> {source ?? NOT_MEASURED}
-      {validation && <><br /><strong>Validation:</strong> {validation}</>}
+      <strong>{t.charts.source}</strong> {source ?? NOT_MEASURED}
+      {validation && <><br /><strong>{t.charts.validation}</strong> {validation}</>}
     </p>
   )
 }
@@ -26,11 +27,11 @@ export function Notes({ notes }: { notes?: string[] }) {
 
 /** Rows are the true class, columns the predicted class. Shade is the row share. */
 export function ConfusionMatrix({ labels, matrix }: { labels: string[]; matrix: number[][] | null | undefined }) {
-  if (!matrix?.length) return <p className={styles.na}>Confusion matrix {NOT_MEASURED}</p>
+  if (!matrix?.length) return <p className={styles.na}>{t.charts.cmNone} {NOT_MEASURED}</p>
   return (
-    <div className={styles.cm} role="table" aria-label="Confusion matrix: rows true class, columns predicted class"
+    <div className={styles.cm} role="table" aria-label={t.charts.cmLabel}
          style={{ gridTemplateColumns: `auto repeat(${labels.length}, minmax(64px, 1fr))` }}>
-      <span role="columnheader" className={styles.cmCorner}>true ↓ / predicted →</span>
+      <span role="columnheader" className={styles.cmCorner}>{t.charts.cmCorner}</span>
       {labels.map((l) => <span key={l} role="columnheader" className={styles.cmHead}>{l}</span>)}
       {matrix.map((row, i) => {
         const total = row.reduce((a, b) => a + b, 0)
@@ -43,7 +44,7 @@ export function ConfusionMatrix({ labels, matrix }: { labels: string[]; matrix: 
               <span key={`${i}-${j}`} role="cell" data-testid={`cm-${i}-${j}`}
                     className={`${styles.cmCell} ${share > 0.45 ? styles.cmDark : ''}`}
                     style={{ background: `color-mix(in srgb, ${tone} ${Math.round(share * 85)}%, white)` }}
-                    title={`true ${labels[i]}, predicted ${labels[j]}: ${n} (${(share * 100).toFixed(1)}% of row)`}>
+                    title={t.charts.cmCell(labels[i], labels[j], n, (share * 100).toFixed(1))}>
                 <strong>{n}</strong>
                 <small>{(share * 100).toFixed(0)}%</small>
               </span>
@@ -117,7 +118,7 @@ export function GroupedBars({ categories, series, max = 100, height = 220 }: {
                       <title>{`${s.name}, ${c}: ${v.toFixed(2)}`}</title>
                     </rect>
                   : <text key={s.name} x={x + 11} y={y(0) - 4} textAnchor="middle" fontSize="10" fill="var(--ink-3)">
-                      n/m<title>{`${s.name}, ${c}: ${NOT_MEASURED}`}</title>
+                      {t.charts.nm}<title>{`${s.name}, ${c}: ${NOT_MEASURED}`}</title>
                     </text>
               })}
               <text x={x0 + (series.length * 26) / 2} y={height - 34} textAnchor="end" fontSize="11"
@@ -132,7 +133,7 @@ export function GroupedBars({ categories, series, max = 100, height = 220 }: {
         {series.map((s) => (
           <span key={s.name}><i style={{ background: s.color }} />{s.name}</span>
         ))}
-        <span className={styles.na}>n/m = {NOT_MEASURED}</span>
+        <span className={styles.na}>{t.charts.nmLegend}</span>
       </figcaption>
     </figure>
   )

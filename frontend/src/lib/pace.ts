@@ -1,4 +1,5 @@
 import type { Health, Language } from '../api/types'
+import { t } from '../strings'
 
 /**
  * Seconds of transcription per second of audio (mean real-time factor),
@@ -38,8 +39,8 @@ export function transcriptionSeconds(rtf: number, durations: (number | null)[]):
 
 /** "a few seconds", "about 20 seconds", "about a minute", "about 3 minutes". */
 export function describeSeconds(seconds: number): string {
-  if (seconds <= 10) return 'a few seconds'
-  if (seconds < 45) return `about ${Math.max(15, Math.round(seconds / 5) * 5)} seconds`
-  if (seconds < 90) return 'about a minute'
-  return `about ${Math.round(seconds / 60)} minutes`
+  if (seconds <= 10) return t.pace.fewSeconds
+  if (seconds < 45) return t.pace.seconds(Math.max(15, Math.round(seconds / 5) * 5))
+  if (seconds < 90) return t.pace.minute
+  return t.pace.minutes(Math.round(seconds / 60))
 }

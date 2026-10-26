@@ -1,24 +1,32 @@
+import { m } from 'motion/react'
 import { useState } from 'react'
 import { ApiError, api } from '../api/client'
 import type { InterviewState, Question, ResponseOut } from '../api/types'
 import { EditedBadge, StatusBadge, TypedBadge } from '../components/Badges'
-import { ErrorNotice, Loading, Notice } from '../components/Notice'
+import { Icon } from '../components/Icon'
+import { ErrorNotice, Notice } from '../components/Notice'
 import { ReplayButton } from '../components/ReplayButton'
 import { Shell } from '../components/Shell'
+import { EmptyState, SkeletonPage } from '../components/ui'
 import { useHealth } from '../hooks/useHealth'
 import { pending, useInterview } from '../hooks/useInterview'
 import { useQuestions } from '../hooks/useQuestions'
 import { domainLabel } from '../lib/domains'
 import { applicantName, formatDateTime } from '../lib/format'
+import { fadeUp, stagger, useReducedMotion } from '../lib/motion'
 import { describeSeconds, realTimeFactor, transcriptionSeconds } from '../lib/pace'
 import { navigate, paths } from '../lib/router'
+import { t } from '../strings'
 import styles from './Review.module.css'
+
+const V = t.review
 
 export function Review({ id }: { id: number }) {
   const iv = useInterview(id)
   const qs = useQuestions(iv.data?.question_set)
   const [drafts, setDrafts] = useState<Record<number, string>>({})
   const health = useHealth()
+  const reduced = useReducedMotion()
   const data = iv.data
   const rtf = data ? realTimeFactor(health, data.language) : null
   const name = applicantName(data?.applicant.name)
@@ -34,42 +42,40 @@ export function Review({ id }: { id: number }) {
   const questionFor = (n: number) => qs.questions?.find((q) => q.order === n)
 
   return (
-    <Shell title={data ? <>Transcript — <strong>{name}</strong></> : 'Transcript'} interviewId={id} step="review"
-           practice={data?.mode === 'practice'}
-           aside={data && `${data.counts.transcribed} of ${data.responses.length} transcribed`}>
-      {iv.error && <ErrorNotice doing="Could not load this interview" error={iv.error} onRetry={iv.refresh} />}
-      {qs.error && <ErrorNotice doing="Could not load the interview questions" error={qs.error} onRetry={qs.retry} />}
-      {!data && !iv.error && <Loading what="the transcripts" />}
+    <Shell title={data ? V.titleFor(name) : V.title} interviewId={id} step="review"
+           applicationId={data?.application_id} practice={data?.mode === 'practice'}
+           aside={data && V.transcribedOf(data.counts.transcribed, data.responses.length)}>
+      {iv.error && <ErrorNotice doing={V.loadFailed} error={iv.error} onRetry={iv.refresh} />}
+      {qs.error && <ErrorNotice doing={t.runner.questionsFailed} error={qs.error} onRetry={qs.retry} />}
+      {!data && !iv.error && <SkeletonPage what={V.title} />}
 
       {data && (
         <div className={styles.layout}>
           {data.status === 'assessed' ? (
-            <Notice tone="info" title="This interview has been assessed"
-                    action={<a className="btn btn-secondary" href={paths.assessment(id)}>View assessment</a>}>
-              Transcripts are kept exactly as they were assessed and can no longer be changed.
+            <Notice tone="info" title={V.assessed}
+                    action={<a className="btn btn-secondary" href={paths.assessment(id)}>{V.viewAssessment}</a>}>
+              {V.assessedBody}
             </Notice>
           ) : (
-            <Notice tone="info">
-              Listen to each recorded answer and correct any transcript that does not match what the applicant said, and check any typed answer, before you run the assessment.
-            </Notice>
+            <Notice tone="info">{V.intro}</Notice>
           )}
 
           <Summary interview={data} total={qs.questions?.length ?? data.responses.length} rtf={rtf} />
 
           {data.responses.length === 0 && (
-            <div className={`card ${styles.empty}`}>
-              <p>No answers have been recorded yet.</p>
-              <a className="btn btn-primary" href={paths.record(id, 1)}>Start recording</a>
+            <div className="card">
+              <EmptyState icon="mic" title={V.none}
+                          action={<a className="btn btn-primary" href={paths.record(id, 1)}>{V.startRecording}</a>} />
             </div>
           )}
 
           <ol className={styles.list}>
-            {data.responses.map((r) => (
-              <li key={r.id}>
+            {data.responses.map((r, i) => (
+              <m.li key={r.id} {...fadeUp(reduced, stagger(reduced, i))}>
                 <ResponseCard response={r} question={questionFor(r.sentence_no)} english={data.language === 'en'} rtf={rtf}
                               readOnly={data.status === 'assessed'} draft={drafts[r.id]}
-                              onDraft={(t) => setDraft(r.id, t)} onSaved={iv.refresh} />
-              </li>
+                              onDraft={(text) => setDraft(r.id, text)} onSaved={iv.refresh} />
+              </m.li>
             ))}
           </ol>
 
@@ -89,15 +95,14 @@ function Summary({ interview, total, rtf }: { interview: InterviewState; total: 
   return (
     <>
       {waiting.length > 0 && (
-        <Notice tone="calm" title={`${waiting.length} ${waiting.length === 1 ? 'answer is' : 'answers are'} still being transcribed`}>
-          This is expected{eta !== null && <>: {waiting.length === 1 ? 'it' : 'they'} should be ready in {describeSeconds(eta)}</>}.
-          {' '}You can review the others meanwhile; this page updates by itself.
+        <Notice tone="calm" title={V.stillTranscribing(waiting.length)}>
+          {V.expected}{eta !== null && V.readyIn(waiting.length, describeSeconds(eta))}.{V.meanwhile}
         </Notice>
       )}
       {missing > 0 && interview.status === 'open' && (
         <p className={styles.missing}>
-          {missing} of {total} questions have no recorded answer.{' '}
-          <a href={paths.record(interview.id)}>Record the remaining answers</a>
+          <Icon name="alert" size={18} /> {V.missing(missing, total)}{' '}
+          <a href={paths.record(interview.id)}>{V.recordRemaining}</a>
         </p>
       )}
     </>
@@ -121,7 +126,7 @@ function ResponseCard({ response: r, question, english, rtf, readOnly, draft, on
   const value = draft ?? r.transcript ?? ''
   const dirty = draft !== undefined && draft !== (r.transcript ?? '')
   const lang = english ? 'en' : 'ki'
-  const kind = r.source === 'typed' ? 'Typed answer' : english ? 'Transcript' : 'Kikuyu transcript'
+  const kind = r.source === 'typed' ? V.typedAnswer : english ? V.transcript : V.kikuyuTranscript
 
   async function save() {
     setSaving(true)
@@ -142,9 +147,10 @@ function ResponseCard({ response: r, question, english, rtf, readOnly, draft, on
   return (
     <article className={`card ${styles.card} ${dirty ? styles.dirty : ''}`} aria-labelledby={`q${r.id}`}>
       <header className={styles.cardHead}>
-        <div>
-          <p className={styles.qno}>Question {r.sentence_no} · {domainLabel(r.domain)}</p>
-          <h2 id={`q${r.id}`} className={styles.qtext}>{question?.text_en ?? `Question ${r.sentence_no}`}</h2>
+        <span className={styles.qno} aria-hidden>{r.sentence_no}</span>
+        <div className={styles.qtextWrap}>
+          <p className={styles.qmeta}>{V.question(r.sentence_no, domainLabel(r.domain))}</p>
+          <h2 id={`q${r.id}`} className={styles.qtext}>{question?.text_en ?? V.questionN(r.sentence_no)}</h2>
         </div>
         <div className={styles.badges}>
           {r.edited && <EditedBadge />}
@@ -155,42 +161,42 @@ function ResponseCard({ response: r, question, english, rtf, readOnly, draft, on
       {(r.status === 'queued' || r.status === 'transcribing') ? (
         <p className={styles.waiting}>
           {r.status === 'transcribing'
-            ? `Being transcribed now${rtf === null ? '' : ` — usually ${describeSeconds(transcriptionSeconds(rtf, [r.duration_s]))}`}.`
-            : 'Waiting its turn to be transcribed.'}
+            ? V.transcribingNow(rtf === null ? null : describeSeconds(transcriptionSeconds(rtf, [r.duration_s])))
+            : V.waitingTurn}
         </p>
       ) : editable ? (
         <>
-          <label className="visually-hidden" htmlFor={`t${r.id}`}>{kind} for question {r.sentence_no}</label>
+          <label className="visually-hidden" htmlFor={`t${r.id}`}>{V.forQuestion(kind, r.sentence_no)}</label>
           <textarea id={`t${r.id}`} className={`textarea ${styles.transcript}`} lang={lang} value={value}
                     rows={2} spellCheck={false}
-                    placeholder={r.status === 'failed' ? 'This answer was not transcribed. Listen, then type what the applicant said.' : 'No words were recognised. Listen, then type what the applicant said.'}
+                    placeholder={r.status === 'failed' ? V.failedPlaceholder : V.emptyPlaceholder}
                     onChange={(e) => onDraft(e.target.value)} />
         </>
       ) : (
-        <p className={styles.readonlyText} lang={lang}>{r.transcript?.trim() || <span className="muted">No transcript</span>}</p>
+        <p className={styles.readonlyText} lang={lang}>{r.transcript?.trim() || <span className="muted">{V.noTranscript}</span>}</p>
       )}
 
       {r.source === 'audio' && r.edited && r.transcript_asr !== r.transcript && (
         <p className={styles.original}>
-          Corrected {r.edited_at && formatDateTime(r.edited_at)}. The speech model heard:{' '}
-          <span lang={lang}>“{r.transcript_asr?.trim() || 'nothing'}”</span>
+          {V.corrected(r.edited_at ? formatDateTime(r.edited_at) : '')}
+          <span lang={lang}>“{r.transcript_asr?.trim() || V.nothing}”</span>
         </p>
       )}
-      {r.source === 'typed' && <p className={styles.original}>Typed by the officer; there is no recording.</p>}
+      {r.source === 'typed' && <p className={styles.original}>{V.typedByOfficer}</p>}
 
       <div className={styles.actions}>
         {r.source === 'audio' && <ReplayButton responseId={r.id} />}
         {editable && (
           <>
             <button className="btn btn-primary" onClick={save} disabled={!dirty || !value.trim() || saving}>
-              {saving && <span className="spinner" aria-hidden />} Save correction
+              {saving && <span className="spinner" aria-hidden />} {V.saveCorrection}
             </button>
-            {dirty && <button className="btn btn-quiet" onClick={() => onDraft(undefined)} disabled={saving}>Undo changes</button>}
-            {saved && <span className={styles.saved} role="status">✓ Saved</span>}
+            {dirty && <button className="btn btn-quiet" onClick={() => onDraft(undefined)} disabled={saving}>{V.undo}</button>}
+            {saved && <span className={styles.saved} role="status"><Icon name="check" size={16} /> {V.saved}</span>}
           </>
         )}
       </div>
-      {error && <ErrorNotice doing="The correction was not saved" error={error} onRetry={save} />}
+      {error && <ErrorNotice doing={V.notSaved} error={error} onRetry={save} />}
     </article>
   )
 }
@@ -201,11 +207,11 @@ function RunAssessment({ interview, unsaved }: { interview: InterviewState; unsa
   const [error, setError] = useState<ApiError | null>(null)
 
   const blocked = pending(interview)
-    ? 'Wait until every answer has been transcribed.'
+    ? V.blockedWait
     : interview.counts.transcribed === 0
-      ? 'There are no transcribed answers to assess yet.'
+      ? V.blockedNone
       : unsaved > 0
-        ? `Save or undo your ${unsaved === 1 ? 'correction' : `${unsaved} corrections`} first.`
+        ? V.blockedUnsaved(unsaved)
         : null
 
   async function run() {
@@ -227,32 +233,29 @@ function RunAssessment({ interview, unsaved }: { interview: InterviewState; unsa
   }
 
   return (
-    <section className={`card ${styles.run}`} aria-label="Run assessment">
+    <section className={`card ${styles.run}`} aria-label={V.run}>
       {running ? (
-        <p className={styles.runningText}>
-          <span className="spinner" aria-hidden /> Assessing: {interview.language === 'en' ? '' : 'translating the answers, '}extracting the facts and scoring.
-          This takes about half a minute.
-        </p>
+        <p className={styles.runningText}><span className="spinner" aria-hidden /> {V.running(interview.language === 'en')}</p>
       ) : confirming ? (
         <>
-          <p><strong>Run the assessment now?</strong> Afterwards the answers and transcripts are fixed and can no longer be changed.</p>
+          <p><strong>{V.confirmRun}</strong> {V.confirmRunBody}</p>
           <div className={styles.actions}>
-            <button className="btn btn-quiet" onClick={() => setConfirming(false)}>Not yet</button>
-            <button className="btn btn-primary btn-large" onClick={run}>Run assessment</button>
+            <button className="btn btn-quiet" onClick={() => setConfirming(false)}>{V.notYet}</button>
+            <button className="btn btn-primary btn-large" onClick={run}>{V.run}</button>
           </div>
         </>
       ) : (
         <>
           <div>
-            <p><strong>When every transcript is right, run the assessment.</strong></p>
-            <p className="muted">{blocked ?? `${interview.counts.transcribed} transcribed answers will be assessed.`}</p>
+            <p><strong>{V.runTitle}</strong></p>
+            <p className="muted">{blocked ?? V.willAssess(interview.counts.transcribed)}</p>
           </div>
           <button className="btn btn-primary btn-large" disabled={!!blocked} onClick={() => setConfirming(true)}>
-            Run assessment
+            <Icon name="scale" /> {V.run}
           </button>
         </>
       )}
-      {error && <ErrorNotice doing="The assessment could not be run" error={error} onRetry={run} />}
+      {error && <ErrorNotice doing={V.runFailed} error={error} onRetry={run} />}
     </section>
   )
 }

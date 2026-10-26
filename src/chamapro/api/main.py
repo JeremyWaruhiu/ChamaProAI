@@ -18,7 +18,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import (FileResponse, JSONResponse, RedirectResponse,
                                Response as HTTPResponse)
-from sqlalchemy import case, func, select
+from sqlalchemy import case, delete, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -29,8 +29,8 @@ from . import pipeline as pl
 from . import schemas as s
 from .auth import require_admin, require_officer
 from .comparator import RECOMMENDED_DECISION
-from .db import (Applicant, Assessment, Decision, Interview, LoanApplication, Response,
-                 User, get_db, init_db, utcnow)
+from .db import (Applicant, Assessment, AuthSession, Decision, Interview, LoanApplication,
+                 Member, Response, User, get_db, init_db, utcnow)
 from .questions import CURRENT_SET, QUESTION_SETS, question
 
 if not logging.getLogger().handlers:
@@ -213,6 +213,61 @@ def logout(request: Request, db: Session = Depends(get_db)):
 @app.get("/api/auth/me", response_model=s.Me, responses={401: {"model": s.Error}})
 def me(user: User = Depends(auth.current_user)):
     return s.Me.model_validate(user)
+
+
+# --- Your own account (every role) -------------------------------------------------
+
+@app.get("/api/auth/profile", response_model=s.Profile, responses={401: {"model": s.Error}})
+def profile(request: Request, user: User = Depends(auth.current_user),
+            db: Session = Depends(get_db)):
+    member = db.scalar(select(Member).where(Member.user_id == user.id))
+    this = db.get(AuthSession, auth.token_hash(request.cookies.get(auth.COOKIE, "")))
+    sessions = db.scalar(select(func.count()).select_from(AuthSession)
+                         .where(AuthSession.user_id == user.id,
+                                AuthSession.expires_at > utcnow())) or 0
+    return s.Profile(username=user.username, role=user.role, email=user.email,
+                     google_sign_in_available=bool(config.GOOGLE_CLIENT_ID),
+                     member=member and s.ProfileMember(member_no=member.member_no,
+                                                       full_name=member.full_name),
+                     signed_in_with=this.auth_method if this else None,
+                     active_sessions=sessions, created_at=user.created_at)
+
+
+@app.post("/api/auth/password", status_code=204,
+          responses={401: {"model": s.Error}, 403: {"model": s.Error},
+                     422: {"model": s.Error}, 429: {"model": s.Error}})
+def change_password(body: s.PasswordChange, request: Request,
+                    user: User = Depends(auth.current_user), db: Session = Depends(get_db)):
+    """Change your own password. Every other session ends; this one stays signed in."""
+    key = f"password:{user.username}"
+    check_rate_limit(key)
+    row = db.get(User, user.id)
+    if not auth.verify_password(body.current_password, row.password_hash):
+        auth.limiter.fail(key)
+        raise HTTPException(403, "your current password is not correct")
+    auth.limiter.clear(key)
+    if body.current_password == body.new_password:
+        raise HTTPException(422, "new_password: must differ from your current password")
+    row.password_hash = auth.hash_password(body.new_password)
+    db.execute(delete(AuthSession).where(
+        AuthSession.user_id == user.id,
+        AuthSession.token_hash != auth.token_hash(request.cookies.get(auth.COOKIE, ""))))
+    audit.record(db, user, "user.change_password", "user", user.id)
+    db.commit()
+    return HTTPResponse(status_code=204)
+
+
+@app.post("/api/auth/logout-all", status_code=204, responses={401: {"model": s.Error}})
+def logout_all(request: Request, user: User = Depends(auth.current_user),
+               db: Session = Depends(get_db)):
+    """End every session of yours, on every device, this one included."""
+    db.execute(delete(AuthSession).where(AuthSession.user_id == user.id))
+    audit.record(db, user, "user.logout_all", "user", user.id)
+    db.commit()
+    out = HTTPResponse(status_code=204)
+    out.delete_cookie(auth.COOKIE, path="/api", httponly=True, samesite="strict",
+                      secure=auth.cookie_secure(request))
+    return out
 
 
 def live_stats(db: Session) -> dict:

@@ -1,29 +1,13 @@
 import type { Question } from '../api/types'
+import { t } from '../strings'
 
 // Question topics, keyed as in questions.json and the API. v1 groups its 40
 // sentences into the eight domains recorded in data/manifest.csv (not Table
-// 3.1's set); v2 has one topic per question.
-const TOPIC_LABEL: Record<string, string> = {
-  // v1
-  household: 'Household',
-  income: 'Income',
-  expenditure: 'Spending',
-  assets: 'Assets',
-  debt_repayment: 'Debts and repayment',
-  sacco_history: 'SACCO history',
-  chama: 'Chama',
-  intent_planning: 'Loan plans',
-  // v2
-  income_sources: 'Other income',
-  savings_in_kind: 'Savings in kind',
-  purchases: 'Purchases',
-  guarantorship: 'Guaranteeing loans',
-  sacco_borrowing: 'SACCO loans',
-  chama_borrowing: 'Chama loans',
-}
+// 3.1's set); v2 has one topic per question. Labels live in strings.ts.
+const TOPIC_LABEL: Record<string, string> = t.topics
 
 export function domainLabel(key: string | null | undefined): string {
-  return (key && TOPIC_LABEL[key]) || 'Other'
+  return (key && key !== 'other' && TOPIC_LABEL[key]) || t.topics.other
 }
 
 /** The topics of a question set, in interview order. */

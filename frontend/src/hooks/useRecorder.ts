@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { t } from '../strings'
 
 export type RecorderState = 'idle' | 'starting' | 'recording'
 
@@ -16,20 +17,61 @@ function pickMime(): string {
 
 export const extensionFor = (mime: string) => (mime.includes('mp4') ? 'm4a' : 'webm')
 
-/** Record one answer from the microphone. stop() resolves with the audio. */
+/** Root-mean-square of 8-bit audio samples centred on 128, scaled to 0-1 for a meter. */
+export function levelOf(samples: Uint8Array): number {
+  if (!samples.length) return 0
+  let sum = 0
+  for (const v of samples) { const x = (v - 128) / 128; sum += x * x }
+  return Math.min(1, Math.sqrt(sum / samples.length) * 3)
+}
+
+type AudioCtor = typeof AudioContext
+
+/** Record one answer from the microphone. stop() resolves with the audio; level is the live input level, 0-1. */
 export function useRecorder() {
   const [state, setState] = useState<RecorderState>('idle')
   const [elapsed, setElapsed] = useState(0)
+  const [level, setLevel] = useState(0)
   const [error, setError] = useState<string | null>(null)
   const recorder = useRef<MediaRecorder | null>(null)
   const chunks = useRef<Blob[]>([])
   const timer = useRef<number | null>(null)
+  const audio = useRef<{ ctx: AudioContext; frame: number } | null>(null)
 
   const release = useCallback(() => {
     if (timer.current) window.clearInterval(timer.current)
     timer.current = null
-    recorder.current?.stream.getTracks().forEach((t) => t.stop())
+    if (audio.current) {
+      cancelAnimationFrame(audio.current.frame)
+      audio.current.ctx.close().catch(() => {})
+      audio.current = null
+    }
+    setLevel(0)
+    recorder.current?.stream.getTracks().forEach((tr) => tr.stop())
     recorder.current = null
+  }, [])
+
+  /** The level meter: optional, so a browser without Web Audio still records. */
+  const meter = useCallback((stream: MediaStream) => {
+    const Ctor: AudioCtor | undefined = window.AudioContext
+      ?? (window as unknown as { webkitAudioContext?: AudioCtor }).webkitAudioContext
+    if (!Ctor) return
+    try {
+      const ctx = new Ctor()
+      const analyser = ctx.createAnalyser()
+      analyser.fftSize = 512
+      ctx.createMediaStreamSource(stream).connect(analyser)
+      const buf = new Uint8Array(analyser.fftSize)
+      let last = 0
+      let smooth = 0
+      const tick = (now: number) => {
+        analyser.getByteTimeDomainData(buf)
+        smooth = Math.max(levelOf(buf), smooth * 0.85)
+        if (now - last > 66) { setLevel(smooth); last = now }   // about 15 updates a second
+        if (audio.current) audio.current.frame = requestAnimationFrame(tick)
+      }
+      audio.current = { ctx, frame: requestAnimationFrame(tick) }
+    } catch { /* no meter; recording carries on */ }
   }, [])
 
   useEffect(() => release, [release])
@@ -48,16 +90,15 @@ export function useRecorder() {
       const t0 = Date.now()
       setElapsed(0)
       timer.current = window.setInterval(() => setElapsed((Date.now() - t0) / 1000), 250)
+      meter(stream)
       setState('recording')
     } catch (e) {
       release()
       setState('idle')
       const denied = e instanceof DOMException && (e.name === 'NotAllowedError' || e.name === 'SecurityError')
-      setError(denied
-        ? 'The browser did not allow the microphone. Allow microphone access for this page, or upload a recording instead.'
-        : 'No microphone could be used. Check that one is connected, or upload a recording instead.')
+      setError(denied ? t.runner.micDenied : t.runner.micMissing)
     }
-  }, [release])
+  }, [release, meter])
 
   const stop = useCallback(() => new Promise<Blob | null>((resolve) => {
     const rec = recorder.current
@@ -78,5 +119,5 @@ export function useRecorder() {
     setState('idle')
   }, [release])
 
-  return { state, elapsed, error, start, stop, cancel, clearError: () => setError(null) }
+  return { state, elapsed, level, error, start, stop, cancel, clearError: () => setError(null) }
 }

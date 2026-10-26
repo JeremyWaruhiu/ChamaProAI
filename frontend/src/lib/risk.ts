@@ -1,20 +1,31 @@
-import type { DecisionValue } from '../api/types'
+import type { DecisionValue, Outcome } from '../api/types'
+import { t } from '../strings'
 
 export type RiskClass = 'Low' | 'Medium' | 'High'
 
 /** What each class means operationally at the SACCO. */
-export const RISK_MEANING: Record<RiskClass, string> = {
-  Low: 'Approve on standard terms',
-  Medium: 'Refer to the loan committee',
-  High: 'Decline, or refer for manual review',
-}
+export const RISK_MEANING: Record<RiskClass, string> = t.risk.meaning
 
 export const RISK_ORDER: RiskClass[] = ['Low', 'Medium', 'High']
 
-export const DECISION_LABEL: Record<DecisionValue, string> = {
-  approve: 'Approve',
-  decline: 'Decline',
-  refer: 'Refer to loan committee',
+export const DECISION_LABEL: Record<DecisionValue, string> = t.risk.decision
+
+/** The coarse decision each outcome is a kind of. */
+export const COARSE: Record<Outcome, DecisionValue> = {
+  approve: 'approve', approve_with_guarantor: 'approve', approve_reduced: 'approve',
+  refer: 'refer', decline: 'decline',
+}
+
+/** The officer decision each risk class recommends (comparator.RECOMMENDED_DECISION). */
+export const RECOMMENDED: Record<RiskClass, DecisionValue> = { Low: 'approve', Medium: 'refer', High: 'decline' }
+
+/** Does the officer's outcome follow the model's recommendation? A borderline call is a referral. */
+export function agrees(risk: string, borderline: boolean, outcome: Outcome | DecisionValue): boolean {
+  const d = COARSE[outcome]
+  if (borderline || risk === 'Medium') return d === 'refer'
+  if (risk === 'Low') return d === 'approve'
+  if (risk === 'High') return d === 'decline' || d === 'refer'
+  return false
 }
 
 /** Two most likely classes within this many points is a close call. */
@@ -36,7 +47,7 @@ export function closeness(probabilities: Record<string, number>): Closeness {
 
 /** The model's recommendation in words. A borderline call is always a referral. */
 export function recommendation(riskClass: string, borderline: boolean): string {
-  if (borderline) return 'Refer to the loan committee (borderline)'
+  if (borderline) return t.risk.borderline
   return RISK_MEANING[riskClass as RiskClass] ?? riskClass
 }
 

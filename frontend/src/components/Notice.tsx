@@ -1,7 +1,11 @@
 import { Component, type ErrorInfo, type ReactNode } from 'react'
+import { t } from '../strings'
+import { Icon, type IconName } from './Icon'
 import styles from './Notice.module.css'
 
 type Tone = 'error' | 'info' | 'warning' | 'calm'
+
+const ICON: Record<Tone, IconName> = { error: 'alert', info: 'info', warning: 'alert', calm: 'clock' }
 
 interface NoticeProps {
   tone?: Tone
@@ -13,6 +17,7 @@ interface NoticeProps {
 export function Notice({ tone = 'info', title, children, action }: NoticeProps) {
   return (
     <div className={`${styles.notice} ${styles[tone]}`} role={tone === 'error' ? 'alert' : 'status'}>
+      <Icon name={ICON[tone]} className={styles.icon} />
       <div className={styles.body}>
         {title && <p className={styles.title}>{title}</p>}
         {children && <div className={styles.text}>{children}</div>}
@@ -26,7 +31,7 @@ export function Notice({ tone = 'info', title, children, action }: NoticeProps) 
 export function ErrorNotice({ doing, error, onRetry }: { doing: string; error: { message: string }; onRetry?: () => void }) {
   return (
     <Notice tone="error" title={doing} action={onRetry &&
-      <button className="btn btn-secondary" onClick={onRetry}>Retry</button>}>
+      <button className="btn btn-secondary" onClick={onRetry}>{t.common.retry}</button>}>
       {error.message}
     </Notice>
   )
@@ -35,7 +40,7 @@ export function ErrorNotice({ doing, error, onRetry }: { doing: string; error: {
 export function Loading({ what }: { what: string }) {
   return (
     <div className={styles.loading} role="status">
-      <span className="spinner" aria-hidden /> Loading {what}…
+      <span className="spinner" aria-hidden /> {t.app.loading(what)}
     </div>
   )
 }
@@ -56,9 +61,9 @@ export class ErrorBoundary extends Component<{ children: ReactNode }, { error: E
     if (!this.state.error) return this.props.children
     return (
       <div className={styles.crash}>
-        <Notice tone="error" title="Something went wrong on this screen"
-                action={<button className="btn btn-primary" onClick={() => window.location.reload()}>Reload</button>}>
-          Nothing you saved has been lost. Reload the page to continue. ({this.state.error.message})
+        <Notice tone="error" title={t.notice.crashTitle}
+                action={<button className="btn btn-primary" onClick={() => window.location.reload()}>{t.notice.reload}</button>}>
+          {t.notice.crashBody(this.state.error.message)}
         </Notice>
       </div>
     )

@@ -11,7 +11,10 @@ OFFICER_NOTE = "Officer-only: brother is in arrears, keep an eye on it"
 MESSAGE = "You need two guarantors before we can pay out."
 MEMBER_ROUTES = {("GET", "/api/me/applications"), ("GET", "/api/me/applications/{application_id}"),
                  ("POST", "/api/me/applications/{application_id}/guarantors"),
-                 ("GET", "/api/auth/me"), ("POST", "/api/auth/logout")}
+                 ("GET", "/api/auth/me"), ("POST", "/api/auth/logout"),
+                 # your own account: every role
+                 ("GET", "/api/auth/profile"), ("POST", "/api/auth/password"),
+                 ("POST", "/api/auth/logout-all")}
 PUBLIC = {("GET", "/api/health"), ("POST", "/api/auth/login"), ("GET", "/api/auth/config"),
           ("POST", "/api/auth/google")}
 

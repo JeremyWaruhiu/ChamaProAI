@@ -1,31 +1,5 @@
-.badge {
-  display: inline-flex; align-items: center; gap: 7px; flex: none;
-  min-height: 32px; padding: 3px 12px;
-  border: 1.5px solid; border-radius: 999px;
-  font-size: 0.88rem; font-weight: 650; white-space: nowrap;
-}
-
-/* Waiting is normal: calm slate, not a warning colour. */
-.queued { color: var(--wait); background: var(--wait-bg); border-color: var(--wait-line); }
-.transcribing { color: var(--green-700); background: var(--green-100); border-color: var(--green-200); }
-.transcribed { color: var(--white); background: var(--green-600); border-color: var(--green-600); }
-.failed { color: var(--high); background: var(--high-bg); border-color: var(--high-line); }
-.typed { color: var(--green-800); background: var(--white); border-color: var(--green-600); }
-.edited { color: var(--medium); background: var(--medium-bg); border-color: var(--medium-line); }
-
 .pulse {
-  width: 9px; height: 9px; border-radius: 50%; background: currentColor;
-  animation: pulse 1.6s ease-in-out infinite;
+  width: 8px; height: 8px; border-radius: 50%; background: currentColor;
+  animation: pulse 1.4s ease-in-out infinite;
 }
-@keyframes pulse { 50% { opacity: 0.25; transform: scale(0.8); } }
-
-.risk {
-  display: inline-flex; align-items: center; justify-content: center;
-  min-width: 150px; min-height: 36px; padding: 4px 14px;
-  border: 2px solid; border-radius: 4px;
-  font-size: 0.9rem; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase;
-}
-.low { color: var(--white); background: var(--low); border-color: var(--low); }
-.medium { color: var(--medium); background: var(--medium-bg); border-color: var(--medium-line); }
-.high { color: var(--high); background: var(--white); border-color: var(--high); }
-.none { color: var(--ink-2); background: var(--white); border-color: var(--line); }
+@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.25; } }
