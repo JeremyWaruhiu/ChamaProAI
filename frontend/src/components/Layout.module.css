@@ -9,21 +9,21 @@
 
 /* --- Staff layout ---------------------------------------------------------------- */
 
-.staff { min-height: 100vh; }
+.staff { display: grid; grid-template-columns: var(--sidebar) minmax(0, 1fr); min-height: 100vh; transition: grid-template-columns var(--dur) var(--ease-out); }
+.staffCollapsed { grid-template-columns: var(--sidebar-collapsed) minmax(0, 1fr); }
 
 /* Kiondo weave: the woven basket's chevrons, very faint. */
 .sidebar {
-  position: fixed; inset: 0 auto 0 0; z-index: 30; width: var(--sidebar);
+  position: relative; z-index: 30;
   background-color: var(--green-900);
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='28' height='16' viewBox='0 0 28 16'%3E%3Cpath d='M0 12 7 4l7 8 7-8 7 8' fill='none' stroke='%23ffffff' stroke-opacity='0.035' stroke-width='2'/%3E%3C/svg%3E");
   color: #e9e3d3;
   transition: width var(--dur) var(--ease-out);
   --focus: var(--focus-on-dark);
 }
-.staffCollapsed .sidebar { width: var(--sidebar-collapsed); }
-.column { margin-left: var(--sidebar); min-width: 0; transition: margin-left var(--dur) var(--ease-out); }
-.staffCollapsed .column { margin-left: var(--sidebar-collapsed); }
+.column { min-width: 0; }
 
+.sidebar > .sidebarInner { position: sticky; top: 0; height: 100vh; }
 .sidebarInner { display: flex; flex-direction: column; height: 100%; padding: var(--space-4) var(--space-3); overflow-y: auto; }
 .sidebarTop { padding: var(--space-1) var(--space-2) var(--space-5); }
 .sidebarBrand { display: inline-flex; border-radius: var(--radius-sm); text-decoration: none; }
@@ -84,8 +84,8 @@
 }
 
 @media (max-width: 900px) {
+  .staff, .staffCollapsed { grid-template-columns: minmax(0, 1fr); }
   .sidebar { display: none; }
-  .column, .staffCollapsed .column { margin-left: 0; }
   .menuButton { display: grid; }
   .topbar { padding: 0 var(--space-4); }
   .main { padding: var(--space-5) var(--space-4) var(--space-9); }

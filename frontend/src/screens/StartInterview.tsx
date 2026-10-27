@@ -413,9 +413,9 @@ function ReviewStep({ draft, setDraft, goTo }: {
         <section className={styles.reviewBlock}>
           <div className={styles.reviewHead}><h3>{W.loan}</h3>{edit(1)}</div>
           <DetailList items={[
-            [W.amount, W.loanSummary(amount, Number(draft.term))],
-            [W.purpose, draft.purpose.trim()],
-            [W.savings, formatKes(parseShillings(draft.savings) ?? 0)],
+            [W.reviewAmount, W.loanSummary(amount, Number(draft.term))],
+            [W.reviewPurpose, draft.purpose.trim()],
+            [W.reviewSavings, formatKes(parseShillings(draft.savings) ?? 0)],
           ]} />
         </section>
         <section className={styles.reviewBlock}>

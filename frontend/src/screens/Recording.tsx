@@ -87,7 +87,7 @@ function QuestionCard({ q, n, total, english }: { q: Question; n: number; total:
   return (
     <section className={`card ${styles.question}`} aria-labelledby="question-text">
       <p className={styles.questionMeta}>
-        <span className={styles.questionNo}>{R.questionOf(n, total)}</span>
+        <span className="visually-hidden">{R.questionOf(n, total)}</span>
         <span className={styles.topic}>{domainLabel(q.topic)}</span>
       </p>
       {kikuyu ? (

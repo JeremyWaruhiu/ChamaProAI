@@ -63,7 +63,7 @@ export function AdminHome() {
               : <Bars items={outcomes} tone={() => 'model'} total={decided} />}
         </Card>
 
-        <Card title={H.agreement} delay={0.1}>
+        <Card title={H.agreementTitle} delay={0.1}>
           <div className={styles.rings}>
             <Ring label={H.agreement} rate={da?.rate ?? null} note={da && isMeasured(da.rate) ? H.agreementOf(da.agreements, da.decisions) : H.notMeasured} />
             <Ring label={H.ruleAgreement} rate={ra?.rate ?? null} note={ra && isMeasured(ra.rate) ? H.ruleOf(ra.agreements, ra.agreements + ra.divergences) : H.notMeasured} />

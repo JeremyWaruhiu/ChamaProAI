@@ -16,7 +16,8 @@ time only. Target hardware is CPU-only, 16 GB RAM.
 
 The repository contains the research experiments behind those design
 decisions, the pipeline scripts, an HTTP API (`src/chamapro/api/`) over the
-pipeline, and the loan officer's dashboard (`frontend/`).
+pipeline, and the web app (`frontend/`): a public landing page, the staff
+dashboard and a member portal.
 
 ## Layout
 
@@ -44,7 +45,8 @@ src/chamapro/config.py                loads .env, exposes keys and paths
 src/chamapro/questions.json           question sets v1 (built from docs/) and v2 (edited here), served to the dashboard
 models/                               classifier and OpenVINO ASR exports (gitignored; see Setup)
 src/chamapro/api/                     FastAPI app over the pipeline (SQLite storage)
-frontend/                             React dashboard (Vite + TypeScript); see frontend/README.md
+frontend/                             React web app (Vite + TypeScript); see frontend/README.md
+docs/screenshots/                     screenshots of the main screens (fictional demo data)
 tests/                                API and script tests (pytest)
 scripts/explore_finaccess.py            browse the FinAccess microdata
 ```
@@ -397,6 +399,9 @@ uploaded audio in `data/uploads/<interview_id>/`; both are gitignored. Optional
 | GET    | `/api/auth/config`                 | `{google_client_id}`, null when Google sign-in is off (no sign-in needed) |
 | POST   | `/api/auth/logout`                 | ends the session and clears the cookie          |
 | GET    | `/api/auth/me`                     | `{username, role}` of the signed-in user, or 401 |
+| GET    | `/api/auth/profile`                | your own account: email, linked Google account, member record, sessions (every role) |
+| POST   | `/api/auth/password`               | `{current_password, new_password}`; ends your other sessions (every role, rate-limited) |
+| POST   | `/api/auth/logout-all`             | ends every session of yours, this one included |
 | GET    | `/api/results`                     | model and evaluation summary plus live stats, practice interviews excluded (admin only) |
 
 Every endpoint except `/api/health`, `/api/auth/config` and the sign-in endpoints needs a signed-in
@@ -660,16 +665,15 @@ A demo run:
   interview: the applicant form is filled in and all eight answers are typed,
   so it can be assessed at once. Every screen of it shows the practice
   banner, and it does not count in the live statistics.
-- To show live recording, start a **New interview**, fill in the applicant
-  form and record an answer with the laptop microphone. It is transcribed in
+- To show live recording, press **Start interview**, go through the wizard
+  (member, loan details, applicant form, language and mode) and record an answer with the laptop microphone. It is transcribed in
   the background while you move to the next question; any answer can be
   typed instead.
 
 - Sign in as **demo.officer** (password printed by `seed_demo.py`) to see two
   loan applications for fictional members: Grace's is approved, Peter's needs
-  two guarantors. Sign in as **demo.peter** to add them through
-  `/api/me/applications/{id}/guarantors` (the dashboard has no member screens
-  yet; use http://localhost:8000/docs), then verify them as the officer.
+  two guarantors. Sign in as **demo.peter** to add them in the member portal,
+  then verify them as the officer on the application's screen.
 
 Run `seed_demo.py` again before the next demo. An assessed demo cannot be
 changed, so the script then starts a fresh one. See

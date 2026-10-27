@@ -60,7 +60,7 @@
   display: grid; place-items: center; width: 40px; height: 40px; border-radius: 12px;
   background: var(--green-50); color: var(--green-700);
 }
-.emptyTitle { margin-top: var(--space-2); font-size: var(--text-lg); font-weight: 680; }
+.emptyTitle { margin-top: var(--space-2); font-size: var(--text-md); font-weight: 620; color: var(--ink-2); }
 .emptyBody { max-width: 46ch; color: var(--ink-2); }
 .emptyAction { margin-top: var(--space-3); }
 

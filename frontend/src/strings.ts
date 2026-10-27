@@ -230,7 +230,7 @@ const en = {
   // --- Start-interview wizard -------------------------------------------------------------
   wizard: {
     title: 'Start an interview',
-    lead: 'Four short steps, then the interview begins.',
+    lead: 'Four short steps and a final check, then the interview begins.',
     stepper: 'Steps to start an interview',
     stepOf: (n: number, total: number) => `Step ${n} of ${total}`,
     steps: ['Member', 'Loan details', 'Applicant', 'Interview', 'Begin'],
@@ -292,6 +292,9 @@ const en = {
     loan: 'Loan',
     applicant: 'Applicant',
     interview: 'Interview',
+    reviewAmount: 'Amount',
+    reviewPurpose: 'Purpose',
+    reviewSavings: 'Savings',
     loanSummary: (amount: number, months: number) => `${ksh(amount)} over ${plural(months, 'month', 'months')}`,
     applicantSummary: (age: string, sex: string, education: string, marital: string) =>
       `${age} years · ${sex} · ${education} · ${marital}`,
@@ -753,6 +756,7 @@ const en = {
     agreementOf: (a: number, n: number) => `${a} of ${n} decisions`,
     ruleAgreement: 'SACCO rule agrees with model',
     ruleOf: (a: number, n: number) => `${a} of ${n} compared`,
+    agreementTitle: 'Agreement with the model',
     distribution: 'Risk bands',
     distributionEmpty: 'No live assessments yet.',
     outcomes: 'Decision outcomes',

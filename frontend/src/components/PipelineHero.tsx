@@ -70,7 +70,7 @@ export function PipelineHero() {
 
         {/* 3. facts */}
         <m.g {...at(1.8, { y: 10 })}>
-          <rect x="20" y="314" width="270" height="116" rx="16" className={styles.card} filter="url(#ph-shadow)" />
+          <rect x="20" y="314" width="300" height="116" rx="16" className={styles.card} filter="url(#ph-shadow)" />
           <text x="44" y="344" className={styles.label}>{L.pipeFacts}</text>
           {[L.pipeFact1, L.pipeFact2, L.pipeFact3].map((f, i) => (
             <m.g key={f} {...at(2.0 + i * 0.2, { x: -6 })}>

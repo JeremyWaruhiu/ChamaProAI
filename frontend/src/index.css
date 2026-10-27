@@ -140,11 +140,12 @@ code { font-family: var(--font-mono); font-size: 0.92em; }
 }
 
 .skip-link {
-  position: absolute; left: var(--space-3); top: -60px; z-index: 100;
+  position: absolute; left: var(--space-3); top: var(--space-3); z-index: 100; transform: translateY(-200%);
   padding: var(--space-2) var(--space-4); border-radius: var(--radius-sm);
   background: var(--surface); color: var(--green-800); font-weight: 650; box-shadow: var(--shadow-lg);
 }
-.skip-link:focus { top: var(--space-3); }
+.skip-link:not(:focus) { box-shadow: none; }
+.skip-link:focus { transform: none; }
 
 .display { font-family: var(--font-display); font-weight: 600; letter-spacing: -0.01em; }
 

@@ -1,6 +1,6 @@
 # Design changes: dashboard vs wireframes (Figures 4.8–4.12)
 
-The Sprint II dashboard (`frontend/`) follows the wireframes in
+The dashboard (`frontend/`) follows the wireframes in
 `docs/wireframes/` for screen structure and flow. This file records every
 place where it differs, whether something was added, changed or deferred, with
 a one-line reason. Wireframe figure numbers refer to Chapter 4.
@@ -9,9 +9,9 @@ a one-line reason. Wireframe figure numbers refer to Chapter 4.
 
 | Change | Status | Reason |
 |---|---|---|
-| Interview screens share a step bar (Record answers · Review transcripts · Assessment) and a "← All interviews" link | Added | The wireframes show the screens separately; officers need a visible, one-tap way between the three steps of one interview. |
+| Interview screens share a step bar (Record answers · Review transcripts · Assessment) and a back link to the interview's loan application (or to all interviews) | Added | The wireframes show the screens separately; officers need a visible, one-tap way between the three steps of one interview. |
 | Risk classes use colour (green / amber / red) as well as text | Changed | The wireframes are monochrome; colour speeds recognition, and the text label means it never relies on colour alone. |
-| System fonts only, no web fonts | Changed | Rural branches may be offline or on slow links; nothing is fetched from the internet. |
+| System fonts only, no web fonts | Changed | Rural branches may be offline or on slow links; nothing is fetched from the internet. Headings use the system serif (Iowan, Palatino, Georgia), body text the system sans. |
 | Status words are plain language ("Waiting", "Transcribing", "Transcribed", "Not transcribed") | Changed | Officers have basic computer literacy; "queued" and "failed" are system terms. |
 | Interview questions grouped by the eight domains recorded in `data/manifest.csv`, not Table 3.1's domains | Changed | The 40 recorded responses use the manifest's domains (Household, Chama, …); Table 3.1's set (Social Capital, Character & Attitude) has no recordings. Applies to question set v1; v2 has one topic per question. |
 | Question set v2: eight questions, one per topic, each targeting named classifier features; age, sex, education and marital status move to an applicant form | Changed | The 40-sentence draft asked many things the classifier never uses and left some features to chance. Form plus v2 cover the 40 features exactly once (tested). v1 is kept so the recorded Kikuyu demo and the evaluation still load. |
@@ -23,7 +23,7 @@ a one-line reason. Wireframe figure numbers refer to Chapter 4.
 
 | Change | Status | Reason |
 |---|---|---|
-| No login screen, no officer name in the header | Deferred (Sprint III) → **Implemented** | Authentication and role separation are now in place: a sign-in page at `#/login`, cookie sessions (8 h), officer and admin roles, and the signed-in username, role and Sign out in every screen's header. Only admins see and may open Model & Evaluation. |
+| No login screen, no officer name in the header | Deferred (Sprint III) → **Implemented** | Authentication and role separation are now in place: a sign-in page at `#/login`, cookie sessions (8 h), officer, admin and member roles, and the signed-in user with a role badge in the top bar's account menu (Your profile, Sign out). Each role lands on its own home; a member cannot open any staff screen and an officer cannot open the admin screens. |
 | Username instead of email | Changed | Accounts are created by the SACCO administrator with `scripts/create_user.py`; officers need not have an email address, and none is stored. |
 | Show / hide password toggle | Added | Typing a password on a tablet keyboard is error-prone; letting the officer check it avoids lockouts. |
 | "Forgot password?" → "Accounts are created by your SACCO administrator." | Changed | There is no email or self-service reset; the administrator resets accounts. A link that led nowhere would mislead. |
@@ -41,10 +41,10 @@ a one-line reason. Wireframe figure numbers refer to Chapter 4.
 | "PROCESSING" badge replaced by a status column ("Transcribing answers", "Ready for review", "Decision: …") | Changed | Status and risk class are different facts; mixing them in one badge hid which step an interview is at. |
 | Officer's decision shown in the status column | Added | The list should show whether a decision has been recorded, not only the model's class. |
 | Opening an interview goes to its next step (record, review or assessment) | Added | Saves the officer finding where they left off. |
-| Search by name or member number | Deferred → **Backend done** | `GET /api/members?q=` searches the new member register by name or member number; the list screen does not use it yet. |
-| Member numbers (M-0412) | Deferred → **Backend done** | A member register (`members`: member number, name, phone, membership start) now exists, with loan applications linked to it; the dashboard screens still list interviews. No national ID number is stored (data minimisation, Kenya Data Protection Act 2019). |
+| Search by name or member number | Deferred → **Implemented** | The top bar searches members (by name or member number, on the server) and applications; the Applications, Members and Interviews tables each have their own search and filters. |
+| Member numbers (M-0412) | Deferred → **Implemented** | A member register (`members`: member number, name, phone, membership start) with loan applications linked to it, and Members and Applications screens over it. No national ID number is stored (data minimisation, Kenya Data Protection Act 2019). |
 | Pagination | Deferred | Not needed at Sprint II volumes. |
-| New interview opens an inline form: name (optional), then the applicant form (age, sex, highest education, marital status), interview language and a practice checkbox | Added → Changed | The wireframe shows the button but not what follows. The four applicant facts are entered here rather than asked in the interview, in the exact categories the classifier was trained on (FinAccess A20 education ladder, A21 marital categories), served by `GET /api/applicant-form` so the form and the model cannot drift apart. |
+| New interview → a start-interview wizard: member (find or add), loan details, applicant form (age, sex, highest education, marital status), language and mode, then a check-and-begin step | Added → Changed | The wireframe shows the button but not what follows. Starting an interview now also creates the member's loan application, so the SACCO rule can be checked. The four applicant facts are entered here rather than asked in the interview, in the exact categories the classifier was trained on, served by `GET /api/applicant-form` so the form and the model cannot drift apart. Each step is validated before the next; a retry never creates the member, interview or application twice. |
 
 ## Figure 4.10 — Interview recording
 
@@ -54,13 +54,13 @@ a one-line reason. Wireframe figure numbers refer to Chapter 4.
 | Kikuyu question text with English gloss beneath | Kept, with fallback | The Kikuyu wording is still being corrected by a native speaker; where it is missing the English is shown alone. English interviews show the English only. v2 has no Kikuyu wording yet. |
 | Questions are a draft (`docs/interview_questions.txt`) | Changed | No 40-question instrument existed; one question per scripted answer was drafted from Table 3.1's wording, pending review. This is question set v1; new interviews use the eight-question v2 in `questions.json`. |
 | **Type the answer** beside Record and Upload | Added | Lets the officer enter an answer when recording is impossible or the applicant prefers to write; a typed answer skips transcription and is ready for review at once. |
-| v2 progress shows one numbered button per question instead of domain segments | Changed | With one question per topic, domain segments would repeat the question buttons. v1 keeps the eight domain segments. |
+| v2 progress shows "Question n of 8", a progress bar, and one status chip per question (not answered, waiting, transcribed, failed) instead of domain segments | Changed | With one question per topic, domain segments would repeat the question chips. v1 keeps the eight domain segments. Opening an interview resumes at its first unanswered question, and says so. |
 | Record answer, Stop, Replay, Re-record | Kept | As in the wireframe; Replay plays the stored clip from the server. |
 | Upload a recording | Added | Specified; lets an officer use a phone recording when the laptop microphone fails. |
 | Live status badge per answer (Waiting, Transcribing, Transcribed, Not transcribed) with a calm waiting message and estimate | Added | Transcription takes about 35 s per clip on CPU; the officer must see that waiting is normal and can carry on. |
 | Re-record while transcribing waits and retries automatically | Added | The server refuses to delete a clip mid-transcription (409, Retry-After); the dashboard waits rather than showing an error. |
 | Domain progress segments are tappable; question number buttons for the current domain | Added | Lets the officer return to any answer without stepping through every screen. |
-| Live waveform | Deferred | Not needed to record or check an answer; Replay covers verification. |
+| Live waveform | Changed | A live level meter (twenty segments, from the microphone's input level) shows that sound is being picked up; a full waveform is still not drawn. |
 | Audio quality indicator | Deferred | Needs signal analysis that is not part of the pipeline yet. |
 | Save draft | Deferred | Every answer is saved to the server as soon as it is recorded, so there is no draft to keep. |
 | Offline buffering ("uploads when a connection is available") | Deferred | Needs a service worker and local storage of personal audio; a separate piece of work. |
@@ -85,6 +85,8 @@ a one-line reason. Wireframe figure numbers refer to Chapter 4.
 
 ## Figure 4.12 — Credit assessment
 
+Also added beside the risk band: a plain-language explanation (the strongest facts in the applicant's favour and against, from the SHAP values), and the transcripts with their recordings in a collapsible section, for a last check before deciding.
+
 | Change | Status | Reason |
 |---|---|---|
 | Risk class shown large with its operational meaning (Low = approve on standard terms; Medium = refer to the loan committee; High = decline or refer for manual review) | Changed | Specified; tells the officer what the class means at the SACCO. |
@@ -102,11 +104,30 @@ a one-line reason. Wireframe figure numbers refer to Chapter 4.
 | One audit line under each assessment: assessment id, time, who assessed it, classifier file and SHA-256, extraction model, "stored permanently" | Added | Auditability (Chapter 4): the stored record identifies exactly which model produced it and who ran it; the line is small and at the foot of the screen, so it does not compete with the decision. |
 | Facts entered on the applicant form listed apart from "What the system heard" | Added | They were typed by the officer, not extracted from speech; listing them as heard, or as "not stated", would misdescribe them. |
 | A practice interview's decision panel and recorded decision say "practice" | Added | A practice decision must never be mistaken for a lending decision. |
-| Approve at a reduced amount | Deferred → **Backend done** | The decision now has an outcome: approve, approve with guarantor, approve reduced (an amount below the request, enforced), refer or decline. The assessment screen still offers Approve / Decline / Refer only. |
-| Loan amount requested in the header | Deferred → **Backend done** | Captured on the loan application (amount, purpose, term, SACCO savings), not by the interview; not shown on the assessment screen yet. |
-| SACCO baseline (savings multiplier) and divergence panel | Deferred → **Backend done** | The SACCO rule (Chapter 5: up to 3 x savings, 2 guarantors, 6 months' membership) is computed live for every assessed application, per condition, with agreement or divergence from the model; savings come from the application, guarantors from the member. The panel itself is still to be drawn. |
+| Approve at a reduced amount | Deferred → **Implemented** | The decision panel offers five outcomes: approve, approve with guarantors (the officer sets how many, 1 to 10, default 2), approve a reduced amount (below the request), refer, decline; plus officer notes (staff only) and a plain-language message for the member. The two application-only outcomes are disabled, with a reason, on an interview without a loan application. |
+| Loan amount requested in the header | Deferred → **Implemented** | Captured on the loan application (amount, purpose, term, SACCO savings) in the wizard; shown on the application screen and in the decision panel. |
+| SACCO baseline (savings multiplier) and divergence panel | Deferred → **Implemented** | "Model and SACCO rule, side by side": the model's recommendation beside the rule's (Chapter 5: up to 3 x savings, 2 guarantors, 6 months' membership), each condition shown pass / fail / pending with whether it agrees with the model. Computed live, never stored with the assessment. |
 | Export report | Deferred | Not needed for Sprint II; the assessment is stored and viewable. |
 | Storing the repayment outcome for retraining | Deferred | Needs loan servicing data after disbursement. |
+
+## Part C: redesign, member portal and administration screens
+
+| Change | Status | Reason |
+|---|---|---|
+| One design-token system (`frontend/src/index.css`): warm neutrals, forest green, clay and ochre accents, type scale, spacing, radius, shadow, motion durations; shared components for every screen | Changed | A financial product for SACCOs should look calm and trustworthy, and consistent from screen to screen. The wireframes' pale-green palette is kept as the brand colour. |
+| Public landing page at `#/` (how it works, for SACCOs, for members, privacy and "the officer always decides") | Added | People arriving at the system need to know what it does and that a person decides. It has no statistics, testimonials or partner logos: none exist. The illustration uses a fictional applicant and draws the Kikuyu transcript as lines, since no Kikuyu text has been written for v2 yet. |
+| Staff layout: collapsible sidebar (a drawer on small screens), top bar with search, account menu and role badge; a prominent Start interview | Changed | Replaces the per-screen green header now that there are ten staff screens. |
+| Officer home: today's interviews, interviews in progress, applications awaiting a decision, guarantors to verify | Added | The officer's starting point is the work waiting for them, not the full list. |
+| Applications and Members screens; an application screen with its timeline and per-guarantor Verify / Reject | Added | The loan workflow from part B needed screens. Rejecting asks for an optional reason, which goes to the audit log. |
+| Admin overview: live KPIs, risk bands, decision outcomes, officer–model and rule–model agreement, recent activity, and the speech engine and device in use | Added | Practice interviews and applications are left out of every figure, as on Model & Evaluation. The engine and device come from `/api/health`, so a fallback to the CPU is visible. |
+| Users and Audit log screens | Added | Account administration and the audit trail without the shell. The audit log filters by person, action, record type and date. |
+| Member portal (`#/my`), phone first: applications with a six-stage timeline (Applied → Interview → Assessment → Decision → Guarantors → Approved), the officer's message, three plain reasons, what happens next, and the guarantor form | Added | Members need to see where they stand and add guarantors themselves. It shows no probability, risk class, SHAP number or officer note. The guarantor form asks for exactly the number still needed and checks each entry before sending. |
+| Profile page for every role: name, role, email, linked Google account, change password, sign out of all sessions | Added | People can manage their own account. Changing the password ends every other session. |
+| Practice badge on every practice interview, application, decision and comparator, including the member portal | Added | A practice record must never be mistaken for a real loan anywhere it appears. |
+| Motion (the `motion` library) for entrances and state changes only; removed entirely under `prefers-reduced-motion` | Added | Motion helps people see what changed; for those who asked for less, content appears at once and nothing moves. |
+| Skeleton loaders, toasts, modals, empty states | Added | Loading, confirmation and empty states look the same on every screen. |
+| Every route is its own code-split chunk; no images beyond inline SVG | Changed | Branch connections may be slow. The landing page and member portal never download the staff screens. |
+| All interface text in `frontend/src/strings.ts` | Changed | Ready for a Kikuyu translation: a second object of the same type can be swapped in. |
 
 ## Backend additions made for the dashboard
 
@@ -137,3 +158,5 @@ a one-line reason. Wireframe figure numbers refer to Chapter 4.
 | `/api/admin/users…`: list, create, deactivate, reset password, change role, link a Google email or a member | Account administration without the shell. An admin cannot deactivate or demote themselves, so one active admin always remains; account changes end that user's sessions. |
 | Audio storage interface: local files or a private Supabase bucket (`STORAGE_BACKEND`), replay by short-lived signed URL | Moving to Supabase must not make recordings public. The service-role key stays on the server; each stored clip remembers which backend holds it, so switching strands nothing. |
 | Rule agreement in the live statistics (`rule_agreement`) | The SACCO rule against the model on live applications, next to the officer-agreement figure; practice applications are left out. |
+| `GET /api/auth/profile`, `POST /api/auth/password`, `POST /api/auth/logout-all` | The profile page. Changing your password needs the current one, is rate-limited like sign-in, and ends your other sessions; signing out everywhere ends all of them. Both are written to the audit log. |
+| `mode` on application lists, the application detail and a member's own applications | Practice applications carry a badge in every list, including the member portal. |
