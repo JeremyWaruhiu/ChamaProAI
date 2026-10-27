@@ -1,0 +1,76 @@
+# ChamaPro AI in a container: dashboard and API on http://localhost:8000.
+#
+#   docker compose up --build -d                  CPU; runs on any machine
+#   docker compose --profile gpu up --build -d app-gpu
+#                                                 Intel GPU through WSL2
+#   docker compose --profile gpu down             stop whichever is running
+#
+# Run one service at a time: both publish port 8000 and share data/.
+#
+# Which database (one switch, DATABASE_URL; README "Docker"):
+#   unset                                     data/demo.db, the online demo
+#                                             (python scripts/seed_demo.py --demo-db data/demo.db)
+#   sqlite:////app/data/chamapro.db           the working database; set
+#                                             CHAMAPRO_UPLOADS=/app/data/uploads with it
+#   postgresql://...pooler.supabase.com/...   Supabase (run `alembic upgrade head` first)
+# Compose takes it from the shell, or from .env in this folder.
+#
+# Nothing private is in the image: models/ and data/ are mounted from this
+# folder and .env is read at run time.
+
+name: chamapro
+
+x-app: &app
+  build: .
+  image: chamapro-ai:latest
+  env_file:
+    - path: .env
+      required: false
+  volumes:
+    - ./models:/app/models:ro
+    - ./data:/app/data
+  # Published on the host's loopback only: reachable from this machine (and
+  # so from a tunnel started on it, scripts/demo_tunnel.sh), not the network.
+  ports:
+    - "${HOST_BIND:-127.0.0.1}:8000:8000"
+  restart: unless-stopped
+  environment: &environment
+    DATABASE_URL: ${DATABASE_URL:-sqlite:////app/data/demo.db}
+    # Each database keeps its own audio: interview ids restart in every
+    # database, so sharing one folder would mix (or overwrite) clips.
+    CHAMAPRO_UPLOADS: ${CHAMAPRO_UPLOADS:-/app/data/demo_uploads}
+    # Believe X-Forwarded-Proto/-For from any peer. Safe only because the
+    # port is published on 127.0.0.1: the peers are this machine's own
+    # processes (the tunnel) seen through Docker's gateway, whose address
+    # differs between Docker Engine and Docker Desktop. If HOST_BIND opens
+    # the port to the network, set this to the proxy's address instead.
+    FORWARDED_ALLOW_IPS: ${FORWARDED_ALLOW_IPS:-*}
+
+services:
+  app:
+    <<: *app
+    environment:
+      <<: *environment
+      ASR_DEVICE: CPU
+
+  # WSL2 exposes the Windows GPU driver as /dev/dxg plus the user-mode
+  # libraries in /usr/lib/wsl/lib; the image has Intel's compute runtime.
+  # If OpenVINO still sees no GPU, the ASR loads on the CPU and /api/health
+  # reports asr_device CPU instead of the container failing.
+  app-gpu:
+    <<: *app
+    profiles: [gpu]
+    devices:
+      - /dev/dxg
+      - /dev/dri
+    # /dev/dri/renderD128 belongs to the host's render group (getent group render).
+    group_add:
+      - "${RENDER_GID:-992}"
+    volumes:
+      - ./models:/app/models:ro
+      - ./data:/app/data
+      - /usr/lib/wsl/lib:/usr/lib/wsl/lib:ro
+    environment:
+      <<: *environment
+      ASR_DEVICE: GPU
+      LD_LIBRARY_PATH: /usr/lib/wsl/lib

@@ -53,6 +53,20 @@ def test_cookie_is_secure_off_localhost(fresh_user):
     assert r.status_code == 200 and "Secure" in r.headers["set-cookie"]
 
 
+def test_cookie_is_secure_behind_an_https_tunnel(fresh_user):
+    """As in the container: uvicorn --proxy-headers believes the tunnel's
+    X-Forwarded-Proto, even when the tunnel forwards to localhost."""
+    from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
+    name, pw = fresh_user
+    c = TestClient(ProxyHeadersMiddleware(app, trusted_hosts="*"), base_url="http://localhost")
+    r = c.post(LOGIN, json={"username": name, "password": pw},
+               headers={"X-Forwarded-Proto": "https", "X-Forwarded-For": "203.0.113.7"})
+    assert r.status_code == 200 and "Secure" in r.headers["set-cookie"]
+    plain = login(TestClient(ProxyHeadersMiddleware(app, trusted_hosts="*"),
+                             base_url="http://localhost"), name, pw)
+    assert "Secure" not in plain.headers["set-cookie"]          # plain http on localhost
+
+
 def test_only_the_token_hash_is_stored(anon_client, fresh_user):
     name, pw = fresh_user
     token = login(anon_client, name, pw).cookies[auth.COOKIE]

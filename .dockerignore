@@ -1,0 +1,21 @@
+# Allow-list: the image gets only what it needs to build and run. Never
+# .env, data/ (databases, uploads, licensed survey data, audio), models/,
+# docs/consent/ or the virtual environment; those are mounted or passed at
+# run time (see docker-compose.yml).
+*
+
+!requirements.lock.txt
+!pyproject.toml
+!alembic.ini
+!src/
+!scripts/
+!results/summary.json
+
+!frontend/
+frontend/node_modules/
+frontend/dist/
+
+# Caches and bytecode, wherever they are
+**/__pycache__/
+**/*.pyc
+**/.pytest_cache/

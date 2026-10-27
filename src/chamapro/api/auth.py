@@ -185,7 +185,10 @@ def end_session(db: Session, token: str | None) -> None:
 def cookie_secure(request: Request) -> bool:
     if config.COOKIE_SECURE is not None:
         return config.COOKIE_SECURE == "1"
-    return request.url.hostname not in ("localhost", "127.0.0.1", "::1")
+    # https as the browser sees it: behind a tunnel, uvicorn --proxy-headers
+    # takes the scheme from X-Forwarded-Proto, whatever Host the tunnel sends.
+    return request.url.scheme == "https" or \
+        request.url.hostname not in ("localhost", "127.0.0.1", "::1")
 
 
 # --- Dependencies ------------------------------------------------------------------

@@ -48,6 +48,8 @@ src/chamapro/api/                     FastAPI app over the pipeline (SQLite stor
 frontend/                             React web app (Vite + TypeScript); see frontend/README.md
 docs/screenshots/                     screenshots of the main screens (fictional demo data)
 tests/                                API and script tests (pytest)
+Dockerfile, docker-compose.yml        one-image deployment, CPU or Intel GPU (see Docker)
+scripts/demo_tunnel.sh                public https URL for an online demo (see Online demo)
 scripts/explore_finaccess.py            browse the FinAccess microdata
 ```
 
@@ -362,6 +364,11 @@ uploaded audio in `data/uploads/<interview_id>/`; both are gitignored. Optional
 `CHAMAPRO_DB` and `CHAMAPRO_UPLOADS` move them elsewhere. `DATABASE_URL` and
 `STORAGE_BACKEND=supabase` move both to Supabase instead; see
 [Switching to Supabase](#switching-to-supabase).
+
+After `cd frontend && npm run build`, the API also serves the built dashboard
+at http://localhost:8000/ (any path that is not `/api/...` or a file gets the
+app, whose router takes over). In development use the Vite server below;
+the Docker image serves the built one.
 
 | Method | Path                               | Purpose                                         |
 |--------|------------------------------------|-------------------------------------------------|
@@ -705,3 +712,109 @@ fictional people out of the live statistics. The passwords are random, printed
 once to the terminal and written nowhere; a re-run leaves existing logins and
 their passwords alone (an admin can reset them). `--no-accounts` skips all of
 this. Run it against a demo database, not the branch's real one.
+
+The online demo has its own self-contained database instead, with no audio
+corpus needed; see [Online demo](#online-demo).
+
+## Docker
+
+One image holds the API and the built dashboard, served together on
+http://localhost:8000 (one origin, so the session cookie needs no CORS). It is
+built in two stages: Node 24 builds `frontend/dist`, then a Python 3.12 slim
+runtime installs `requirements.lock.txt`, ffmpeg and Intel's GPU compute
+runtime. It runs as a non-root user and Docker checks `/api/health`.
+
+Nothing private is in the image: `models/` (read-only) and `data/` are mounted
+from this folder and `.env` is read at run time. So the classifier and the
+OpenVINO exports must already be in `models/` (see Setup).
+
+Install Docker first: on Windows, Docker Desktop with *Settings > Resources >
+WSL integration* turned on for your Ubuntu distro; on Linux, Docker Engine
+with the compose plugin.
+
+    docker compose up --build -d              # CPU: runs on any machine
+    docker compose ps                         # wait for "healthy" (up to a minute)
+    docker compose logs -f                    # startup, ASR device, requests
+    docker compose down                       # stop
+
+**Intel GPU on WSL2** (profile `gpu`): the container gets `/dev/dxg`,
+`/dev/dri` and the Windows driver's libraries from `/usr/lib/wsl/lib`.
+
+    RENDER_GID=$(getent group render | cut -d: -f3) \
+        docker compose --profile gpu up --build -d app-gpu
+    curl -s localhost:8000/api/health         # "asr_device": "GPU", or "CPU" if not visible
+    docker compose --profile gpu down
+
+Start one service at a time: both publish port 8000. If the GPU is not
+visible inside the container, the app starts anyway with the ASR on the CPU
+and `/api/health` reports `"asr_device": "CPU"`.
+
+**Which database.** `DATABASE_URL` chooses it, from the shell or `.env`:
+
+| Database                    | Setting |
+|-----------------------------|---------|
+| `data/demo.db` (default)    | nothing; build it first: `python scripts/seed_demo.py --demo-db data/demo.db` |
+| `data/chamapro.db` (working)| `DATABASE_URL=sqlite:////app/data/chamapro.db CHAMAPRO_UPLOADS=/app/data/uploads docker compose up -d` |
+| Supabase                    | `DATABASE_URL=postgresql://...` (the session pooler string), after `docker compose run --rm app alembic upgrade head` |
+
+Each SQLite database keeps its audio in its own folder (`data/demo_uploads/`
+for the demo): interview ids restart in every database, so one shared folder
+would mix clips. The demo database can also be built inside the container:
+`docker compose run --rm app python scripts/seed_demo.py --demo-db data/demo.db`.
+
+The port is published on `127.0.0.1` only. Uvicorn runs with
+`--proxy-headers` and believes `X-Forwarded-Proto` from any peer
+(`FORWARDED_ALLOW_IPS=*`), which is safe because only this machine can reach
+the port: behind a tunnel the app sees https and marks the session cookie
+Secure. To open the port to the network instead (`HOST_BIND=0.0.0.0`), set
+`FORWARDED_ALLOW_IPS` to your reverse proxy's address.
+
+## Online demo
+
+A free Cloudflare quick tunnel gives the container a public https address
+(microphone recording needs https), with no account and no configuration.
+
+**Install cloudflared** (Ubuntu, once):
+
+    curl -fsSL https://pkg.cloudflare.com/cloudflare-main.gpg \
+        | sudo tee /usr/share/keyrings/cloudflare-main.gpg >/dev/null
+    echo "deb [signed-by=/usr/share/keyrings/cloudflare-main.gpg] https://pkg.cloudflare.com/cloudflared $(lsb_release -cs) main" \
+        | sudo tee /etc/apt/sources.list.d/cloudflared.list
+    sudo apt-get update && sudo apt-get install cloudflared
+
+**Build the demo database** (once; again with `--replace` for a clean demo):
+
+    python scripts/seed_demo.py --demo-db data/demo.db
+
+It builds a separate database with an admin, two officers and nine fictional
+members ("(fictional)" in every name, phones 0700 000 xxx, member numbers
+DEMO-...). Twelve live loan applications cover every status and decision
+outcome: approved, approved with guarantors (verified, pending and one
+rejected), reduced amount, referred, declined, awaiting a decision,
+mid-interview and draft. Each assessed interview is scored by the real
+classifier on fixed features (no Gemini, no network), and the records are
+spread over the last eight weeks, so every dashboard, KPI and chart has
+realistic figures. The logins' passwords are printed once and written
+nowhere; note them. It never touches `data/chamapro.db`, and refuses any
+existing file that is not an earlier demo database.
+
+**On the day:**
+
+    docker compose up -d                      # the demo database is the default
+    docker compose ps                         # wait for "healthy"
+    scripts/demo_tunnel.sh                    # prints https://<random>.trycloudflare.com
+
+Share the printed URL. It is new on every run and lasts until you press
+Ctrl-C in that window, so start the tunnel shortly before the demo and send
+the link then. Keep the laptop plugged in and awake (on Windows: *Settings >
+System > Power* set to never sleep while plugged in) and the terminal open.
+Anyone with the link reaches the sign-in page; stop the tunnel afterwards.
+Google sign-in does not work on the tunnel's address (it is not an
+authorised origin); use the demo passwords.
+
+**If the internet drops**, the demo still runs locally: open
+http://localhost:8000 on the laptop and present from its screen. The tunnel
+reconnects on its own when the connection returns; if the URL stops working,
+press Ctrl-C and run `scripts/demo_tunnel.sh` again for a new one.
+
+Afterwards: Ctrl-C the tunnel, then `docker compose down`.

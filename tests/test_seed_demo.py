@@ -1,6 +1,7 @@
 """scripts/seed_demo.py: a complete demo interview without running Whisper."""
 import csv
 import re
+import sqlite3
 import subprocess
 import sys
 import uuid
@@ -12,6 +13,7 @@ from fastapi.testclient import TestClient
 
 import seed_demo  # scripts/ is on sys.path via chamapro.api.pipeline
 from chamapro import config
+from chamapro.api.db import APPLICATION_STATUSES
 from chamapro.api.main import app
 
 from conftest import BASE_URL, needs_classifier, uploads
@@ -295,3 +297,83 @@ def test_passwords_are_printed_once_and_never_written(client, tmp_path):
     for pw in re.findall(r"^  demo\.\S+\s+(\S+)$", first.stdout, flags=re.M):
         assert pw not in second.stdout
         assert pw.encode() not in stored                            # only its scrypt hash is
+
+
+# --- Self-contained demo database (--demo-db) ----------------------------------------
+
+def demo_cmd(path, *extra):
+    return [sys.executable, str(config.SCRIPTS_DIR / "seed_demo.py"), "--demo-db", str(path), *extra]
+
+
+def test_demo_people_are_obviously_fictional():
+    for p in seed_demo.DEMO_PEOPLE.values():
+        assert p["full_name"].endswith("(fictional)")
+        assert re.fullmatch(r"0700000\d{3}", p["phone"]) and p["member_no"].startswith("DEMO-")
+
+
+def test_demo_answers_say_what_was_scored():
+    answers = seed_demo.demo_answers(seed_demo.DEMO_PEOPLE["john"]["features"])
+    assert sorted(answers) == list(range(1, 9))
+    assert "I have no children" in answers[1]
+    assert "30,000 shillings" in answers[2] and "10,000 shillings" in answers[3]
+    assert "my pension, farming and renting out rooms" in answers[3]
+    assert answers[7] == "Yes, I am repaying one now." and answers[8] == "No, never."
+
+
+def test_demo_db_refuses_the_working_database():
+    # Only paths are compared; nothing is opened.
+    for path in (config.DATA_DIR / "chamapro.db", config.DB_PATH):
+        assert "is the working database" in seed_demo.demo_db_refusal(path, replace=True)
+
+
+def test_demo_db_refuses_a_file_the_engine_is_not_on(tmp_path):
+    # In-process the engine is on the test database, set at import.
+    assert "DATABASE_URL" in seed_demo.demo_db_refusal(tmp_path / "demo.db", replace=False)
+
+
+def test_demo_db_refuses_a_database_that_is_not_a_demo(tmp_path):
+    other = tmp_path / "other.db"
+    sqlite3.connect(other).execute("CREATE TABLE notes (x)").connection.close()
+    before = other.read_bytes()
+    r = subprocess.run(demo_cmd(other, "--replace"), capture_output=True, text=True)
+    assert r.returncode != 0 and "is not a demo database" in r.stderr
+    assert other.read_bytes() == before
+
+
+@needs_classifier
+def test_demo_db_covers_every_status_and_outcome(tmp_path):
+    path = tmp_path / "demo.db"
+    r = subprocess.run(demo_cmd(path), capture_output=True, text=True, cwd=tmp_path)
+    assert r.returncode == 0, r.stderr
+    logins = dict(re.findall(r"^  (demo\.\S+)\s+(\S+)$", r.stdout, flags=re.M))
+    assert set(logins) == {"demo.admin", "demo.officer1", "demo.officer2", "demo.grace",
+                           "demo.peter", "demo.mary", "demo.esther"}
+
+    con = sqlite3.connect(path)
+    col = lambda sql: [v for (v,) in con.execute(sql)]  # noqa: E731
+    assert set(col("SELECT status FROM loan_applications")) == set(APPLICATION_STATUSES)
+    assert set(col("SELECT outcome FROM decisions")) == {
+        "approve", "approve_with_guarantor", "approve_reduced", "refer", "decline"}
+    assert set(col("SELECT status FROM guarantors")) == {"verified", "pending", "rejected"}
+    assert set(col("SELECT risk_class FROM assessments")) == {"Low", "Medium", "High"}
+    assert set(col("SELECT mode FROM interviews")) == {"live"}
+    assert set(col("SELECT role FROM users")) == {"admin", "officer", "member"}
+    assert all(n.endswith("(fictional)") for n in col("SELECT full_name FROM members"))
+    assert set(col("SELECT extraction_model FROM assessments")) == {seed_demo.SEED_EXTRACTION}
+    days = col("SELECT DISTINCT date(created_at) FROM loan_applications")
+    assert len(days) >= 8                                   # spread over weeks, not one moment
+    con.close()
+
+    stored = b"".join(p.read_bytes() for p in tmp_path.glob("demo.db*"))
+    for pw in logins.values():
+        assert pw.encode() not in stored                    # printed once, never written
+    assert {p.name for p in tmp_path.iterdir()} <= {"demo.db", "demo.db-wal", "demo.db-shm"}
+
+    again = subprocess.run(demo_cmd(path), capture_output=True, text=True)
+    assert again.returncode != 0 and "--replace" in again.stderr
+    rebuilt = subprocess.run(demo_cmd(path, "--replace"), capture_output=True, text=True)
+    assert rebuilt.returncode == 0, rebuilt.stderr
+    fresh = dict(re.findall(r"^  (demo\.\S+)\s+(\S+)$", rebuilt.stdout, flags=re.M))
+    assert set(fresh) == set(logins) and not set(fresh.values()) & set(logins.values())
+    assert sqlite3.connect(path).execute("SELECT count(*) FROM loan_applications").fetchone() \
+        == (len(seed_demo.DEMO_APPLICATIONS),)

@@ -723,3 +723,24 @@ def record_decision(interview_id: int, body: s.DecisionCreate, db: Session = Dep
     same as POST /api/applications/{id}/decision)."""
     d = loans.decide(db, get_interview(db, interview_id), body, user)
     return s.DecisionOut.model_validate(d)
+
+
+# --- Dashboard ---------------------------------------------------------------
+# Registered last, so every /api route above wins. In development Vite serves
+# the dashboard and proxies /api; frontend/dist does not exist and this is a 404.
+
+@app.get("/{path:path}", include_in_schema=False)
+def dashboard(path: str):
+    """The built dashboard (npm run build), served from the API's own origin
+    so the SameSite=Strict session cookie needs no CORS. A path that is not a
+    file is a client-side route: it gets index.html and the router takes over."""
+    dist = config.FRONTEND_DIST.resolve()
+    if path == "api" or path.startswith("api/") or not (dist / "index.html").is_file():
+        raise HTTPException(404, "Not Found")
+    file = (dist / path).resolve()
+    if path and file.is_file() and file.is_relative_to(dist):
+        # Vite puts a content hash in every name under assets/
+        immutable = file.is_relative_to(dist / "assets")
+        return FileResponse(file, headers={"Cache-Control": "public, max-age=31536000, immutable"
+                                           if immutable else "no-cache"})
+    return FileResponse(dist / "index.html", headers={"Cache-Control": "no-cache"})

@@ -74,3 +74,8 @@ docs/Kikuyu_Recording_Worksheet.pdf
 *.db-shm
 *.bak
 docs/part_c_progress.md
+
+# Online-demo database and its audio (scripts/seed_demo.py --demo-db). data/**
+# covers them already; named so they stay ignored if that rule is narrowed.
+data/demo.db
+data/demo_uploads/

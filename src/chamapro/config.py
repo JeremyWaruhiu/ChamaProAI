@@ -64,6 +64,8 @@ CLASSIFIER_PATH = MODELS_DIR / "classifier.joblib"
 CLASSIFIER_META_PATH = MODELS_DIR / "classifier_meta.json"
 # Aggregate evaluation figures, written by scripts/export_results.py
 RESULTS_SUMMARY_PATH = PROJECT_ROOT / "results" / "summary.json"
+# The built dashboard (cd frontend && npm run build), served by the API at /.
+FRONTEND_DIST = _project_path(os.getenv("CHAMAPRO_FRONTEND_DIST") or "frontend/dist")
 
 # --- API ---------------------------------------------------------------------
 DB_PATH = Path(os.getenv("CHAMAPRO_DB") or DATA_DIR / "chamapro.db")
