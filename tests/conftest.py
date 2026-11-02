@@ -16,6 +16,7 @@ import re
 import secrets
 import shutil
 import subprocess
+import sys
 import tempfile
 import threading
 import time
@@ -39,11 +40,41 @@ import soundfile as sf  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 
 from chamapro import config  # noqa: E402
+from safety import unsafe_target  # noqa: E402
+
+
+def _where_tests_write() -> str | None:
+    """Why this run could write anywhere but a scratch database and folder, or None."""
+    from dotenv import dotenv_values
+    db = sys.modules.get("chamapro.api.db")
+    return unsafe_target(
+        urls={"DATABASE_URL in the environment": os.environ.get("DATABASE_URL", ""),
+              "chamapro.config.DATABASE_URL": config.DATABASE_URL,
+              **({"the app's database engine": db.engine.url.render_as_string(hide_password=False)}
+                 if db is not None else {})},
+        storage={"STORAGE_BACKEND in the environment": os.environ.get("STORAGE_BACKEND"),
+                 "chamapro.config.STORAGE_BACKEND": config.STORAGE_BACKEND},
+        test_postgres=os.getenv("CHAMAPRO_TEST_POSTGRES_URL"),
+        production=dotenv_values(config.PROJECT_ROOT / ".env").get("DATABASE_URL"),
+        data_dir=config.DATA_DIR)
+
+
+def _abort_if_unsafe(when: str) -> None:
+    if (why := _where_tests_write()) is not None:
+        pytest.exit(f"test run stopped {when}: {why}. Tests only ever write to a scratch SQLite "
+                    f"file or CHAMAPRO_TEST_POSTGRES_URL; check .env and the environment.",
+                    returncode=3)
+
+
+_abort_if_unsafe("before anything ran")
+
 from chamapro.api import auth  # noqa: E402
 from chamapro.api import pipeline as pl  # noqa: E402
 from chamapro.api import loans  # noqa: E402
 from chamapro.api.db import Assessment, Interview, Member, SessionLocal, User  # noqa: E402
 from chamapro.api.main import app  # noqa: E402
+
+_abort_if_unsafe("before anything ran")   # again, now that the engine exists
 
 needs_classifier = pytest.mark.skipif(
     not (config.CLASSIFIER_PATH.exists() and config.CLASSIFIER_META_PATH.exists()),
@@ -203,6 +234,14 @@ def admin_client(client):
 @pytest.fixture
 def anon_client(client):
     return TestClient(app, base_url=BASE_URL)
+
+
+@pytest.fixture(autouse=True)
+def _still_on_scratch_storage(request):
+    """After every test: a test, or a script it ran in-process (several call
+    load_dotenv(override=True)), must not have pointed the run at production."""
+    yield
+    _abort_if_unsafe(f"after {request.node.nodeid}")
 
 
 @pytest.fixture(autouse=True)

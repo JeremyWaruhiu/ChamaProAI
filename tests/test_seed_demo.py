@@ -1,5 +1,6 @@
 """scripts/seed_demo.py: a complete demo interview without running Whisper."""
 import csv
+import json
 import re
 import secrets
 import sqlite3
@@ -7,6 +8,7 @@ import subprocess
 import sys
 import uuid
 from datetime import date
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -324,10 +326,27 @@ def test_passwords_are_printed_once_and_never_written(client, tmp_path):
     assert "shown once and not saved" in first.stdout or "already exists" in first.stdout
     assert "already exists; password unchanged" in second.stdout
     assert list(tmp_path.iterdir()) == []                          # nothing written to cwd
-    stored = b"".join(p.read_bytes() for p in config.DB_PATH.parent.glob(config.DB_PATH.name + "*"))
-    for _, pw in re.findall(LOGIN_LINE, first.stdout, flags=re.M):
-        assert pw not in second.stdout
-        assert pw.encode() not in stored                            # only its scrypt hash is
+    printed = [pw for _, pw in re.findall(LOGIN_LINE, first.stdout, flags=re.M)]
+    assert not [pw for pw in printed if pw in second.stdout]
+    assert found_in_files(config.DB_PATH, printed) == []           # only their scrypt hashes are
+    login = seed_demo.OFFICER["login"]
+    assert found_in_files(config.DB_PATH, [login]) == [login]      # the scan does read the files
+
+
+def found_in_files(db: Path, needles: list[str]) -> list[str]:
+    """Which needles occur in the bytes of db and its -wal and -shm files.
+
+    Read by a child process, never this one: on Linux, closing any descriptor
+    on a file drops every POSIX lock this process holds on it, SQLAlchemy's
+    SQLite locks included. A later writer in another process could then
+    checkpoint the WAL under this process's pooled connection, which goes on
+    reading a stale snapshot ("disk I/O error", or an update it never sees)."""
+    code = ("import json, pathlib, sys; db = pathlib.Path(sys.argv[1]); "
+            "data = b''.join(p.read_bytes() for p in db.parent.glob(db.name + '*')); "
+            "print(json.dumps([n for n in json.loads(sys.stdin.read()) if n.encode() in data]))")
+    r = subprocess.run([sys.executable, "-c", code, str(db)], input=json.dumps(needles),
+                       capture_output=True, text=True, check=True)
+    return json.loads(r.stdout)
 
 
 def test_admin_sees_display_names_and_roles(client, admin_client):

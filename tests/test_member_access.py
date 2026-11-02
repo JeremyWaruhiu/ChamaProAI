@@ -1,6 +1,5 @@
 """Members see only their own applications and guarantors, never a staff
 endpoint, and never what the officer wrote for staff or the model's numbers."""
-import json
 import re
 
 import pytest
@@ -17,6 +16,52 @@ MEMBER_ROUTES = {("GET", "/api/me/applications"), ("GET", "/api/me/applications/
                  ("POST", "/api/auth/logout-all")}
 PUBLIC = {("GET", "/api/health"), ("POST", "/api/auth/login"), ("GET", "/api/auth/config"),
           ("POST", "/api/auth/google")}
+
+# Fields of the officer's application view (schemas.ApplicationDetail and what it
+# nests) that carry the model's numbers, what staff wrote, or who did what. Each
+# must exist in the officer payload (so this list cannot go stale) and nowhere in
+# the member's, at any depth.
+OFFICER_ONLY = {
+    # the assessment
+    "assessment", "risk_class", "probabilities", "feature_vector", "contributions", "feature", "shap",
+    "extracted", "applicant_form", "extraction_completeness", "features_populated", "features_total",
+    "features_not_extractable", "extraction_model", "model_file", "model_sha256", "assessed_by",
+    # the SACCO rule beside it
+    "comparator", "conditions", "agreement",
+    # the decision and the guarantor checks
+    "officer_notes", "note", "decided_by", "verified_by", "verified_at", "created_by",
+}
+# Feature names as the classifier stores them: distinctive enough to search for in text.
+FEATURE_SENTINELS = ("B3A__", "E3B__", "log_monthly_income", "is_female")
+
+
+def walk(obj, path="$", key=None):
+    """Every (path, key, value) in a parsed JSON body, the body itself and every
+    nested object, list and list item included; key is None for those without one."""
+    yield path, key, obj
+    if isinstance(obj, dict):
+        for k, v in obj.items():
+            yield from walk(v, f"{path}.{k}", k)
+    elif isinstance(obj, list):
+        for i, v in enumerate(obj):
+            yield from walk(v, f"{path}[{i}]")
+
+
+def keys(obj) -> set[str]:
+    return {k for _, k, _ in walk(obj) if k is not None}
+
+
+def leaks(body) -> list[str]:
+    """What in a member-facing body should only ever be shown to staff."""
+    out = [f"{p}: officer-only field" for p, k, _ in walk(body) if k in OFFICER_ONLY]
+    for p, _, v in walk(body):
+        # Scores, probabilities and SHAP values are floats; every number a member
+        # sees (amounts, counts, ids) is a whole number.
+        if isinstance(v, float):
+            out.append(f"{p}: number {v}")
+        if isinstance(v, str) and (OFFICER_NOTE in v or any(f in v for f in FEATURE_SENTINELS)):
+            out.append(f"{p}: {v!r}")
+    return out
 
 
 @pytest.fixture
@@ -62,9 +107,11 @@ def test_member_cannot_see_or_add_another_members_guarantors(two_members):
     r = b["client"].post(f"/api/me/applications/{a['app_id']}/guarantors",
                          json={"guarantors": [guarantor(3)]})
     assert r.status_code == 404
-    own = json.dumps(b["client"].get(f"/api/me/applications/{b['app_id']}").json())
+    own = b["client"].get(f"/api/me/applications/{b['app_id']}").json()
     theirs = a["client"].get(f"/api/me/applications/{a['app_id']}").json()["guarantors"]
-    assert len(theirs) == 2 and all(g["member_no"] not in own for g in theirs)
+    seen = {v for _, k, v in walk(own) if k == "member_no"}
+    assert len(theirs) == 2 and own["guarantors"] == []
+    assert not seen & {g["member_no"] for g in theirs}
 
 
 @pytest.mark.parametrize("method,path", sorted(staff_routes()))
@@ -98,16 +145,16 @@ def test_member_without_a_record_sees_nothing(client):
                                                  "display_name": None}
 
 
-def test_member_view_has_no_notes_numbers_or_feature_names(two_members):
+def test_member_view_has_no_notes_numbers_or_feature_names(client, two_members):
     a = two_members[0]
-    r = a["client"].get(f"/api/me/applications/{a['app_id']}")
-    body = r.json()
-    text = r.text
-    assert OFFICER_NOTE not in text
-    for word in ("officer_notes", "note", "probabilit", "risk_class", "shap", "feature",
-                 "B3A__", "E3B__", "log_monthly_income", "is_female", "Medium", "0.5",
-                 "decided_by", "verified_by", "model"):
-        assert word not in text, word
+    staff = client.get(f"/api/applications/{a['app_id']}").json()
+    assert OFFICER_ONLY <= keys(staff), OFFICER_ONLY - keys(staff)      # the list is real
+    assert staff["decision"]["officer_notes"] == OFFICER_NOTE
+
+    for body in (a["client"].get(f"/api/me/applications/{a['app_id']}").json(),
+                 a["client"].get("/api/me/applications").json()):
+        assert leaks(body) == []
+    body = a["client"].get(f"/api/me/applications/{a['app_id']}").json()
     assert body["member_message"] == MESSAGE
     assert body["outcome"] == "approve_with_guarantor" and body["guarantors_required"] == 2
     assert body["reasons"] == [
@@ -127,7 +174,7 @@ def test_guarantor_submission_response_has_no_notes(client):
                 json={"outcome": "approve_with_guarantor", "officer_notes": OFFICER_NOTE})
     r = mc.post(f"/api/me/applications/{app_['id']}/guarantors",
                 json={"guarantors": [guarantor(1), guarantor(2)]})
-    assert r.status_code == 201 and OFFICER_NOTE not in r.text and "officer_notes" not in r.text
+    assert r.status_code == 201 and leaks(r.json()) == []
     assert r.json()["member_message"].startswith("Your loan can be approved once 2 guarantor")
 
 
@@ -142,3 +189,13 @@ def test_no_reasons_before_a_decision(client):
     body = mc.get(f"/api/me/applications/{app_['id']}").json()
     assert body["status"] == "assessed" and body["reasons"] == [] and body["outcome"] is None
     assert body["status_label"] == "Being reviewed by a loan officer"
+
+
+def test_the_leak_check_catches_what_it_is_for():
+    """leaks() itself: officer fields at any depth, any float, the note, feature names."""
+    assert leaks({"id": 3, "created_at": "2026-10-27T02:16:50.507010Z", "amount": 30000}) == []
+    found = leaks({"timeline": [{"status": "assessed", "extra": {"probabilities": {"Low": 0.2}}}],
+                   "score": 0.37, "reasons": [f"see {OFFICER_NOTE}", "is_female counted"]})
+    assert found == ["$.timeline[0].extra.probabilities: officer-only field",
+                     "$.timeline[0].extra.probabilities.Low: number 0.2", "$.score: number 0.37",
+                     f"$.reasons[0]: {f'see {OFFICER_NOTE}'!r}", "$.reasons[1]: 'is_female counted'"]

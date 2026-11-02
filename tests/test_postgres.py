@@ -9,6 +9,7 @@ The rest of the suite runs on SQLite.
 """
 import os
 import secrets
+from contextlib import contextmanager
 from datetime import date
 
 import pytest
@@ -20,7 +21,7 @@ from sqlalchemy.orm import Session
 
 from chamapro import config
 from chamapro.api.db import (Applicant, AuditLog, Decision, Guarantor, Interview,
-                             LoanApplication, Member, User, alembic_config, init_db)
+                             LoanApplication, Member, User, alembic_config, head_revision, init_db)
 
 SERVER = os.getenv("CHAMAPRO_TEST_POSTGRES_URL")
 pytestmark = pytest.mark.skipif(not SERVER, reason="set CHAMAPRO_TEST_POSTGRES_URL to run")
@@ -28,20 +29,26 @@ GUARDED = {"assessments": "assessments are immutable", "decisions": "decisions a
            "audit_log": "audit_log is append-only"}
 
 
-@pytest.fixture(scope="module")
-def pg_url():
+@contextmanager
+def scratch_database():
+    """A new, empty database on SERVER, dropped afterwards; yields its URL."""
     base = make_url(config._database_url(SERVER))
     name = f"chamapro_test_{secrets.token_hex(4)}"
     admin = create_engine(base, isolation_level="AUTOCOMMIT")
     with admin.connect() as c:
         c.exec_driver_sql(f"CREATE DATABASE {name}")
-    url = base.set(database=name).render_as_string(hide_password=False)
     try:
-        yield url
+        yield base.set(database=name).render_as_string(hide_password=False)
     finally:
         with admin.connect() as c:
             c.exec_driver_sql(f"DROP DATABASE IF EXISTS {name} WITH (FORCE)")
         admin.dispose()
+
+
+@pytest.fixture(scope="module")
+def pg_url():
+    with scratch_database() as url:
+        yield url
 
 
 @pytest.fixture(scope="module")
@@ -83,19 +90,23 @@ def rows(engine):
 
 def test_schema_is_at_head_and_init_db_accepts_it(engine):
     with engine.connect() as c:
-        assert c.execute(text("SELECT version_num FROM alembic_version")).scalar() == "0002"
+        assert c.execute(text("SELECT version_num FROM alembic_version")).scalar() == head_revision()
     init_db(engine)          # at head: a no-op, no error
 
 
-def test_init_db_refuses_to_migrate_postgres_implicitly(pg_url):
-    other = create_engine(pg_url)
-    with other.begin() as c:
-        c.exec_driver_sql("CREATE SCHEMA empty_one")
-    eng = create_engine(pg_url, connect_args={"options": "-csearch_path=empty_one"})
-    with pytest.raises(RuntimeError, match="alembic upgrade head"):
-        init_db(eng)
-    eng.dispose()
-    other.dispose()
+def test_init_db_refuses_to_migrate_postgres_implicitly():
+    # Its own empty database, not a schema of the module's: the module's has been
+    # migrated by the `engine` fixture by the time this runs in a full run, and
+    # hiding it behind a search_path startup option fails wherever that option is
+    # not honoured (PgBouncer, Supabase's pooler), so the test passed alone only.
+    with scratch_database() as url:
+        eng = create_engine(url)
+        try:
+            with pytest.raises(RuntimeError, match="alembic upgrade head"):
+                init_db(eng)
+            assert not inspect(eng).get_table_names()                  # nothing was created
+        finally:
+            eng.dispose()
 
 
 def test_every_table_has_row_level_security(engine):
