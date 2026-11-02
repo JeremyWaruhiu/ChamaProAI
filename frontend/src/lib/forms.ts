@@ -6,7 +6,9 @@ import { t } from '../strings'
 const USERNAME = /^[A-Za-z0-9._@-]{3,64}$/
 const EMAIL = /^[^@\s]+@[^@\s]+\.[^@\s]+$/
 
-export interface NewUser { username: string; password: string; role: Role; email: string; member_id: string }
+export interface NewUser {
+  username: string; display_name: string; password: string; role: Role; email: string; member_id: string
+}
 
 /** What stops a new user being created; {} when the form is complete. */
 export function newUserErrors(u: NewUser): Partial<Record<keyof NewUser, string>> {

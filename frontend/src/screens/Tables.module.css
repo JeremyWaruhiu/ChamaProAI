@@ -15,6 +15,7 @@
   color: var(--ink-2); font: inherit; font-size: var(--text-sm); font-weight: 620; cursor: pointer;
 }
 .segmented button:hover { color: var(--ink); background: var(--surface); }
+@media (max-width: 720px), (pointer: coarse) { .segmented button { min-height: 44px; } }
 .segmented button[aria-pressed="true"] { background: var(--green-800); color: var(--white); }
 
 .sub { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); margin-top: 3px; color: var(--ink-3); font-size: var(--text-sm); }
@@ -24,12 +25,16 @@
 .badges { display: flex; flex-wrap: wrap; gap: var(--space-2); }
 .actions { display: flex; flex-wrap: wrap; gap: var(--space-2); justify-content: flex-end; }
 .mono { font-family: var(--font-mono); font-size: var(--text-sm); }
+.username { display: block; font-family: var(--font-mono); }
 .nowrap { white-space: nowrap; }
 
 /* Small screens: each row becomes a card */
 @media (max-width: 720px) {
   .stack :global(thead) { display: none; }
-  .stack :global(tr) { display: grid; gap: var(--space-1); padding: var(--space-3) var(--space-4); border-bottom: 1px solid var(--line); }
+  .stack :global(tr) {
+    display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--space-1);
+    padding: var(--space-3) var(--space-4); border-bottom: 1px solid var(--line);
+  }
   .stack :global(tr:last-child) { border-bottom: 0; }
   .stack :global(td) { padding: 0; border: 0; }
   .stack :global(td[data-label])::before {

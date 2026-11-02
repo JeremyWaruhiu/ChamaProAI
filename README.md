@@ -46,7 +46,7 @@ src/chamapro/questions.json           question sets v1 (built from docs/) and v2
 models/                               classifier and OpenVINO ASR exports (gitignored; see Setup)
 src/chamapro/api/                     FastAPI app over the pipeline (SQLite storage)
 frontend/                             React web app (Vite + TypeScript); see frontend/README.md
-docs/screenshots/                     screenshots of the main screens (fictional demo data)
+docs/screenshots/                     screenshots of the main screens, desktop and phone-360/430 (fictional data)
 tests/                                API and script tests (pytest)
 Dockerfile, docker-compose.yml        one-image deployment, CPU or Intel GPU (see Docker)
 scripts/demo_tunnel.sh                public https URL for an online demo (see Online demo)
@@ -161,6 +161,19 @@ Options: `--binary` (default/no-default, banded back into three classes),
 `--low-vs-high` (drop the Medium class), `--random-split` (stratified split
 instead of the Central Kenya holdout), `--seed 42`. Results go to
 `results/model_results<tag>.json`.
+
+The deployed classifier (`models/classifier.joblib`, HistGradientBoosting) is
+saved by `scripts/train_and_save.py`. The Model & Evaluation page compares it
+with a RandomForest trained on the same split, saved beside it and never
+deployed; then `scripts/export_results.py` scores both on the same held-out
+rows (per-class precision and recall, AUC, macro-F1, High-risk recall) into
+`results/summary.json`:
+
+    python scripts/train_and_save.py --estimator random_forest --name random_forest
+    python scripts/export_results.py
+
+The export refuses to compare a RandomForest whose model card shows a
+different frame, protocol, seed, training rows or features.
 
 ### Experiment 04: borrower subset
 
@@ -477,7 +490,8 @@ become `v1`, `kik`, `live`, responses `audio`). `0002` adds members, loan
 applications, guarantors and the audit log, and adds the new decision columns
 with ADD COLUMN only: existing decisions keep every value, read with
 `outcome` equal to their `decision`, and no immutability trigger fires or is
-dropped.
+dropped. `0003` adds `users.display_name` and a `seed_tag` on users, members
+and applicants (see [Demo data](#demo-data)), all nullable, ADD COLUMN only.
 
     alembic upgrade head            # the database in DATABASE_URL, else data/chamapro.db
     alembic current
@@ -501,14 +515,19 @@ twice and never prints it:
 Then add each loan officer (the role defaults to `officer`):
 
     python scripts/create_user.py wanjiru
+    python scripts/create_user.py j.wanjiru --display-name "Jane Wanjiru"
+
+The display name is shown beside the role badge in the top bar and the users
+list; without one the username is shown. The role, not the username, is what
+grants officer or admin access.
 
 Passwords must be at least 10 characters. The script creates the database
 tables if they do not exist yet, so it can run before the API has started.
 
 A member's login (`--role member --member-no M-0412`) sees only that member's
 own applications. Once an admin exists, users can also be managed through
-`/api/admin/users`: create, deactivate, reset a password, change a role, link
-a Google email or a member record. An admin cannot deactivate or demote
+`/api/admin/users`: create, deactivate, reset a password, change a role or
+display name, link a Google email or a member record. An admin cannot deactivate or demote
 themselves; deactivating, resetting or changing a role ends that user's
 sessions.
 
@@ -662,13 +681,14 @@ classifier in `models/` (`python scripts/train_and_save.py`), and Node.js
 
 A demo run:
 
-- Open **Demo applicant (S01)**. All 40 answers are already transcribed.
+- Open **Wanjiru Njoroge** (the S01 recordings). All 40 answers are
+  already transcribed.
 - On **Review transcripts**, correct a transcript and save it to show the
   *Edited* mark.
 - Press **Run assessment**. Translation and scoring take about half a minute
   and need internet access for Gemini.
 - On the assessment, record the officer's decision.
-- Open **Practice: Mary Wambui (fictional)** for an English practice
+- Open **Mary Wambui** for an English practice
   interview: the applicant form is filled in and all eight answers are typed,
   so it can be assessed at once. Every screen of it shows the practice
   banner, and it does not count in the live statistics.
@@ -677,10 +697,11 @@ A demo run:
   the background while you move to the next question; any answer can be
   typed instead.
 
-- Sign in as **demo.officer** (password printed by `seed_demo.py`) to see two
-  loan applications for fictional members: Grace's is approved, Peter's needs
-  two guarantors. Sign in as **demo.peter** to add them in the member portal,
-  then verify them as the officer on the application's screen.
+- Sign in as **j.mwangi** (officer Joseph Mwangi; password printed by
+  `seed_demo.py`) to see two loan applications for fictional members:
+  Grace's is approved, Peter's needs two guarantors. Sign in as **p.kamau**
+  to add them in the member portal, then verify them as the officer on the
+  application's screen.
 
 Run `seed_demo.py` again before the next demo. An assessed demo cannot be
 changed, so the script then starts a fresh one. See
@@ -702,16 +723,26 @@ response deleted for re-recording, and starts a fresh one once the previous
 one has been assessed. Audio is copied into `data/uploads/` (or the Supabase
 bucket), so re-recording in the dashboard never touches the corpus.
 
-It also creates demo accounts: one loan officer (`demo.officer`) and two
-fictional members (`demo.grace`, `demo.peter`), each with a member record and
+It also creates accounts: one loan officer (`j.mwangi`, Joseph Mwangi) and two
+fictional members (`g.wanjiku`, Grace Wanjiku; `p.kamau`, Peter Kamau), each with a member record and
 a loan application on a typed English practice interview. With the classifier
 in `models/` both are assessed by the real classifier on fixed features (no
-Gemini, no network; `extraction_model` says so) and decided by the demo
+Gemini, no network; `extraction_model` says so) and decided by the
 officer: one approved, one requiring two guarantors. Practice mode keeps these
 fictional people out of the live statistics. The passwords are random, printed
 once to the terminal and written nowhere; a re-run leaves existing logins and
 their passwords alone (an admin can reset them). `--no-accounts` skips all of
-this. Run it against a demo database, not the branch's real one.
+this. Run it against a demo database, not the branch's real one: with
+`DATABASE_URL` set in `.env` it writes to that database.
+
+Every seeded person is invented, but no name, login or note on screen says
+so. The seeder recognises its own rows by `seed_tag`, a column on users,
+members and applicants that the API never returns, and stops before writing
+anything if a login or member number it wants belongs to an account it did
+not create. Rows from earlier versions (`demo.` logins, `DEMO-` member
+numbers, "(fictional)" and "Practice:" names) are renamed in place on the
+next run; their assessments and decisions are immutable and keep the
+officer name and notes they were recorded with.
 
 The online demo has its own self-contained database instead, with no audio
 corpus needed; see [Online demo](#online-demo).
@@ -786,9 +817,10 @@ A free Cloudflare quick tunnel gives the container a public https address
 
     python scripts/seed_demo.py --demo-db data/demo.db
 
-It builds a separate database with an admin, two officers and nine fictional
-members ("(fictional)" in every name, phones 0700 000 xxx, member numbers
-DEMO-...). Twelve live loan applications cover every status and decision
+It builds a separate database with an admin (`s.achieng`), two officers
+(`j.mwangi`, `a.chebet`) and nine fictional members (phones 0700 000 xxx,
+member numbers M-1001 to M-1009; nothing on screen marks them as invented).
+Twelve live loan applications cover every status and decision
 outcome: approved, approved with guarantors (verified, pending and one
 rejected), reduced amount, referred, declined, awaiting a decision,
 mid-interview and draft. Each assessed interview is scored by the real
@@ -796,7 +828,8 @@ classifier on fixed features (no Gemini, no network), and the records are
 spread over the last eight weeks, so every dashboard, KPI and chart has
 realistic figures. The logins' passwords are printed once and written
 nowhere; note them. It never touches `data/chamapro.db`, and refuses any
-existing file that is not an earlier demo database.
+existing file that is not an earlier demo database (one whose logins carry a
+`demo-db:` seed tag, or, built before the tag existed, a `demo.admin` login).
 
 **On the day:**
 

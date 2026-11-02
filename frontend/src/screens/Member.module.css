@@ -21,7 +21,7 @@
 .dotsLabel { color: var(--ink-3); font-size: var(--text-sm); }
 
 .detail { display: grid; gap: var(--space-4); }
-.back { display: inline-flex; align-items: center; gap: var(--space-1); justify-self: start; min-height: 40px; font-weight: 620; text-decoration: none; }
+.back { display: inline-flex; align-items: center; gap: var(--space-1); justify-self: start; min-height: 44px; font-weight: 620; text-decoration: none; }
 .head { display: grid; gap: var(--space-2); }
 .title { font-size: var(--text-2xl); color: var(--green-900); }
 .practice {

@@ -1,19 +1,24 @@
 """scripts/seed_demo.py: a complete demo interview without running Whisper."""
 import csv
 import re
+import secrets
 import sqlite3
 import subprocess
 import sys
 import uuid
+from datetime import date
 
 import numpy as np
 import pytest
 import soundfile as sf
 from fastapi.testclient import TestClient
+from sqlalchemy import select
 
 import seed_demo  # scripts/ is on sys.path via chamapro.api.pipeline
 from chamapro import config
-from chamapro.api.db import APPLICATION_STATUSES
+from chamapro.api import auth
+from chamapro.api.db import (APPLICATION_STATUSES, Applicant, AuditLog, Interview, LoanApplication,
+                             Member, SessionLocal, User)
 from chamapro.api.main import app
 
 from conftest import BASE_URL, needs_classifier, uploads
@@ -44,13 +49,14 @@ def corpus(tmp_path):
 
 @pytest.fixture
 def name():
-    return f"Demo {uuid.uuid4().hex[:8]}"   # tests share a database
+    """Applicant name and seed tag in one (tests share a database)."""
+    return f"Applicant {uuid.uuid4().hex[:8]}"
 
 
 def test_seed_creates_a_transcribed_interview(client, corpus, name, state):
     csv_path, audio, rows = corpus
 
-    res = seed_demo.seed(csv_path, audio, name)
+    res = seed_demo.seed(csv_path, audio, name, tag=name)
 
     assert (res.created, res.added, res.total) == (True, 5, 5)
     st = state(res.interview_id)
@@ -69,7 +75,7 @@ def test_seed_creates_a_transcribed_interview(client, corpus, name, state):
 
 def test_seed_copies_audio_into_uploads(client, corpus, name, state):
     csv_path, audio, _ = corpus
-    res = seed_demo.seed(csv_path, audio, name)
+    res = seed_demo.seed(csv_path, audio, name, tag=name)
     ids = [r["id"] for r in state(res.interview_id)["responses"]]
     assert uploads(res.interview_id) == sorted(
         f"response_{i}_s{n:02d}.wav" for i, n in zip(ids, (1, 2, 6, 7, 16)))
@@ -77,10 +83,10 @@ def test_seed_copies_audio_into_uploads(client, corpus, name, state):
 
 def test_seed_is_idempotent(client, corpus, name, state):
     csv_path, audio, _ = corpus
-    first = seed_demo.seed(csv_path, audio, name)
+    first = seed_demo.seed(csv_path, audio, name, tag=name)
     before = state(first.interview_id)
 
-    again = seed_demo.seed(csv_path, audio, name)
+    again = seed_demo.seed(csv_path, audio, name, tag=name)
 
     assert (again.interview_id, again.created, again.added, again.total) == \
         (first.interview_id, False, 0, 5)
@@ -91,25 +97,25 @@ def test_seed_is_idempotent(client, corpus, name, state):
 
 def test_seed_keeps_reviewer_edits(client, corpus, name, state):
     csv_path, audio, _ = corpus
-    res = seed_demo.seed(csv_path, audio, name)
+    res = seed_demo.seed(csv_path, audio, name, tag=name)
     rid = state(res.interview_id)["responses"][3]["id"]          # the blank one
     client.patch(f"/api/responses/{rid}", json={"transcript": "typed by officer"})
 
-    seed_demo.seed(csv_path, audio, name)
+    seed_demo.seed(csv_path, audio, name, tag=name)
 
     assert state(res.interview_id)["responses"][3]["transcript"] == "typed by officer"
 
 
 def test_rerecord_deletes_the_copy_and_reseed_restores_it(client, corpus, name, state):
     csv_path, audio, _ = corpus
-    res = seed_demo.seed(csv_path, audio, name)
+    res = seed_demo.seed(csv_path, audio, name, tag=name)
     rid = state(res.interview_id)["responses"][0]["id"]
 
     assert client.delete(f"/api/responses/{rid}").status_code == 200
     assert (audio / "S01_clean_001.wav").exists()                 # corpus untouched
     assert len(uploads(res.interview_id)) == 4
 
-    again = seed_demo.seed(csv_path, audio, name)
+    again = seed_demo.seed(csv_path, audio, name, tag=name)
 
     assert (again.interview_id, again.created, again.added, again.total) == \
         (res.interview_id, False, 1, 5)
@@ -120,16 +126,16 @@ def test_rerecord_deletes_the_copy_and_reseed_restores_it(client, corpus, name, 
 def test_seed_after_assessment_starts_a_fresh_demo(client, corpus, name, monkeypatch):
     from chamapro.api.db import Interview, SessionLocal
     csv_path, audio, _ = corpus
-    first = seed_demo.seed(csv_path, audio, name)
+    first = seed_demo.seed(csv_path, audio, name, tag=name)
     with SessionLocal() as db:                       # as if assessed during a rehearsal
         db.get(Interview, first.interview_id).status = "assessed"
         db.commit()
 
-    fresh = seed_demo.seed(csv_path, audio, name)
+    fresh = seed_demo.seed(csv_path, audio, name, tag=name)
 
     assert fresh.created and fresh.interview_id != first.interview_id
     assert (fresh.added, fresh.total) == (5, 5)
-    assert seed_demo.seed(csv_path, audio, name).interview_id == fresh.interview_id
+    assert seed_demo.seed(csv_path, audio, name, tag=name).interview_id == fresh.interview_id
 
 
 def test_missing_clip_writes_nothing(client, corpus, name):
@@ -138,7 +144,7 @@ def test_missing_clip_writes_nothing(client, corpus, name):
     before = client.get("/api/interviews").json()
 
     with pytest.raises(FileNotFoundError, match="S01_clean_006.wav"):
-        seed_demo.seed(csv_path, audio, name)
+        seed_demo.seed(csv_path, audio, name, tag=name)
 
     assert client.get("/api/interviews").json() == before
 
@@ -146,17 +152,20 @@ def test_missing_clip_writes_nothing(client, corpus, name):
 def test_cli_reports_and_is_idempotent(client, corpus, name):
     csv_path, audio, _ = corpus
     cmd = [sys.executable, str(config.SCRIPTS_DIR / "seed_demo.py"),
-           "--csv", str(csv_path), "--audio", str(audio), "--name", name]
+           "--csv", str(csv_path), "--audio", str(audio), "--name", name, "--tag", name]
     first = subprocess.run(cmd, capture_output=True, text=True, check=True)
     second = subprocess.run(cmd, capture_output=True, text=True, check=True)
-    assert "created demo interview" in first.stdout and "with 5 responses" in first.stdout
+    assert "created Kikuyu interview" in first.stdout and "with 5 responses" in first.stdout
     assert "already complete; nothing to do" in second.stdout
     assert str(config.DB_PATH) in second.stdout              # wrote to the test database
 
     bad = subprocess.run(cmd[:2] + ["--csv", str(csv_path.with_name("nope.csv")),
-                                    "--name", name], capture_output=True, text=True)
+                                    "--name", name, "--tag", name], capture_output=True, text=True)
     assert bad.returncode != 0 and "nothing written" in bad.stderr
 
+
+# "  <login> <password>" as the seeder prints each new login.
+LOGIN_LINE = r"^  ([a-z]\.[a-z]+\S*)\s+(\S+)$"
 
 REAL_CSV = config.DATA_DIR / "asr_paza.csv"
 REAL_AUDIO = config.DATA_DIR / "audio_16k"
@@ -165,7 +174,7 @@ REAL_AUDIO = config.DATA_DIR / "audio_16k"
 @pytest.mark.skipif(not (REAL_CSV.exists() and REAL_AUDIO.exists()),
                     reason="needs data/asr_paza.csv and data/audio_16k/ (not in the repo)")
 def test_real_corpus_seeds_all_40(client, name, state):
-    res = seed_demo.seed(REAL_CSV, REAL_AUDIO, name)
+    res = seed_demo.seed(REAL_CSV, REAL_AUDIO, name, tag=name)
     st = state(res.interview_id)
     assert res.total == 40 and st["counts"]["transcribed"] == 40
     assert [x["sentence_no"] for x in st["responses"]] == list(range(1, 41))
@@ -175,7 +184,7 @@ def test_real_corpus_seeds_all_40(client, name, state):
 # --- English practice interview ----------------------------------------------
 
 def test_seed_practice_creates_an_english_practice_interview(client, name, state):
-    res = seed_demo.seed_practice(name)
+    res = seed_demo.seed_practice(name, tag=name)
 
     assert (res.created, res.added, res.total) == (True, 8, 8)
     st = state(res.interview_id)
@@ -189,21 +198,38 @@ def test_seed_practice_creates_an_english_practice_interview(client, name, state
 
 
 def test_seed_practice_is_idempotent(client, name, state):
-    first = seed_demo.seed_practice(name)
+    first = seed_demo.seed_practice(name, tag=name)
     before = state(first.interview_id)
-    again = seed_demo.seed_practice(name)
+    again = seed_demo.seed_practice(name, tag=name)
     assert (again.interview_id, again.created, again.added) == (first.interview_id, False, 0)
     assert state(first.interview_id) == before
 
 
-def test_practice_applicant_is_fictional():
-    assert "fictional" in seed_demo.PRACTICE_NAME.lower()
-    assert seed_demo.PRACTICE_NAME.lower().startswith("practice")
+# What a seeded name must not say; API replies may say "practice" (the mode).
+NAME_MARKERS = re.compile(r"demo|fictional|practice|test", re.I)
+VISIBLE_MARKERS = re.compile(r"demo|fictional", re.I)
+
+
+def test_seeded_names_carry_no_visible_marker():
+    """Nothing a user sees says demo; the seed tags, never shown, mark the rows."""
+    names = [seed_demo.KIKUYU_NAME, seed_demo.PRACTICE_NAME, seed_demo.OFFICER["login"],
+             seed_demo.OFFICER["display_name"], seed_demo.SEED_EXTRACTION]
+    for spec in seed_demo.MEMBERS:
+        names += [spec["login"], spec["full_name"], spec["member_no"],
+                  spec["decision"]["officer_notes"], spec["decision"]["member_message"]]
+    for p in seed_demo.DEMO_PEOPLE.values():
+        names += [p["full_name"], p["member_no"], p.get("login", "")]
+    for login, _, display in seed_demo.DEMO_STAFF.values():
+        names += [login, display]
+    for spec in seed_demo.DEMO_APPLICATIONS:
+        names += [str(spec.get("decision", {}).get("officer_notes", ""))]
+    assert not [n for n in names if NAME_MARKERS.search(n)]
+    assert seed_demo.KIKUYU_TAG != seed_demo.PRACTICE_TAG
 
 
 @needs_classifier
 def test_seeded_practice_interview_is_fully_assessable(client, gemini, name):
-    res = seed_demo.seed_practice(name)
+    res = seed_demo.seed_practice(name, tag=name)
     r = client.post(f"/api/interviews/{res.interview_id}/assess")
     assert r.status_code == 201, r.text
     a = r.json()
@@ -218,32 +244,36 @@ def test_cli_practice_only_needs_no_corpus(client, tmp_path):
            "--csv", str(tmp_path / "missing.csv")]
     out = subprocess.run(cmd, capture_output=True, text=True)
     assert out.returncode == 0, out.stderr
-    assert "practice interview" in out.stdout and "demo interview" not in out.stdout
+    assert "practice interview" in out.stdout and "Kikuyu interview" not in out.stdout
 
 
 # --- Demo accounts and loan applications -------------------------------------------
 
-def accounts(tag):
-    """seed_demo's demo people with names unique to this test (tests share a database)."""
-    members = []
-    for spec in seed_demo.MEMBERS:
-        members.append({**spec, "login": f"{spec['login']}.{tag}",
-                        "member_no": f"{spec['member_no']}-{tag}"})
-    return f"demo.officer.{tag}", members
+def accounts(tag, legacy=False):
+    """seed_demo's people with logins, member numbers and seed tags unique to
+    this test (tests share a database); legacy ones only if asked for."""
+    def own(spec):
+        spec = {**spec, "login": f"{spec['login']}.{tag}"}
+        for k in ("legacy_login", "legacy_member_no"):
+            spec.pop(k, None)
+            if legacy:
+                spec[k] = f"old.{k}.{spec['key']}.{tag}"
+        return spec
+    members = [{**own(m), "member_no": f"{m['member_no']}-{tag}"} for m in seed_demo.MEMBERS]
+    return own(seed_demo.OFFICER), members, f"t{tag}"
 
 
-def test_accounts_are_fictional():
+def test_accounts_hold_no_identity_numbers():
     for spec in seed_demo.MEMBERS:
-        assert "(fictional)" in spec["full_name"]
         assert "id_number" not in spec and "national_id" not in spec
 
 
 @needs_classifier
 def test_seed_accounts_creates_logins_and_decided_applications(client, admin_client, capsys):
-    officer, members = accounts(uuid.uuid4().hex[:6])
-    res = seed_demo.seed_accounts(officer, members)
+    officer, members, prefix = accounts(uuid.uuid4().hex[:6])
+    res = seed_demo.seed_accounts(officer, members, prefix)
 
-    assert set(res.passwords) == {officer, *(m["login"] for m in members)}
+    assert set(res.passwords) == {officer["login"], *(m["login"] for m in members)}
     assert all(len(pw) >= 10 for pw in res.passwords.values())
     statuses = {no: status for no, _, status, new in res.applications}
     assert statuses == {members[0]["member_no"]: "approved",
@@ -256,13 +286,14 @@ def test_seed_accounts_creates_logins_and_decided_applications(client, admin_cli
     (mine,) = grace.get("/api/me/applications").json()
     detail = grace.get(f"/api/me/applications/{mine['id']}").json()
     assert detail["status"] == "approved" and detail["approved_amount_kes"] == 40000
-    assert len(detail["reasons"]) == 3 and "Demo record" not in str(detail)
+    assert len(detail["reasons"]) == 3 and not VISIBLE_MARKERS.search(str(detail))
 
     app_id = res.applications[1][1]
     staff = client.get(f"/api/applications/{app_id}").json()
     assert staff["interview"]["mode"] == "practice"                 # out of live statistics
     assert staff["assessment"]["extraction_model"] == seed_demo.SEED_EXTRACTION
-    assert staff["decision"]["decided_by"] == officer
+    assert staff["decision"]["decided_by"] == officer["login"]
+    assert not VISIBLE_MARKERS.search(staff["decision"]["officer_notes"])
     assert staff["comparator"]["conditions"][1]["result"] == "pending"
     st = client.get(f"/api/interviews/{staff['interview_id']}").json()
     assert st["counts"]["transcribed"] == 8 and st["applicant"]["age"] == 35
@@ -270,17 +301,17 @@ def test_seed_accounts_creates_logins_and_decided_applications(client, admin_cli
 
 @needs_classifier
 def test_seed_accounts_is_idempotent_and_keeps_passwords(client):
-    officer, members = accounts(uuid.uuid4().hex[:6])
-    first = seed_demo.seed_accounts(officer, members)
-    again = seed_demo.seed_accounts(officer, members)
+    officer, members, prefix = accounts(uuid.uuid4().hex[:6])
+    first = seed_demo.seed_accounts(officer, members, prefix)
+    again = seed_demo.seed_accounts(officer, members, prefix)
     assert again.passwords == {} and set(again.existing) == set(first.passwords)
     assert [(a[1], a[3]) for a in again.applications] == [(a[1], False) for a in first.applications]
 
 
 def test_seed_accounts_without_classifier_waits_for_the_dashboard(client, monkeypatch, tmp_path):
     monkeypatch.setattr(config, "CLASSIFIER_PATH", tmp_path / "missing.joblib")
-    officer, members = accounts(uuid.uuid4().hex[:6])
-    res = seed_demo.seed_accounts(officer, members)
+    officer, members, prefix = accounts(uuid.uuid4().hex[:6])
+    res = seed_demo.seed_accounts(officer, members, prefix)
     assert not res.assessed
     assert {status for _, _, status, _ in res.applications} == {"interview_complete"}
 
@@ -294,9 +325,77 @@ def test_passwords_are_printed_once_and_never_written(client, tmp_path):
     assert "already exists; password unchanged" in second.stdout
     assert list(tmp_path.iterdir()) == []                          # nothing written to cwd
     stored = b"".join(p.read_bytes() for p in config.DB_PATH.parent.glob(config.DB_PATH.name + "*"))
-    for pw in re.findall(r"^  demo\.\S+\s+(\S+)$", first.stdout, flags=re.M):
+    for _, pw in re.findall(LOGIN_LINE, first.stdout, flags=re.M):
         assert pw not in second.stdout
         assert pw.encode() not in stored                            # only its scrypt hash is
+
+
+def test_admin_sees_display_names_and_roles(client, admin_client):
+    officer, members, prefix = accounts(uuid.uuid4().hex[:6])
+    seed_demo.seed_accounts(officer, members, prefix)
+    users = {u["username"]: u for u in admin_client.get("/api/admin/users").json()}
+    assert (users[officer["login"]]["display_name"], users[officer["login"]]["role"]) == \
+        ("Joseph Mwangi", "officer")
+    assert (users[members[0]["login"]]["display_name"], users[members[0]["login"]]["role"]) == \
+        ("Grace Wanjiku", "member")
+    assert all("seed_tag" not in u for u in users.values())          # the marker stays server-side
+
+
+def test_seeder_refuses_a_login_it_did_not_create(client):
+    from conftest import add_user
+    officer, members, prefix = accounts(uuid.uuid4().hex[:6])
+    add_user(officer["login"], secrets.token_urlsafe(12))             # a real officer by that name
+    with pytest.raises(ValueError, match="did not create"):
+        seed_demo.seed_accounts(officer, members, prefix)
+    with SessionLocal() as db:
+        assert db.scalar(select(User).where(User.seed_tag.startswith(prefix))) is None
+
+
+def test_earlier_rows_are_renamed_in_place(client, monkeypatch):
+    """Rows from before seed_tag (demo. logins, DEMO- numbers, "(fictional)"
+    names) are adopted: renamed, tagged, passwords and applications kept."""
+    from conftest import add_user
+    tag = uuid.uuid4().hex[:6]
+    officer, members, prefix = accounts(tag, legacy=True)
+    old_kikuyu = f"Demo applicant {tag}"
+    monkeypatch.setitem(seed_demo.LEGACY_APPLICANTS, f"{prefix}:kikuyu", old_kikuyu)
+    add_user(officer["legacy_login"], "old-password-1", "officer")
+    with SessionLocal() as db:
+        old = User(username=members[0]["legacy_login"], password_hash="scrypt$x", role="member")
+        db.add(old)
+        db.flush()
+        m = Member(member_no=members[0]["legacy_member_no"], full_name="Grace Njeri (fictional)",
+                   joined_on=date(2019, 3, 1), user_id=old.id)
+        iv = Interview(applicant=Applicant(name="Grace Njeri (fictional)"), mode="practice")
+        db.add_all([m, iv, Interview(applicant=Applicant(name=old_kikuyu), question_set="v1")])
+        db.flush()
+        db.add(LoanApplication(member=m, created_by=old.id, amount_requested_kes=1000, purpose="x",
+                               term_months=6, sacco_savings_kes=500, interview_id=iv.id))
+        db.commit()
+        old_id, member_id, iv_id = old.id, m.id, iv.id
+
+    res = seed_demo.seed_accounts(officer, members[:1], prefix)
+    seed_demo.seed_practice(seed_demo.PRACTICE_NAME, tag=f"{prefix}:practice")
+    with SessionLocal() as db:
+        adopted = seed_demo.open_interview(db, f"{prefix}:kikuyu", seed_demo.KIKUYU_NAME)
+        db.commit()
+        assert adopted is not None and adopted.applicant.name == seed_demo.KIKUYU_NAME
+
+    assert officer["login"] not in res.passwords and members[0]["login"] not in res.passwords
+    assert res.applications == [(members[0]["member_no"], res.applications[0][1], "draft", False)]
+    with SessionLocal() as db:
+        u = db.get(User, old_id)
+        assert (u.username, u.display_name, u.seed_tag) == \
+            (members[0]["login"], "Grace Wanjiku", f"{prefix}:grace")
+        m = db.get(Member, member_id)
+        assert (m.member_no, m.full_name, m.user_id) == (members[0]["member_no"], "Grace Wanjiku", old_id)
+        assert db.get(Interview, iv_id).applicant.name == "Grace Wanjiku"
+        o = db.scalar(select(User).where(User.username == officer["login"]))
+        assert (o.display_name, o.role, auth.verify_password("old-password-1", o.password_hash)) == \
+            ("Joseph Mwangi", "officer", True)
+        renames = db.scalars(select(AuditLog).where(AuditLog.action == "user.rename",
+                                                    AuditLog.entity_id == old_id)).all()
+        assert [r.details["from"] for r in renames] == [members[0]["legacy_login"]]
 
 
 # --- Self-contained demo database (--demo-db) ----------------------------------------
@@ -305,10 +404,10 @@ def demo_cmd(path, *extra):
     return [sys.executable, str(config.SCRIPTS_DIR / "seed_demo.py"), "--demo-db", str(path), *extra]
 
 
-def test_demo_people_are_obviously_fictional():
+def test_demo_people_have_placeholder_phones():
     for p in seed_demo.DEMO_PEOPLE.values():
-        assert p["full_name"].endswith("(fictional)")
-        assert re.fullmatch(r"0700000\d{3}", p["phone"]) and p["member_no"].startswith("DEMO-")
+        assert re.fullmatch(r"0700000\d{3}", p["phone"])
+    assert len({p["member_no"] for p in seed_demo.DEMO_PEOPLE.values()}) == len(seed_demo.DEMO_PEOPLE)
 
 
 def test_demo_answers_say_what_was_scored():
@@ -331,6 +430,22 @@ def test_demo_db_refuses_a_file_the_engine_is_not_on(tmp_path):
     assert "DATABASE_URL" in seed_demo.demo_db_refusal(tmp_path / "demo.db", replace=False)
 
 
+@pytest.mark.parametrize("sql, demo", [
+    ("CREATE TABLE users (username TEXT, seed_tag TEXT); "
+     "INSERT INTO users VALUES ('s.achieng', 'demo-db:admin')", True),
+    ("CREATE TABLE users (username TEXT); INSERT INTO users VALUES ('demo.admin')", True),  # pre-seed_tag
+    ("CREATE TABLE users (username TEXT, seed_tag TEXT); "
+     "INSERT INTO users VALUES ('j.mwangi', 'seed:officer')", False),   # the working database's seed
+    ("CREATE TABLE users (username TEXT, seed_tag TEXT); INSERT INTO users VALUES ('admin', NULL)", False),
+    ("CREATE TABLE notes (x)", False),
+])
+def test_a_demo_database_is_recognised_by_its_marker(tmp_path, sql, demo):
+    con = sqlite3.connect(tmp_path / "x.db")
+    con.executescript(sql)
+    assert seed_demo.is_demo_db(con) is demo
+    con.close()
+
+
 def test_demo_db_refuses_a_database_that_is_not_a_demo(tmp_path):
     other = tmp_path / "other.db"
     sqlite3.connect(other).execute("CREATE TABLE notes (x)").connection.close()
@@ -345,9 +460,9 @@ def test_demo_db_covers_every_status_and_outcome(tmp_path):
     path = tmp_path / "demo.db"
     r = subprocess.run(demo_cmd(path), capture_output=True, text=True, cwd=tmp_path)
     assert r.returncode == 0, r.stderr
-    logins = dict(re.findall(r"^  (demo\.\S+)\s+(\S+)$", r.stdout, flags=re.M))
-    assert set(logins) == {"demo.admin", "demo.officer1", "demo.officer2", "demo.grace",
-                           "demo.peter", "demo.mary", "demo.esther"}
+    logins = dict(re.findall(LOGIN_LINE, r.stdout, flags=re.M))
+    assert set(logins) == {"s.achieng", "j.mwangi", "a.chebet", "g.wanjiku",
+                           "p.kamau", "m.wanjiru", "e.nyambura"}
 
     con = sqlite3.connect(path)
     col = lambda sql: [v for (v,) in con.execute(sql)]  # noqa: E731
@@ -358,7 +473,13 @@ def test_demo_db_covers_every_status_and_outcome(tmp_path):
     assert set(col("SELECT risk_class FROM assessments")) == {"Low", "Medium", "High"}
     assert set(col("SELECT mode FROM interviews")) == {"live"}
     assert set(col("SELECT role FROM users")) == {"admin", "officer", "member"}
-    assert all(n.endswith("(fictional)") for n in col("SELECT full_name FROM members"))
+    assert not [n for n in col("SELECT full_name FROM members") + col("SELECT name FROM applicants")
+                + col("SELECT officer_notes FROM decisions WHERE officer_notes IS NOT NULL")
+                if NAME_MARKERS.search(n)]
+    assert all(t.startswith("demo-db:") for t in col("SELECT seed_tag FROM users")
+               + col("SELECT seed_tag FROM members"))
+    assert dict(con.execute("SELECT username, display_name FROM users WHERE role != 'member'")) == {
+        "s.achieng": "Susan Achieng", "j.mwangi": "Joseph Mwangi", "a.chebet": "Alice Chebet"}
     assert set(col("SELECT extraction_model FROM assessments")) == {seed_demo.SEED_EXTRACTION}
     days = col("SELECT DISTINCT date(created_at) FROM loan_applications")
     assert len(days) >= 8                                   # spread over weeks, not one moment
@@ -373,7 +494,7 @@ def test_demo_db_covers_every_status_and_outcome(tmp_path):
     assert again.returncode != 0 and "--replace" in again.stderr
     rebuilt = subprocess.run(demo_cmd(path, "--replace"), capture_output=True, text=True)
     assert rebuilt.returncode == 0, rebuilt.stderr
-    fresh = dict(re.findall(r"^  (demo\.\S+)\s+(\S+)$", rebuilt.stdout, flags=re.M))
+    fresh = dict(re.findall(LOGIN_LINE, rebuilt.stdout, flags=re.M))
     assert set(fresh) == set(logins) and not set(fresh.values()) & set(logins.values())
     assert sqlite3.connect(path).execute("SELECT count(*) FROM loan_applications").fetchone() \
         == (len(seed_demo.DEMO_APPLICATIONS),)

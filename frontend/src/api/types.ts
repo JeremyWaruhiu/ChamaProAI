@@ -40,6 +40,7 @@ export interface Health {
 export interface Me {
   username: string
   role: Role
+  display_name?: string | null // shown beside the role; null shows the username
 }
 
 export interface Question {
@@ -223,6 +224,27 @@ export interface HeldOut extends Section {
   labels: string[]
 }
 
+export type VersusMetric = 'auc_macro_ovr' | 'macro_f1' | 'high_recall'
+
+/** One metric for both models; difference is RandomForest minus deployed. */
+export interface Versus {
+  deployed: number | null
+  random_forest: number | null
+  difference: number | null
+  better: 'deployed' | 'random_forest' | 'tie' | null
+}
+
+/** The RandomForest trained on the deployed model's split, scored on the same held-out rows. */
+export interface RandomForestSummary extends Section {
+  estimator?: string | null
+  trained_on?: string | null
+  auc_macro_ovr?: number | null
+  macro_f1?: number | null
+  per_class?: Record<string, PrecisionRecall> | null
+  per_class_recall?: Record<string, number> | null
+  versus_deployed?: Partial<Record<VersusMetric, Versus>> | null
+}
+
 export interface ClassBalance extends Section {
   labels: string[]
   train: Record<string, number> | null
@@ -280,7 +302,7 @@ export interface Results {
   model_card?: ModelCard
   held_out?: HeldOut
   class_balance?: ClassBalance
-  random_forest?: Section & { per_class_recall?: Record<string, number> | null }
+  random_forest?: RandomForestSummary
   shap?: ShapSummary
   asr?: AsrComparison
   live: LiveStats
@@ -292,6 +314,7 @@ export interface Results {
 export interface Profile {
   username: string
   role: Role
+  display_name?: string | null
   email: string | null // the Google account linked for sign-in
   google_sign_in_available: boolean
   member: { member_no: string; full_name: string } | null
@@ -457,6 +480,7 @@ export interface MyApplication extends MyApplicationSummary {
 export interface UserOut {
   id: number
   username: string
+  display_name?: string | null
   role: Role
   email: string | null
   is_active: boolean
@@ -469,6 +493,7 @@ export interface UserCreate {
   username: string
   password: string
   role: Role
+  display_name: string | null
   email: string | null
   member_id: number | null
 }

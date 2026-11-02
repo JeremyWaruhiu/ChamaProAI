@@ -26,9 +26,15 @@ router = APIRouter(prefix="/api/admin", responses=ERRORS)
 
 def user_out(db: Session, u: User) -> s.UserOut:
     m = db.scalar(select(Member).where(Member.user_id == u.id))
-    return s.UserOut(id=u.id, username=u.username, role=u.role, email=u.email,
+    return s.UserOut(id=u.id, username=u.username, display_name=u.display_name, role=u.role,
+                     email=u.email,
                      is_active=u.is_active, created_at=u.created_at,
                      member_id=m.id if m else None, member_no=m.member_no if m else None)
+
+
+def clean_name(name: str | None) -> str | None:
+    """Collapse runs of whitespace; blank is no display name."""
+    return " ".join(name.split()) or None if name else None
 
 
 def get_user(db: Session, user_id: int) -> User:
@@ -94,6 +100,7 @@ def create_user(body: s.UserCreate, db: Session = Depends(get_db),
     if db.scalar(select(User.id).where(User.username == body.username)):
         raise HTTPException(409, f"user {body.username!r} already exists")
     u = User(username=body.username, password_hash=hash_password(body.password), role=body.role,
+             display_name=clean_name(body.display_name),
              email=checked_email(db, body.email, None), is_active=True)
     try:
         db.add(u)
@@ -153,6 +160,19 @@ def change_role(user_id: int, body: s.RoleChange, db: Session = Depends(get_db),
         audit.record(db, actor, "user.change_role", "user", u.id, **{"from": u.role, "to": body.role})
         u.role = body.role
         end_sessions(db, u)
+        db.commit()
+    return user_out(db, u)
+
+
+@router.put("/users/{user_id}/display-name", response_model=s.UserOut)
+def set_display_name(user_id: int, body: s.DisplayNameChange, db: Session = Depends(get_db),
+                     actor: User = Depends(require_admin)):
+    u = get_user(db, user_id)
+    name = clean_name(body.display_name)
+    if u.display_name != name:
+        audit.record(db, actor, "user.display_name", "user", u.id,
+                     **{"from": u.display_name, "to": name})
+        u.display_name = name
         db.commit()
     return user_out(db, u)
 

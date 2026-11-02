@@ -12,5 +12,5 @@ export default defineConfig({
     proxy: { '/api': 'http://localhost:8000' },
   },
   // The reduced-motion test reads the global stylesheet; other CSS stays stubbed in tests.
-  test: { css: { include: [/index\.css/] } },
+  test: { css: { include: [/index\.css/, /\.module\.css\?raw/] } },
 })

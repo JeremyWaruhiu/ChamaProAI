@@ -6,7 +6,7 @@ import { ErrorNotice } from '../components/Notice'
 import { useToast } from '../components/toastContext'
 import { Badge, Card, Field, Modal, PageHeader, SkeletonList } from '../components/ui'
 import { useLoad } from '../hooks/useLoad'
-import { ROLE_LABEL, useAuth } from '../lib/auth'
+import { ROLE_LABEL, displayName, useAuth } from '../lib/auth'
 import { formatDate } from '../lib/format'
 import { newUserErrors, type NewUser } from '../lib/forms'
 import { t } from '../strings'
@@ -41,7 +41,7 @@ export function Users() {
             <table className="table">
               <thead>
                 <tr>
-                  <th scope="col">{U.username}</th>
+                  <th scope="col">{U.user}</th>
                   <th scope="col">{U.role}</th>
                   <th scope="col">{U.email}</th>
                   <th scope="col">{U.member}</th>
@@ -53,7 +53,10 @@ export function Users() {
               <tbody>
                 {users.map((u) => (
                   <tr key={u.id}>
-                    <td><strong>{u.username}</strong>{me?.username === u.username && <span className="subtle"> ({U.you})</span>}</td>
+                    <td>
+                      <strong>{displayName(u)}</strong>{me?.username === u.username && <span className="subtle"> ({U.you})</span>}
+                      {u.display_name && <span className={`subtle small ${styles.username}`}>{u.username}</span>}
+                    </td>
                     <td data-label={U.role}><Badge tone={u.role === 'admin' ? 'attention' : u.role === 'member' ? 'info' : 'low'}>{ROLE_LABEL[u.role]}</Badge></td>
                     <td data-label={U.email}>{u.email ?? <span className="subtle">—</span>}</td>
                     <td data-label={U.member} className={styles.mono}>{u.member_no ?? <span className="subtle">—</span>}</td>
@@ -94,7 +97,7 @@ function CreateUser({ open, members, onClose, onCreated }: {
   open: boolean; members: Member[]; onClose: () => void; onCreated: (u: UserOut) => void
 }) {
   const toast = useToast()
-  const empty: NewUser = { username: '', password: '', role: 'officer', email: '', member_id: '' }
+  const empty: NewUser = { username: '', display_name: '', password: '', role: 'officer', email: '', member_id: '' }
   const [u, setU] = useState<NewUser>(empty)
   const [tried, setTried] = useState(false)
   const [busy, setBusy] = useState(false)
@@ -109,7 +112,8 @@ function CreateUser({ open, members, onClose, onCreated }: {
     setBusy(true)
     setError(null)
     try {
-      const out = await api.createUser({ username: u.username.trim(), password: u.password, role: u.role,
+      const out = await api.createUser({ username: u.username.trim(), display_name: u.display_name.trim() || null,
+        password: u.password, role: u.role,
         email: u.email.trim() || null, member_id: u.role === 'member' && u.member_id ? Number(u.member_id) : null })
       toast(U.created_(out.username))
       setU(empty)
@@ -133,6 +137,9 @@ function CreateUser({ open, members, onClose, onCreated }: {
       <form className={styles.modalForm} onSubmit={submit} noValidate>
         <Field id="nu-username" label={U.username} hint={U.usernameHint} error={errors.username}>
           {(p) => <input {...p} className="input" value={u.username} autoComplete="off" onChange={(e) => put('username', e.target.value)} />}
+        </Field>
+        <Field id="nu-display" label={U.displayName} hint={U.displayNameHint} optional>
+          {(p) => <input {...p} className="input" value={u.display_name} autoComplete="off" maxLength={120} onChange={(e) => put('display_name', e.target.value)} />}
         </Field>
         <Field id="nu-password" label={U.password} hint={U.passwordHint} error={errors.password}>
           {(p) => <input {...p} className="input" type="password" value={u.password} autoComplete="new-password" onChange={(e) => put('password', e.target.value)} />}
@@ -167,6 +174,7 @@ function ManageUser({ user, members, self, onClose, onChanged }: {
   const [error, setError] = useState<ApiError | null>(null)
   const [password, setPassword] = useState('')
   const [email, setEmail] = useState(user.email ?? '')
+  const [name, setName] = useState(user.display_name ?? '')
   const [memberId, setMemberId] = useState(user.member_id ? String(user.member_id) : '')
 
   async function run(what: string, call: () => Promise<UserOut>, done: string) {
@@ -204,6 +212,16 @@ function ManageUser({ user, members, self, onClose, onChanged }: {
           {spin('active')} {user.is_active ? U.deactivate : U.activate}
         </button>
       </div>
+
+      <form className={styles.manageRow} onSubmit={(e) => { e.preventDefault(); run('name', () => api.setDisplayName(user.id, name || null), U.displayNameChanged(user.username)) }}>
+        <label className="field" htmlFor="mu-name">
+          <span className="field-label">{U.changeDisplayName}</span>
+          <input id="mu-name" className="input" value={name} maxLength={120} autoComplete="off" onChange={(e) => setName(e.target.value)} />
+        </label>
+        <button type="submit" className="btn btn-secondary" disabled={busy !== null || name.trim() === (user.display_name ?? '')}>
+          {spin('name')} {t.common.save}
+        </button>
+      </form>
 
       <form className={styles.manageRow} onSubmit={(e) => { e.preventDefault(); if (password.length >= 10) run('password', () => api.resetPassword(user.id, password), U.passwordReset(user.username)) }}>
         <label className="field" htmlFor="mu-password">

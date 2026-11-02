@@ -29,6 +29,16 @@ describe('staff layout', () => {
     expect(signOut).toHaveBeenCalledOnce()
   })
 
+  it('shows the display name with the role, and the username inside the menu', () => {
+    staff({ username: 'j.mwangi', role: 'officer', display_name: 'Joseph Mwangi' })
+    const button = screen.getByRole('button', { name: 'Account menu for Joseph Mwangi' })
+    expect(button.textContent).toContain('Joseph Mwangi')
+    expect(button.textContent).toContain('Loan officer')
+    expect(button.textContent).not.toContain('j.mwangi')
+    fireEvent.click(button)
+    expect(screen.getByRole('menu').textContent).toContain('j.mwangi')
+  })
+
   it('shows the administration section to an admin only', () => {
     staff({ username: 'admin', role: 'admin' })
     const nav = screen.getAllByRole('navigation', { name: 'Main navigation' })[0]

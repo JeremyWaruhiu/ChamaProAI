@@ -48,7 +48,7 @@ export function InterviewList() {
         )}
         {data && data.length > 0 && shown.length === 0 && <EmptyState icon="search" title={T.noMatch} />}
         {shown.length > 0 && (
-          <div className="table-wrap">
+          <div className={`table-wrap ${styles.stack}`}>
             <table className="table">
               <thead>
                 <tr>
@@ -70,15 +70,15 @@ export function InterviewList() {
                         {iv.mode === 'practice' && <PracticeBadge />}
                       </div>
                     </td>
-                    <td className="num">{formatDate(iv.created_at)}</td>
-                    <td>
+                    <td className="num" data-label={T.date}>{formatDate(iv.created_at)}</td>
+                    <td data-label={T.answers}>
                       <span className="num"><strong>{iv.responses_recorded}</strong> <span className="subtle">/ {iv.questions_total}</span></span>
                       <span className={styles.meter} aria-hidden>
                         <span style={{ width: `${(100 * iv.responses_recorded) / iv.questions_total}%` }} />
                       </span>
                     </td>
-                    <td><Badge tone={interviewTone(iv)}>{interviewStatusText(iv)}</Badge></td>
-                    <td>{iv.risk_class ? <RiskBadge risk={iv.risk_class} /> : <span className="subtle">{t.risk.notAssessed}</span>}</td>
+                    <td data-label={T.status}><Badge tone={interviewTone(iv)}>{interviewStatusText(iv)}</Badge></td>
+                    <td data-label={T.riskClass}>{iv.risk_class ? <RiskBadge risk={iv.risk_class} /> : <span className="subtle">{t.risk.notAssessed}</span>}</td>
                   </tr>
                 ))}
               </tbody>

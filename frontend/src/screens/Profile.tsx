@@ -5,7 +5,7 @@ import { ErrorNotice } from '../components/Notice'
 import { useToast } from '../components/toastContext'
 import { Badge, Card, DetailList, Field, Modal, PageHeader, SkeletonPage } from '../components/ui'
 import { useLoad } from '../hooks/useLoad'
-import { ROLE_LABEL, useAuth } from '../lib/auth'
+import { ROLE_LABEL, displayName, useAuth } from '../lib/auth'
 import { formatDate } from '../lib/format'
 import { passwordErrors, type PasswordForm } from '../lib/forms'
 import { t } from '../strings'
@@ -27,9 +27,9 @@ export function Profile() {
       <div className={styles.grid}>
         <Card title={P.account}>
           <div className={styles.who}>
-            <span className={styles.avatar} aria-hidden>{(me.member?.full_name ?? me.username).slice(0, 1).toUpperCase()}</span>
+            <span className={styles.avatar} aria-hidden>{(me.member?.full_name ?? displayName(me)).slice(0, 1).toUpperCase()}</span>
             <div>
-              <p className={styles.name}>{me.member?.full_name ?? me.username}</p>
+              <p className={styles.name}>{me.member?.full_name ?? displayName(me)}</p>
               <Badge tone={me.role === 'admin' ? 'attention' : me.role === 'member' ? 'info' : 'low'}>{ROLE_LABEL[me.role]}</Badge>
             </div>
           </div>

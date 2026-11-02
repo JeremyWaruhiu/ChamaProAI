@@ -94,7 +94,8 @@ def test_member_without_a_record_sees_nothing(client):
     add_user("m_unlinked", PASSWORDS["m_unlinked"], role="member")
     c = signed_in("m_unlinked")
     assert c.get("/api/me/applications").json() == []
-    assert c.get("/api/auth/me").json() == {"username": "m_unlinked", "role": "member"}
+    assert c.get("/api/auth/me").json() == {"username": "m_unlinked", "role": "member",
+                                                 "display_name": None}
 
 
 def test_member_view_has_no_notes_numbers_or_feature_names(two_members):

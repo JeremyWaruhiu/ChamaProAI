@@ -1,20 +1,29 @@
 """Create the demo interviews without re-running Whisper.
 
-1. The Kikuyu demo (question set v1, live): reads the saved ASR output
+1. The Kikuyu interview (question set v1, live): reads the saved ASR output
    (data/asr_paza.csv) and the matching clips in data/audio_16k/, and writes
    one interview whose 40 responses are all marked transcribed.
 2. An English practice interview (question set v2, practice) for a fictional
    applicant: the applicant form filled in and all eight answers typed. Needs
    no audio, so it can be seeded on any machine.
-3. Demo accounts: one loan officer and two fictional members with their own
-   logins, each member with a loan application on a typed, assessable
-   practice interview. With the classifier present (models/), both are
-   assessed with fixed features (no Gemini, no network; the assessment says
-   so in extraction_model) and decided by the demo officer: Grace's is
-   approved, Peter's needs two guarantors, which he can add after signing in.
-   Without the classifier they wait at "interview completed" for the
-   dashboard. Passwords are random, printed once here and never written to
-   a file; a re-run leaves existing logins and their passwords alone.
+3. Accounts: one loan officer (j.mwangi) and two fictional members (g.wanjiku,
+   p.kamau) with their own logins, each member with a loan application on a
+   typed, assessable practice interview. With the classifier present
+   (models/), both are assessed with fixed features (no Gemini, no network;
+   the assessment says so in extraction_model) and decided by the officer:
+   Grace's is approved, Peter's needs two guarantors, which he can add after
+   signing in. Without the classifier they wait at "interview completed" for
+   the dashboard. Passwords are random, printed once here and never written
+   to a file; a re-run leaves existing logins and their passwords alone.
+
+Every person is invented, but nothing on screen says so: names, logins and
+notes read like a working SACCO's. The seeder finds its own rows again by
+seed_tag (users, members, applicants), a column the API never returns, so it
+never mistakes a real account for its own: a login or member number that
+some other account already holds stops the run before anything is written.
+Rows from earlier versions, which carried "demo." logins, DEMO- member
+numbers and "(fictional)" names, are renamed in place on the next run;
+their assessments and decisions are immutable and keep what they recorded.
 
 The interviews are ready for review and assessment in the dashboard.
 
@@ -33,11 +42,11 @@ rebuilds an earlier one only with --replace (new passwords, printed once).
     python scripts/seed_demo.py --demo-db data/demo.db
     python scripts/seed_demo.py --demo-db data/demo.db --replace
 
-Idempotent: it ensures one open demo interview holds every row of the CSV,
+Idempotent: it ensures one open Kikuyu interview holds every row of the CSV,
 and one open practice interview holds every typed answer.
 A second run changes nothing; a run after a response was deleted restores
-only that response; a run after the demo was assessed (assessments are
-immutable) starts a fresh demo interview.
+only that response; a run after the interview was assessed (assessments are
+immutable) starts a fresh one.
 
 Audio is copied into data/uploads/<interview_id>/ like any upload, so
 re-recording in the dashboard deletes the copy, never the corpus file.
@@ -71,12 +80,21 @@ from chamapro.api.db import (APPLICATION_STATUSES, Applicant, Assessment, Guaran
 
 import score_interview  # scripts/, next to this file
 
-DEMO_NAME = "Demo applicant (S01)"
+# seed_tag values: "<prefix>:<key>", prefix SEED in the working database and
+# DEMO_DB in a --demo-db file. The names people see carry no marker.
+SEED, DEMO_DB = "seed", "demo-db"
+KIKUYU_TAG, PRACTICE_TAG = f"{SEED}:kikuyu", f"{SEED}:practice"
+# The worksheet's speaker introduces herself as Wanjiru from Githunguri; the
+# surname is invented.
+KIKUYU_NAME = "Wanjiru Njoroge"
 # The model that produced data/asr_paza.csv, recorded as each row's provenance.
 CSV_ASR_MODEL = "microsoft/paza-whisper-large-v3-turbo"
 
 # The practice applicant is invented: no real person's details.
-PRACTICE_NAME = "Practice: Mary Wambui (fictional)"
+PRACTICE_NAME = "Mary Wambui"
+# Earlier versions found these applicants by name; such rows are adopted.
+LEGACY_APPLICANTS = {KIKUYU_TAG: "Demo applicant (S01)",
+                     PRACTICE_TAG: "Practice: Mary Wambui (fictional)"}
 PRACTICE_FORM = {"age": 38, "sex": "female", "education": 4,   # Secondary completed
                  "marital_status": "married"}
 # One typed English answer per v2 question, keyed by its order.
@@ -126,18 +144,34 @@ def read_rows(csv_path: Path, audio_dir: Path) -> list[dict]:
     return rows
 
 
-def seed(csv_path: Path, audio_dir: Path, name: str = DEMO_NAME,
+def adopt_applicants(db, tag: str, name: str) -> None:
+    """Tag and rename the applicants an earlier version marked by name alone."""
+    legacy = LEGACY_APPLICANTS.get(tag)
+    if legacy is None:
+        return
+    for a in db.scalars(select(Applicant).where(Applicant.name == legacy,
+                                                Applicant.seed_tag.is_(None))):
+        a.name, a.seed_tag = name, tag
+
+
+def open_interview(db, tag: str, name: str, *where) -> Interview | None:
+    """The newest open interview of the seeder's applicant tagged `tag`."""
+    adopt_applicants(db, tag, name)
+    return db.scalars(select(Interview).join(Applicant)
+                      .where(Applicant.seed_tag == tag, Interview.status == "open", *where)
+                      .order_by(Interview.id.desc())).first()
+
+
+def seed(csv_path: Path, audio_dir: Path, name: str = KIKUYU_NAME, tag: str = KIKUYU_TAG,
          asr_model: str = CSV_ASR_MODEL) -> Seeded:
     rows = read_rows(csv_path, audio_dir)
     init_db()
     copied: list[str] = []
     with SessionLocal() as db:
-        iv = db.scalars(select(Interview).join(Applicant)
-                        .where(Applicant.name == name, Interview.status == "open")
-                        .order_by(Interview.id.desc())).first()
+        iv = open_interview(db, tag, name)
         created = iv is None
         if created:
-            iv = Interview(applicant=Applicant(name=name), question_set="v1",
+            iv = Interview(applicant=Applicant(name=name, seed_tag=tag), question_set="v1",
                            language="kik", mode="live")
             db.add(iv)
             db.flush()
@@ -173,7 +207,7 @@ def seed(csv_path: Path, audio_dir: Path, name: str = DEMO_NAME,
         return Seeded(iv.id, created, len(todo), len(have) + len(todo))
 
 
-def seed_practice(name: str = PRACTICE_NAME) -> Seeded:
+def seed_practice(name: str = PRACTICE_NAME, tag: str = PRACTICE_TAG) -> Seeded:
     """The English practice interview: form filled, every v2 answer typed."""
     questions = {q["order"]: q for q in json.loads(config.QUESTIONS_PATH.read_text(encoding="utf-8"))
                  if q["version"] == "v2"}
@@ -181,13 +215,11 @@ def seed_practice(name: str = PRACTICE_NAME) -> Seeded:
         raise ValueError("practice answers do not match question set v2")
     init_db()
     with SessionLocal() as db:
-        iv = db.scalars(select(Interview).join(Applicant)
-                        .where(Applicant.name == name, Interview.status == "open",
-                               Interview.mode == "practice")
-                        .order_by(Interview.id.desc())).first()
+        iv = open_interview(db, tag, name, Interview.mode == "practice")
         created = iv is None
         if created:
-            iv = Interview(applicant=Applicant(name=name, **PRACTICE_FORM), question_set="v2",
+            iv = Interview(applicant=Applicant(name=name, seed_tag=tag, **PRACTICE_FORM),
+                           question_set="v2",
                            language="en", mode="practice")
             db.add(iv)
             db.flush()
@@ -201,13 +233,16 @@ def seed_practice(name: str = PRACTICE_NAME) -> Seeded:
         return Seeded(iv.id, created, len(todo), len(have) + len(todo))
 
 
-# --- Demo accounts and loan applications (all fictional) ----------------------
+# --- Accounts and loan applications (all fictional) ---------------------------
 
-OFFICER = "demo.officer"
+# key: the seed_tag suffix; legacy: what an earlier version called the row.
+OFFICER = {"key": "officer", "login": "j.mwangi", "display_name": "Joseph Mwangi",
+           "legacy_login": "demo.officer"}
 # Recorded on each seeded assessment instead of a Gemini model name.
-SEED_EXTRACTION = "seed_demo.py: fixed features, no extraction model"
+SEED_EXTRACTION = "fixed features; no extraction model"
 MEMBERS = [
-    {"login": "demo.grace", "member_no": "DEMO-001", "full_name": "Grace Njeri (fictional)",
+    {"key": "grace", "login": "g.wanjiku", "member_no": "M-9001", "full_name": "Grace Wanjiku",
+     "legacy_login": "demo.grace", "legacy_member_no": "DEMO-001",
      "phone": "0700000001", "joined_on": date(2019, 3, 1),
      "form": {"age": 41, "sex": "female", "education": 4, "marital_status": "married"},
      "answers": {
@@ -233,10 +268,11 @@ MEMBERS = [
      "application": {"amount_requested_kes": 40000, "purpose": "A second dairy cow",
                      "term_months": 12, "sacco_savings_kes": 20000},
      "decision": {"outcome": "approve",
-                  "officer_notes": "Demo record (fictional member). Repaid an earlier loan on time.",
+                  "officer_notes": "Repaid an earlier loan on time.",
                   "member_message": "Your loan of KSh 40,000 has been approved. Please visit the "
                                     "branch to sign the loan form."}},
-    {"login": "demo.peter", "member_no": "DEMO-002", "full_name": "Peter Kamau (fictional)",
+    {"key": "peter", "login": "p.kamau", "member_no": "M-9002", "full_name": "Peter Kamau",
+     "legacy_login": "demo.peter", "legacy_member_no": "DEMO-002",
      "phone": "0700000002", "joined_on": date(2023, 5, 1),
      "form": {"age": 35, "sex": "male", "education": 3, "marital_status": "married"},
      "answers": {
@@ -259,8 +295,7 @@ MEMBERS = [
      "application": {"amount_requested_kes": 60000, "purpose": "School fees and farm inputs",
                      "term_months": 18, "sacco_savings_kes": 25000},
      "decision": {"outcome": "approve_with_guarantor", "guarantors_required": 2,
-                  "officer_notes": "Demo record (fictional member). First SACCO loan; "
-                                   "ask for guarantors.",
+                  "officer_notes": "First SACCO loan; ask for guarantors.",
                   "member_message": "Your loan can be approved once two guarantors who are SACCO "
                                     "members have been confirmed. Please add them here."}},
 ]
@@ -274,13 +309,32 @@ class AccountsSeeded:
     assessed: bool = False
 
 
-def ensure_user(db, username: str, role: str, out: AccountsSeeded) -> User:
-    user = db.scalar(select(User).where(User.username == username))
+def taken(db, model, column, value) -> None:
+    """Refuse a login or member number that an account the seeder did not make holds."""
+    if db.scalar(select(model.id).where(column == value)) is not None:
+        raise ValueError(f"{value!r} already belongs to a {model.__tablename__[:-1]} that "
+                         f"seed_demo.py did not create; nothing written")
+
+
+def ensure_user(db, username: str, role: str, out: AccountsSeeded, tag: str,
+                display_name: str | None = None, legacy: str | None = None) -> User:
+    """The seeder's login tagged `tag`: found by the tag, else an earlier
+    version's login `legacy` renamed in place (password kept), else created."""
+    user = db.scalar(select(User).where(User.seed_tag == tag))
+    if user is None and legacy is not None:
+        user = db.scalar(select(User).where(User.username == legacy, User.seed_tag.is_(None)))
+        if user is not None:
+            taken(db, User, User.username, username)
+            audit.record(db, None, "user.rename", "user", user.id,
+                         **{"from": user.username, "to": username}, via="seed_demo.py")
+            user.username, user.display_name, user.seed_tag = username, display_name, tag
     if user is not None:
-        out.existing.append(username)
+        out.existing.append(user.username)
         return user
+    taken(db, User, User.username, username)
     password = secrets.token_urlsafe(12)
-    user = User(username=username, password_hash=hash_password(password), role=role)
+    user = User(username=username, password_hash=hash_password(password), role=role,
+                display_name=display_name, seed_tag=tag)
     db.add(user)
     db.flush()
     audit.record(db, None, "user.create", "user", user.id, role=role, via="seed_demo.py")
@@ -310,12 +364,27 @@ def seed_interview(db, spec: dict, officer: User, mode: str = "practice",
     return iv
 
 
-def ensure_member(db, spec: dict, officer: User, user: User | None) -> Member:
-    """The member record numbered spec["member_no"], linked to user if given."""
-    member = db.scalar(select(Member).where(Member.member_no == spec["member_no"]))
+def ensure_member(db, spec: dict, officer: User, user: User | None, tag: str) -> Member:
+    """The seeder's member record tagged `tag`, linked to user if given: found
+    by the tag, else an earlier version's record renamed in place, else created."""
+    member = db.scalar(select(Member).where(Member.seed_tag == tag))
+    if member is None and (legacy := spec.get("legacy_member_no")) is not None:
+        member = db.scalar(select(Member).where(Member.member_no == legacy,
+                                                Member.seed_tag.is_(None)))
+        if member is not None:
+            taken(db, Member, Member.member_no, spec["member_no"])
+            # The applicant on each of its interviews carried the old name too.
+            for app in member.applications:
+                if app.interview is not None and app.interview.applicant.name == member.full_name:
+                    app.interview.applicant.name = spec["full_name"]
+            audit.record(db, officer, "member.update", "member", member.id,
+                         fields=["member_no", "full_name"], via="seed_demo.py")
+            member.member_no, member.full_name, member.seed_tag = \
+                spec["member_no"], spec["full_name"], tag
     if member is None:
+        taken(db, Member, Member.member_no, spec["member_no"])
         member = Member(member_no=spec["member_no"], full_name=spec["full_name"],
-                        phone=spec["phone"], joined_on=spec["joined_on"])
+                        phone=spec["phone"], joined_on=spec["joined_on"], seed_tag=tag)
         db.add(member)
         db.flush()
         audit.record(db, officer, "member.create", "member", member.id, via="seed_demo.py")
@@ -360,15 +429,20 @@ def seed_assessment(db, iv: Interview, spec: dict, officer: User) -> None:
     loans.sync_with_interview(db, iv, officer)
 
 
-def seed_accounts(officer_login: str = OFFICER, members: list[dict] = MEMBERS) -> AccountsSeeded:
+def seed_accounts(officer_spec: dict = OFFICER, members: list[dict] = MEMBERS,
+                  prefix: str = SEED) -> AccountsSeeded:
     out = AccountsSeeded()
     out.assessed = config.CLASSIFIER_PATH.exists() and config.CLASSIFIER_META_PATH.exists()
     init_db()
     with SessionLocal() as db:
-        officer = ensure_user(db, officer_login, "officer", out)
+        officer = ensure_user(db, officer_spec["login"], "officer", out,
+                              f"{prefix}:{officer_spec['key']}", officer_spec["display_name"],
+                              officer_spec.get("legacy_login"))
         for spec in members:
-            user = ensure_user(db, spec["login"], "member", out)
-            member = ensure_member(db, spec, officer, user)
+            tag = f"{prefix}:{spec['key']}"
+            user = ensure_user(db, spec["login"], "member", out, tag, spec["full_name"],
+                               spec.get("legacy_login"))
+            member = ensure_member(db, spec, officer, user, tag)
             app = db.scalar(select(LoanApplication).where(LoanApplication.member_id == member.id)
                             .order_by(LoanApplication.id))
             if app is not None:
@@ -388,7 +462,7 @@ def seed_accounts(officer_login: str = OFFICER, members: list[dict] = MEMBERS) -
 
 def report_accounts(res: AccountsSeeded) -> None:
     if res.passwords:
-        print("demo logins created; passwords are shown once and not saved anywhere:")
+        print("logins created; passwords are shown once and not saved anywhere:")
         for name, pw in res.passwords.items():
             print(f"  {name:14} {pw}")
     for name in res.existing:
@@ -402,12 +476,15 @@ def report_accounts(res: AccountsSeeded) -> None:
 
 # --- Self-contained demo database (--demo-db) ----------------------------------------
 
-DEMO_STAFF = [("demo.admin", "admin"), ("demo.officer1", "officer"), ("demo.officer2", "officer")]
-# Every person is invented: "(fictional)" is part of each name, every phone
-# number is 0700 000 xxx, and every member number starts DEMO-.
-# joined: months of membership before today; login: members who can sign in.
+# key: (login, role, display name). Each row's seed_tag is "demo-db:<key>".
+DEMO_STAFF = {"admin": ("s.achieng", "admin", "Susan Achieng"),
+              "officer1": ("j.mwangi", "officer", "Joseph Mwangi"),
+              "officer2": ("a.chebet", "officer", "Alice Chebet")}
+# Every person is invented (see the module docstring); every phone number is
+# 0700 000 xxx. joined: months of membership before today; login: members who
+# can sign in.
 DEMO_PEOPLE = {
-    "grace": {"full_name": "Grace Njeri (fictional)", "joined": 70, "login": "demo.grace",
+    "grace": {"full_name": "Grace Wanjiku", "joined": 70, "login": "g.wanjiku",
               "form": {"age": 48, "sex": "female", "education": 6, "marital_status": "married"},
               "features": {"household_size": 4, "children": 2, "children_under5": 0,
                            "children_in_school": 2, "monthly_income_kes": 45000,
@@ -417,7 +494,7 @@ DEMO_PEOPLE = {
                            "purchases_last_12m": {"livestock": 1, "farm_equipment": 1},
                            "lost_as_guarantor": {"sacco": 0, "chama": 0},
                            "sacco_loan_use": 1, "chama_loan_use": 1}},
-    "peter": {"full_name": "Peter Kamau (fictional)", "joined": 30, "login": "demo.peter",
+    "peter": {"full_name": "Peter Kamau", "joined": 30, "login": "p.kamau",
               "form": {"age": 35, "sex": "male", "education": 3, "marital_status": "married"},
               "features": {"household_size": 6, "children": 4, "children_under5": 1,
                            "children_in_school": 3, "monthly_income_kes": 14000,
@@ -426,7 +503,7 @@ DEMO_PEOPLE = {
                            "non_monetary_savings": {"livestock": 1}, "purchases_last_12m": {},
                            "lost_as_guarantor": {"sacco": 0, "chama": 1},
                            "sacco_loan_use": 0, "chama_loan_use": 2}},
-    "mary": {"full_name": "Mary Wanjiku (fictional)", "joined": 26, "login": "demo.mary",
+    "mary": {"full_name": "Mary Wanjiru", "joined": 26, "login": "m.wanjiru",
              "form": {"age": 33, "sex": "female", "education": 4, "marital_status": "married"},
              "features": {"household_size": 5, "children": 3, "children_under5": 1,
                           "children_in_school": 2, "monthly_income_kes": 18000,
@@ -434,7 +511,7 @@ DEMO_PEOPLE = {
                           "non_monetary_savings": {"livestock": 1}, "purchases_last_12m": {},
                           "lost_as_guarantor": {"sacco": 0, "chama": 0},
                           "sacco_loan_use": 0, "chama_loan_use": 1}},
-    "john": {"full_name": "John Mwangi (fictional)", "joined": 96,
+    "john": {"full_name": "John Kariuki", "joined": 96,
              "form": {"age": 62, "sex": "male", "education": 5, "marital_status": "married"},
              "features": {"household_size": 2, "children": 0, "children_under5": 0,
                           "children_in_school": 0, "monthly_income_kes": 30000,
@@ -443,7 +520,7 @@ DEMO_PEOPLE = {
                           "non_monetary_savings": {"land_or_buildings": 1, "agroforestry": 1},
                           "purchases_last_12m": {}, "lost_as_guarantor": {"sacco": 0, "chama": 0},
                           "sacco_loan_use": 2, "chama_loan_use": 0}},
-    "faith": {"full_name": "Faith Wairimu (fictional)", "joined": 50,
+    "faith": {"full_name": "Faith Wairimu", "joined": 50,
               "form": {"age": 67, "sex": "female", "education": 0, "marital_status": "widowed"},
               "features": {"household_size": 3, "children": 1, "children_under5": 1,
                            "children_in_school": 0, "monthly_income_kes": 4000,
@@ -452,7 +529,7 @@ DEMO_PEOPLE = {
                            "non_monetary_savings": {}, "purchases_last_12m": {},
                            "lost_as_guarantor": {"sacco": 0, "chama": 1},
                            "sacco_loan_use": 0, "chama_loan_use": 2}},
-    "samuel": {"full_name": "Samuel Otieno (fictional)", "joined": 14,
+    "samuel": {"full_name": "Samuel Otieno", "joined": 14,
                "form": {"age": 31, "sex": "male", "education": 2, "marital_status": "single"},
                "features": {"household_size": 3, "children": 1, "children_under5": 1,
                             "children_in_school": 0, "monthly_income_kes": 9000,
@@ -462,7 +539,7 @@ DEMO_PEOPLE = {
                             "lost_as_guarantor": {"sacco": 0, "chama": 0},
                             "sacco_loan_use": 0, "chama_loan_use": 0}},
     # Joined four months ago: short of the SACCO rule's six months' membership.
-    "esther": {"full_name": "Esther Nyambura (fictional)", "joined": 4, "login": "demo.esther",
+    "esther": {"full_name": "Esther Nyambura", "joined": 4, "login": "e.nyambura",
                "form": {"age": 29, "sex": "female", "education": 1, "marital_status": "divorced"},
                "features": {"household_size": 4, "children": 3, "children_under5": 2,
                             "children_in_school": 1, "monthly_income_kes": 7000,
@@ -470,7 +547,7 @@ DEMO_PEOPLE = {
                             "non_monetary_savings": {}, "purchases_last_12m": {},
                             "lost_as_guarantor": {"sacco": 1, "chama": 0},
                             "sacco_loan_use": 0, "chama_loan_use": 2}},
-    "joseph": {"full_name": "Joseph Kiprono (fictional)", "joined": 20,
+    "joseph": {"full_name": "Joseph Kiprono", "joined": 20,
                "form": {"age": 27, "sex": "male", "education": 3, "marital_status": "single"},
                "features": {"household_size": 2, "children": 0, "children_under5": 0,
                             "children_in_school": 0, "monthly_income_kes": 5000,
@@ -478,7 +555,7 @@ DEMO_PEOPLE = {
                             "non_monetary_savings": {}, "purchases_last_12m": {},
                             "lost_as_guarantor": {"sacco": 0, "chama": 1},
                             "sacco_loan_use": 0, "chama_loan_use": 0}},
-    "david": {"full_name": "David Mutua (fictional)", "joined": 40,
+    "david": {"full_name": "David Mutua", "joined": 40,
               "form": {"age": 39, "sex": "male", "education": 8, "marital_status": "married"},
               "features": {"household_size": 5, "children": 3, "children_under5": 1,
                            "children_in_school": 2, "monthly_income_kes": 60000,
@@ -489,95 +566,94 @@ DEMO_PEOPLE = {
                            "sacco_loan_use": 1, "chama_loan_use": 0}},
 }
 for _no, _p in enumerate(DEMO_PEOPLE.values(), 1):
-    _p.update(member_no=f"DEMO-{_no:03d}", phone=f"0700000{_no:03d}")
+    _p.update(member_no=f"M-{1000 + _no}", phone=f"0700000{_no:03d}")
 
-NOTE = "Demo record (fictional member). "
 # Oldest first. answered: typed answers (None: no interview yet); assess: score
 # it; guarantors: (person, verdict) after the member submits them, verdict
 # "pending" left for an officer to review in the dashboard. Comments give the
 # model's risk class for these fixed features.
 DEMO_APPLICATIONS = [
-    {"person": "joseph", "days_ago": 58, "officer": "demo.officer2",          # High
+    {"person": "joseph", "days_ago": 58, "officer": "officer2",          # High
      "fields": {"amount_requested_kes": 50000, "purpose": "Stock for a mitumba stall",
                 "term_months": 12, "sacco_savings_kes": 6000},
      "answered": 8, "assess": True,
      "decision": {"outcome": "decline",
-                  "officer_notes": NOTE + "Irregular income; savings cover a fifth of the amount.",
+                  "officer_notes": "Irregular income; savings cover a fifth of the amount.",
                   "member_message": "We cannot approve this loan now. Building your SACCO "
                                     "savings for six months will help a future application."}},
-    {"person": "grace", "days_ago": 52, "officer": "demo.officer1",           # Low
+    {"person": "grace", "days_ago": 52, "officer": "officer1",           # Low
      "fields": {"amount_requested_kes": 40000, "purpose": "A second dairy cow",
                 "term_months": 12, "sacco_savings_kes": 20000},
      "answered": 8, "assess": True,
      "decision": {"outcome": "approve",
-                  "officer_notes": NOTE + "Repaid an earlier SACCO loan on time.",
+                  "officer_notes": "Repaid an earlier SACCO loan on time.",
                   "member_message": "Your loan of KSh 40,000 has been approved. Please visit "
                                     "the branch to sign the loan form."}},
-    {"person": "peter", "days_ago": 45, "officer": "demo.officer1",           # Medium
+    {"person": "peter", "days_ago": 45, "officer": "officer1",           # Medium
      "fields": {"amount_requested_kes": 60000, "purpose": "School fees and farm inputs",
                 "term_months": 18, "sacco_savings_kes": 25000},
      "answered": 8, "assess": True,
      "decision": {"outcome": "approve_with_guarantor", "guarantors_required": 2,
-                  "officer_notes": NOTE + "First SACCO loan; ask for guarantors.",
+                  "officer_notes": "First SACCO loan; ask for guarantors.",
                   "member_message": "Your loan can be approved once two guarantors who are "
                                     "SACCO members have been confirmed. Please add them here."},
      "guarantors": [("john", "verified"), ("david", "verified")]},
-    {"person": "john", "days_ago": 38, "officer": "demo.officer2",            # Low
+    {"person": "john", "days_ago": 38, "officer": "officer2",            # Low
      "fields": {"amount_requested_kes": 150000, "purpose": "Roof and water tank for rental rooms",
                 "term_months": 24, "sacco_savings_kes": 40000},
      "answered": 8, "assess": True,
      "decision": {"outcome": "approve_reduced", "approved_amount_kes": 120000,
-                  "officer_notes": NOTE + "Reduced to three times savings.",
+                  "officer_notes": "Reduced to three times savings.",
                   "member_message": "We have approved KSh 120,000, three times your SACCO "
                                     "savings. Please visit the branch to sign."}},
-    {"person": "faith", "days_ago": 30, "officer": "demo.officer1",           # Medium
+    {"person": "faith", "days_ago": 30, "officer": "officer1",           # Medium
      "fields": {"amount_requested_kes": 20000, "purpose": "Medical bills",
                 "term_months": 6, "sacco_savings_kes": 12000},
      "answered": 8, "assess": True,
      "decision": {"outcome": "refer",
-                  "officer_notes": NOTE + "Refer to the credit committee: income is mostly "
+                  "officer_notes": "Refer to the credit committee: income is mostly "
                                           "transfers from family.",
                   "member_message": "Your application has gone to the credit committee, "
                                     "which meets next week."}},
-    {"person": "samuel", "days_ago": 24, "officer": "demo.officer2",          # High
+    {"person": "samuel", "days_ago": 24, "officer": "officer2",          # High
      "fields": {"amount_requested_kes": 80000, "purpose": "A second-hand motorbike",
                 "term_months": 18, "sacco_savings_kes": 10000},
      "answered": 8, "assess": True,
      "decision": {"outcome": "decline",
-                  "officer_notes": NOTE + "Amount is eight times savings.",
+                  "officer_notes": "Amount is eight times savings.",
                   "member_message": "We cannot approve this loan. A smaller amount, up to three "
                                     "times your savings, could be considered."}},
-    {"person": "esther", "days_ago": 14, "officer": "demo.officer1",          # Medium
+    {"person": "esther", "days_ago": 14, "officer": "officer1",          # Medium
      "fields": {"amount_requested_kes": 15000, "purpose": "Stock for a vegetable stall",
                 "term_months": 6, "sacco_savings_kes": 8000},
      "answered": 8, "assess": True,
      "decision": {"outcome": "approve_with_guarantor", "guarantors_required": 2,
-                  "officer_notes": NOTE + "New member; guarantors needed.",
+                  "officer_notes": "New member; guarantors needed.",
                   "member_message": "Your loan can be approved once two guarantors who are "
                                     "SACCO members have been confirmed."},
      "guarantors": [("mary", "verified"), ("joseph", "rejected")]},
-    {"person": "mary", "days_ago": 9, "officer": "demo.officer2",             # Medium
+    {"person": "mary", "days_ago": 9, "officer": "officer2",             # Medium
      "fields": {"amount_requested_kes": 35000, "purpose": "A sewing machine for the shop",
                 "term_months": 12, "sacco_savings_kes": 15000},
      "answered": 8, "assess": True,
      "decision": {"outcome": "approve_with_guarantor", "guarantors_required": 2,
-                  "officer_notes": NOTE + "Business income only; guarantors needed.",
+                  "officer_notes": "Business income only; guarantors needed.",
                   "member_message": "Your loan can be approved once two guarantors who are "
                                     "SACCO members have been confirmed."},
      "guarantors": [("grace", "verified"), ("faith", "pending")]},
-    {"person": "samuel", "days_ago": 2, "officer": "demo.officer2",
+    {"person": "samuel", "days_ago": 2, "officer": "officer2",
      "fields": {"amount_requested_kes": 25000, "purpose": "Motorbike repairs",
                 "term_months": 6, "sacco_savings_kes": 10000},
      "answered": None},
-    {"person": "david", "days_ago": 1, "officer": "demo.officer1",            # Low
+    {"person": "david", "days_ago": 1, "officer": "officer1",            # Low
      "fields": {"amount_requested_kes": 90000, "purpose": "Building a kitchen",
                 "term_months": 24, "sacco_savings_kes": 45000},
      "answered": 8, "assess": True},
-    {"person": "joseph", "days_ago": 0, "officer": "demo.officer2",
+    {"person": "joseph", "days_ago": 0, "officer": "officer2",
      "fields": {"amount_requested_kes": 12000, "purpose": "Tools for casual work",
                 "term_months": 6, "sacco_savings_kes": 9000},
      "answered": 8},
-    {"person": "grace", "days_ago": 0, "officer": "demo.officer1",
+    {"person": "grace", "days_ago": 0, "officer": "officer1",
      "fields": {"amount_requested_kes": 30000, "purpose": "Fencing the paddock",
                 "term_months": 12, "sacco_savings_kes": 26000},
      "answered": 3},
@@ -681,13 +757,16 @@ def seed_demo_db() -> DemoSeeded:
             raise ValueError("the demo needs an empty database; this one already has users")
         clock = Clock(db)
         clock.now = now - timedelta(days=100)
-        users = {name: ensure_user(db, name, role, out) for name, role in DEMO_STAFF}
-        admin = users["demo.admin"]
+        users = {key: ensure_user(db, login, role, out, f"{DEMO_DB}:{key}", name)
+                 for key, (login, role, name) in DEMO_STAFF.items()}
+        admin = users["admin"]
         members = {}
         for key, p in DEMO_PEOPLE.items():
-            user = ensure_user(db, p["login"], "member", out) if "login" in p else None
+            tag = f"{DEMO_DB}:{key}"
+            user = ensure_user(db, p["login"], "member", out, tag, p["full_name"]) \
+                if "login" in p else None
             members[key] = ensure_member(db, {**p, "joined_on": months_ago(p["joined"])},
-                                         admin, user)
+                                         admin, user, tag)
             users[key] = user
         db.commit()
 
@@ -735,6 +814,19 @@ def seed_demo_db() -> DemoSeeded:
     return DemoSeeded(out.passwords, apps)
 
 
+def is_demo_db(con: sqlite3.Connection) -> bool:
+    """A --demo-db file: a login tagged demo-db:..., or (built before seed_tag
+    existed) the old demo.admin login."""
+    for sql in (f"SELECT 1 FROM users WHERE seed_tag LIKE '{DEMO_DB}:%'",
+                "SELECT 1 FROM users WHERE username = 'demo.admin'"):
+        try:
+            if con.execute(sql).fetchone():
+                return True
+        except sqlite3.OperationalError:   # no such table or column
+            continue
+    return False
+
+
 def demo_db_refusal(path: Path, replace: bool) -> str | None:
     """Why --demo-db must not build at path, or None. Opens nothing but an
     existing demo file, read-only."""
@@ -748,7 +840,7 @@ def demo_db_refusal(path: Path, replace: bool) -> str | None:
     try:
         con = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
         try:
-            is_demo = con.execute("SELECT 1 FROM users WHERE username = 'demo.admin'").fetchone()
+            is_demo = is_demo_db(con)
         finally:
             con.close()
     except sqlite3.Error:
@@ -770,7 +862,7 @@ def build_demo_db(path: Path, replace: bool) -> None:
     except (OSError, ValueError) as e:
         sys.exit(f"demo database not built: {e}")
     print(f"built demo database {path.resolve()}")
-    print("demo logins; passwords are shown once and not saved anywhere:")
+    print("logins; passwords are shown once and not saved anywhere:")
     for name, pw in res.passwords.items():
         print(f"  {name:14} {pw}")
     for app_id, member_no, risk, status in res.applications:
@@ -790,13 +882,15 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--csv", type=Path, default=config.DATA_DIR / "asr_paza.csv")
     ap.add_argument("--audio", type=Path, default=config.DATA_DIR / "audio_16k")
-    ap.add_argument("--name", default=DEMO_NAME, help="applicant name that marks the demo")
+    ap.add_argument("--name", default=KIKUYU_NAME, help="the Kikuyu interview's applicant name")
+    ap.add_argument("--tag", default=KIKUYU_TAG,
+                    help="seed_tag by which a re-run finds that applicant (default %(default)s)")
     ap.add_argument("--asr-model", default=CSV_ASR_MODEL,
                     help="model that produced the CSV, stored as provenance")
     ap.add_argument("--practice-only", action="store_true",
-                    help="skip the Kikuyu demo interview (no audio corpus needed)")
+                    help="skip the Kikuyu interview (no audio corpus needed)")
     ap.add_argument("--no-accounts", action="store_true",
-                    help="skip the demo officer, members and loan applications")
+                    help="skip the officer, members and loan applications")
     ap.add_argument("--demo-db", type=Path, metavar="FILE",
                     help="build the self-contained online-demo database in FILE instead "
                          "(e.g. data/demo.db); nothing else is seeded")
@@ -810,10 +904,10 @@ def main():
 
     if not a.practice_only:
         try:
-            res = seed(a.csv, a.audio, a.name, a.asr_model)
+            res = seed(a.csv, a.audio, a.name, a.tag, a.asr_model)
         except (OSError, ValueError, KeyError) as e:
             sys.exit(f"seed failed, nothing written: {e}")
-        report("demo", res)
+        report("Kikuyu", res)
         print(f"  {res.total} responses, database {config.DB_PATH}")
 
     res = seed_practice()

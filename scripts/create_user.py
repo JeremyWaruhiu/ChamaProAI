@@ -2,6 +2,7 @@
 
     python scripts/create_user.py admin --role admin
     python scripts/create_user.py wanjiru            # role defaults to officer
+    python scripts/create_user.py j.wanjiru --display-name "Jane Wanjiru"
     python scripts/create_user.py admin --role admin --email you@example.com
     python scripts/create_user.py njeri --role member --member-no M-0412
 
@@ -49,6 +50,7 @@ def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("username")
     ap.add_argument("--role", choices=ROLES, default="officer")
+    ap.add_argument("--display-name", help="name shown beside the role (default: the username)")
     ap.add_argument("--email", help="Google account email to link for Sign in with Google")
     ap.add_argument("--member-no", help="members only: the member record this login belongs to")
     a = ap.parse_args()
@@ -77,6 +79,7 @@ def main() -> None:
             sys.exit("passwords do not match; no user created")
 
         user = User(username=a.username, password_hash=hash_password(password), role=a.role,
+                    display_name=" ".join((a.display_name or "").split())[:120] or None,
                     email=email)
         db.add(user)
         db.flush()

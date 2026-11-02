@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useState, type ReactNode } from 'react'
 import { ApiError, api } from '../api/client'
-import type { Results as ResultsData } from '../api/types'
+import type { Results as ResultsData, VersusMetric } from '../api/types'
 import {
   Caption, ConfusionMatrix, GroupedBars, HBars, Notes, Stat, Value,
 } from '../components/Charts'
 import { ErrorNotice } from '../components/Notice'
 import { Badge, PageHeader, SkeletonPage } from '../components/ui'
 import { formatDateTime } from '../lib/format'
+import { VERSUS_METRICS, overall, verdict } from '../lib/compare'
 import { NOT_MEASURED, fmt, isMeasured, pct } from '../lib/measure'
 import { RISK_ORDER } from '../lib/risk'
 import { t } from '../strings'
@@ -92,6 +93,10 @@ export function ResultsBody({ data }: { data: ResultsData }) {
                  validation={ho?.validation} />
       </Card>
 
+      <Card title={T.compare.title}>
+        <Versus rf={rf} estimator={card?.estimator} />
+      </Card>
+
       <Card title={T.confusion}>
         <ConfusionMatrix labels={labels} matrix={ho?.confusion_matrix} />
         <p className={`muted ${styles.small}`}>{T.confusionNote}</p>
@@ -102,21 +107,32 @@ export function ResultsBody({ data }: { data: ResultsData }) {
         <HBars max={1} bars={labels.map((l) => ({
           label: l, value: ho?.per_class?.[l]?.recall, tone: TONE[l as keyof typeof TONE] ?? 'model',
         }))} />
-        <table className={styles.table}>
-          <thead><tr><th>{T.cls}</th><th>{T.precision}</th><th>{T.recall}</th>{rf && <th>{T.recallRf}</th>}</tr></thead>
-          <tbody>
-            {labels.map((l) => (
-              <tr key={l}>
-                <td>{l}</td>
-                <td><Value v={ho?.per_class?.[l]?.precision} /></td>
-                <td><Value v={ho?.per_class?.[l]?.recall} /></td>
-                {rf && <td><Value v={rf.per_class_recall?.[l]} /></td>}
+        <div className={styles.tableScroll}>
+          <table className={styles.table}>
+            <thead>
+              <tr>
+                <th>{T.cls}</th>
+                <th><abbr title={`${T.precision}, ${card?.estimator ?? T.deployedShort}`}>{T.precision}</abbr></th>
+                <th><abbr title={`${T.recall}, ${card?.estimator ?? T.deployedShort}`}>{T.recall}</abbr></th>
+                {rf && <th><abbr title={T.precisionRf}>{T.precision} ({T.rfShort})</abbr></th>}
+                {rf && <th><abbr title={T.recallRf}>{T.recall} ({T.rfShort})</abbr></th>}
               </tr>
-            ))}
-          </tbody>
-        </table>
-        <Notes notes={rf?.notes} />
-        <Caption source={ho?.source} validation={ho?.validation} />
+            </thead>
+            <tbody>
+              {labels.map((l) => (
+                <tr key={l}>
+                  <td>{l}</td>
+                  <td><Value v={ho?.per_class?.[l]?.precision} /></td>
+                  <td><Value v={ho?.per_class?.[l]?.recall} /></td>
+                  {rf && <td><Value v={rf.per_class?.[l]?.precision} /></td>}
+                  {rf && <td><Value v={rf.per_class?.[l]?.recall ?? rf.per_class_recall?.[l]} /></td>}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <Caption source={[ho?.source, rf?.per_class && rf.source].filter(Boolean).join('; RandomForest: ')}
+                 validation={ho?.validation} />
       </Card>
 
       <Card title={T.shap}>
@@ -186,6 +202,51 @@ export function ResultsBody({ data }: { data: ResultsData }) {
   )
 }
 
+function Versus({ rf, estimator }: { rf: ResultsData['random_forest']; estimator?: string | null }) {
+  const C = T.compare
+  const v = rf?.versus_deployed
+  const summary = overall(v)
+  const digits = (m: VersusMetric) => (m === 'high_recall' ? 3 : 4)
+  return (
+    <>
+      <p className={`muted ${styles.small}`}>{C.lead}</p>
+      <div className={styles.tableScroll}>
+        <table className={styles.table}>
+          <thead>
+            <tr>
+              <th>{C.metricCol}</th><th>{C.deployedCol(estimator ?? T.deployedShort)}</th><th>{C.rfCol}</th>
+              <th>{C.diffCol}</th><th>{C.betterCol}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {VERSUS_METRICS.map((m) => {
+              const row = v?.[m]
+              return (
+                <tr key={m}>
+                  <td>{C.metric[m]}</td>
+                  <td><Value v={row?.deployed} digits={digits(m)} /></td>
+                  <td><Value v={row?.random_forest} digits={digits(m)} /></td>
+                  <td>{isMeasured(row?.difference) ? `${row.difference > 0 ? '+' : ''}${row.difference.toFixed(4)}` : <Value v={null} />}</td>
+                  <td>{row?.better ? C.better[row.better] : <Value v={null} />}</td>
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
+      </div>
+      {v && (
+        <ul className={styles.verdicts}>
+          {VERSUS_METRICS.map((m) => <li key={m}>{verdict(m, v[m])}</li>)}
+        </ul>
+      )}
+      {summary && <p className={styles.verdictSummary}>{summary}</p>}
+      <p className={`muted ${styles.small}`}>{C.highRecallNote}</p>
+      <Notes notes={rf?.notes} />
+      <Caption source={rf?.source ?? C.none} validation={rf?.validation} />
+    </>
+  )
+}
+
 function AsrSection({ asr }: { asr: ResultsData['asr'] }) {
   if (!asr) return <p className={styles.na}>{T.asrNone} {NOT_MEASURED}</p>
   const systems = Object.keys(asr.systems)
@@ -194,26 +255,28 @@ function AsrSection({ asr }: { asr: ResultsData['asr'] }) {
     : [...new Set(systems.flatMap((s) => Object.keys(asr.systems[s].by_domain ?? {})))]
   return (
     <>
-      <table className={styles.table}>
-        <thead>
-          <tr><th>{T.system}</th><th>{T.clips}</th><th>{T.collapses}</th><th>{T.yield}</th><th>chrF++</th><th>BLEU</th></tr>
-        </thead>
-        <tbody>
-          {systems.map((s) => {
-            const o = asr.systems[s].overall
-            return (
-              <tr key={s}>
-                <td>{name(s)}</td>
-                <td><Value v={o?.n} digits={0} /></td>
-                <td><Value v={o?.collapse_count} digits={0} /></td>
-                <td><Value v={o?.yield} percent /></td>
-                <td><Value v={o?.chrf_pp} digits={2} /></td>
-                <td><Value v={o?.bleu} digits={2} /></td>
-              </tr>
-            )
-          })}
-        </tbody>
-      </table>
+      <div className={styles.tableScroll}>
+        <table className={styles.table}>
+          <thead>
+            <tr><th>{T.system}</th><th>{T.clips}</th><th>{T.collapses}</th><th>{T.yield}</th><th>chrF++</th><th>BLEU</th></tr>
+          </thead>
+          <tbody>
+            {systems.map((s) => {
+              const o = asr.systems[s].overall
+              return (
+                <tr key={s}>
+                  <td>{name(s)}</td>
+                  <td><Value v={o?.n} digits={0} /></td>
+                  <td><Value v={o?.collapse_count} digits={0} /></td>
+                  <td><Value v={o?.yield} percent /></td>
+                  <td><Value v={o?.chrf_pp} digits={2} /></td>
+                  <td><Value v={o?.bleu} digits={2} /></td>
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
+      </div>
       <p className={styles.splitTitle}>{T.byDomain}</p>
       <GroupedBars categories={domains} series={systems.map((s) => ({
         name: name(s), color: ASR_COLOR[s] ?? 'var(--ink-3)',
@@ -221,22 +284,24 @@ function AsrSection({ asr }: { asr: ResultsData['asr'] }) {
       }))} />
       <details className={styles.small}>
         <summary>{T.perDomain}</summary>
-        <table className={styles.table}>
-          <thead>
-            <tr><th>{T.domain}</th>{systems.map((s) => <th key={s}>{T.domainCols(name(s))}</th>)}</tr>
-          </thead>
-          <tbody>
-            {domains.map((d) => (
-              <tr key={d}>
-                <td>{d.replace(/_/g, ' ')}</td>
-                {systems.map((s) => {
-                  const b = asr.systems[s].by_domain?.[d]
-                  return <td key={s}>{fmt(b?.chrf_pp, 2)} / {fmt(b?.bleu, 2)} / {pct(b?.yield, 0)} / {fmt(b?.collapse_count, 0)}</td>
-                })}
-              </tr>
-            ))}
-          </tbody>
-        </table>
+        <div className={styles.tableScroll}>
+          <table className={styles.table}>
+            <thead>
+              <tr><th>{T.domain}</th>{systems.map((s) => <th key={s}>{T.domainCols(name(s))}</th>)}</tr>
+            </thead>
+            <tbody>
+              {domains.map((d) => (
+                <tr key={d}>
+                  <td>{d.replace(/_/g, ' ')}</td>
+                  {systems.map((s) => {
+                    const b = asr.systems[s].by_domain?.[d]
+                    return <td key={s}>{fmt(b?.chrf_pp, 2)} / {fmt(b?.bleu, 2)} / {pct(b?.yield, 0)} / {fmt(b?.collapse_count, 0)}</td>
+                  })}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       </details>
       <Notes notes={asr.notes} />
       <Caption source={asr.source}

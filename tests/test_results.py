@@ -109,3 +109,60 @@ def test_rule_agreement_counts_live_applications_only(admin_client, summary_path
     assert (after["agreements"] - before["agreements"], after["divergences"] - before["divergences"],
             after["undetermined"] - before["undetermined"]) == (1, 1, 1)
     assert 0 <= after["rate"] <= 1 and "3 x savings" in after["rule"]
+
+
+# --- scripts/export_results.py: the RandomForest comparison --------------------------
+
+def test_versus_names_the_better_model_and_by_how_much():
+    import export_results as ex
+    deployed = {"auc_macro_ovr": 0.57, "macro_f1": 0.37, "per_class": {"High": {"recall": 0.53}}}
+    rf = {"auc_macro_ovr": 0.58, "macro_f1": 0.37, "per_class": {"High": {"recall": 0.28}}}
+    out = ex.versus(deployed, rf)
+    assert out["auc_macro_ovr"] == {"deployed": 0.57, "random_forest": 0.58, "difference": 0.01,
+                                    "better": "random_forest"}
+    assert out["macro_f1"]["better"] == "tie" and out["macro_f1"]["difference"] == 0
+    assert out["high_recall"]["better"] == "deployed" and out["high_recall"]["difference"] == -0.25
+    missing = ex.versus(deployed, {"auc_macro_ovr": None})
+    assert missing["auc_macro_ovr"]["better"] is None and missing["macro_f1"]["difference"] is None
+
+
+def test_missing_random_forest_is_null_with_the_command_to_train_it(monkeypatch, tmp_path):
+    import export_results as ex
+    monkeypatch.setattr(ex, "RF_MODEL", ex.ROOT / "models" / "nope.joblib")
+    sec = ex.random_forest({}, None, None, {}, "v", ex.ROOT / "x.csv")
+    assert sec["per_class"] is None and sec["versus_deployed"] is None
+    assert "--estimator random_forest --name random_forest" in sec["notes"][0]
+
+
+def test_a_random_forest_from_another_split_is_not_compared(monkeypatch, tmp_path):
+    import export_results as ex
+    model, meta = tmp_path / "rf.joblib", tmp_path / "rf_meta.json"
+    model.write_bytes(b"never loaded")
+    deployed_meta = {"frame": "f.csv", "protocol": "central_kenya_held_out", "seed": 42,
+                     "n_train": 10, "feature_order": ["a", "b"]}
+    meta.write_text(json.dumps({**deployed_meta, "seed": 7, "estimator": "random_forest"}))
+    monkeypatch.setattr(ex, "RF_MODEL", model)
+    monkeypatch.setattr(ex, "RF_META", meta)
+    sec = ex.random_forest(deployed_meta, None, None, {}, "v", ex.ROOT / "f.csv")
+    assert sec["per_class"] is None and sec["estimator"] == "random_forest"
+    assert "differs" in sec["notes"][0] and "seed" in sec["notes"][0]
+
+
+def _rf_ready():
+    import export_results as ex
+    from model import DEFAULT_FRAME
+    return all(p.exists() for p in (ex.RF_MODEL, ex.RF_META, ex.MODEL, ex.META, DEFAULT_FRAME))
+
+
+@pytest.mark.skipif(not _rf_ready(), reason="needs models/random_forest.joblib, the classifier "
+                                            "and the FinAccess modelling frame (not in the repo)")
+def test_real_random_forest_is_scored_on_the_deployed_models_held_out_rows():
+    import export_results as ex
+    meta = json.loads(ex.META.read_text(encoding="utf-8"))
+    perf, _, rf, _ = ex.held_out(meta)
+    assert rf["notes"] == [] and rf["estimator"] == "random_forest"
+    assert set(rf["per_class"]) == {"Low", "Medium", "High"} == set(perf["per_class"])
+    assert rf["per_class_recall"] == {k: v["recall"] for k, v in rf["per_class"].items()}
+    assert sum(map(sum, rf["confusion_matrix"])) == perf["n_test"]          # the same rows
+    for metric, row in rf["versus_deployed"].items():
+        assert row["difference"] == round(row["random_forest"] - row["deployed"], 4), metric

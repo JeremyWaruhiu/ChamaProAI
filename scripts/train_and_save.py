@@ -4,8 +4,15 @@ Uses the same encoding and training protocol as experiments/03_classifier/model.
 by importing encode() from it, so the saved model matches the reported results.
 
     python scripts/train_and_save.py
-    python scripts/train_and_save.py --estimator random_forest
     python scripts/train_and_save.py --frame .../modelling_frame_suspect.csv
+
+The deployed classifier is models/classifier.joblib. --name saves under
+another name instead, beside it and without touching it: the RandomForest the
+evaluation page compares against is trained on the same split with
+
+    python scripts/train_and_save.py --estimator random_forest --name random_forest
+
+which writes models/random_forest.joblib and models/random_forest_meta.json.
 """
 from __future__ import annotations
 
@@ -39,6 +46,9 @@ ap.add_argument("--frame", default=str(DEFAULT_FRAME))
 ap.add_argument("--estimator", default="hist_gradient_boosting",
                 choices=list(ESTIMATORS))
 ap.add_argument("--seed", type=int, default=42)
+ap.add_argument("--name", default="classifier",
+                help="file stem in models/ (default: the deployed classifier); "
+                     "anything else leaves models/classifier.joblib as it is")
 ap.add_argument("--all-rows", action="store_true",
                 help="train on every row; default holds out Central Kenya "
                      "to match the reported evaluation protocol")
@@ -62,7 +72,9 @@ m = ESTIMATORS[a.estimator](a.seed)
 m.fit(Xtr, ytr)
 
 OUT.mkdir(parents=True, exist_ok=True)
-joblib.dump(m, OUT / "classifier.joblib")
+model_path, meta_path = OUT / f"{a.name}.joblib", OUT / f"{a.name}_meta.json"
+# A 500-tree forest is large uncompressed; the boosted model is small either way.
+joblib.dump(m, model_path, compress=3 if a.estimator == "random_forest" else 0)
 
 meta = {
     "estimator": a.estimator,
@@ -75,10 +87,10 @@ meta = {
     "classes": {str(k): v for k, v in RISK.items()},
     "trained_on": date.today().isoformat(),
 }
-(OUT / "classifier_meta.json").write_text(json.dumps(meta, indent=2), encoding="utf-8")
+meta_path.write_text(json.dumps(meta, indent=2), encoding="utf-8")
 
-print(f"saved  {OUT / 'classifier.joblib'}")
-print(f"saved  {OUT / 'classifier_meta.json'}")
+print(f"saved  {model_path}")
+print(f"saved  {meta_path}")
 print(f"\nfeature contract: {X.shape[1]} columns, first 8:")
 for c in list(X.columns)[:8]:
     print(f"  {c}")

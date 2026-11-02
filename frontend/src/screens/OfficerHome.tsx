@@ -7,7 +7,7 @@ import { Icon } from '../components/Icon'
 import { ErrorNotice } from '../components/Notice'
 import { Badge, Card, EmptyState, Kpi, PageHeader, PracticeBadge, SkeletonList } from '../components/ui'
 import { useLoad } from '../hooks/useLoad'
-import { useAuth } from '../lib/auth'
+import { displayName, useAuth } from '../lib/auth'
 import { applicantName, formatDateTime, formatKes, isSameDay } from '../lib/format'
 import { fadeUp, useReducedMotion } from '../lib/motion'
 import { paths } from '../lib/router'
@@ -33,7 +33,7 @@ export function OfficerHome() {
 
   return (
     <>
-      <PageHeader title={H.greeting(user?.username ?? '')} lead={H.lead} />
+      <PageHeader title={H.greeting(user ? displayName(user) : '')} lead={H.lead} />
 
       <m.a href={paths.start()} className={styles.start} {...fadeUp(reduced, 0.05)}>
         <span className={styles.startIcon}><Icon name="mic" size={28} /></span>

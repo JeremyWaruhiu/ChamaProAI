@@ -3,6 +3,7 @@ import { ApiError, api } from '../api/client'
 import type { AuditEntry, UserOut } from '../api/types'
 import { ErrorNotice } from '../components/Notice'
 import { Card, EmptyState, PageHeader, SkeletonList } from '../components/ui'
+import { userLabel } from '../lib/auth'
 import { formatDateTime } from '../lib/format'
 import { auditFilter } from '../lib/selectors'
 import { t } from '../strings'
@@ -48,7 +49,7 @@ export function AuditLog() {
             <span className="field-label">{L.actor}</span>
             <select className="select" value={form.actor} onChange={(e) => put('actor', e.target.value)}>
               <option value="">{L.anyone}</option>
-              {users.map((u) => <option key={u.id} value={u.id}>{u.username}</option>)}
+              {users.map((u) => <option key={u.id} value={u.id}>{userLabel(u)}</option>)}
             </select>
           </label>
           <label className="field">

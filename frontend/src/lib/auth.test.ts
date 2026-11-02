@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { Me } from '../api/types'
-import { canOpen, homeFor, redirectFor, safeNext } from './auth'
+import { canOpen, displayName, homeFor, redirectFor, safeNext, userLabel } from './auth'
 import { parse, paths } from './router'
 
 const officer: Me = { username: 'wanjiru', role: 'officer' }
@@ -104,5 +104,18 @@ describe('return to the original route after sign-in', () => {
   it('sends a signed-in user from an unknown address to their home', () => {
     expect(redirectFor('#/nowhere', officer)).toBe('#/app')
     expect(redirectFor('#/nowhere', member)).toBe('#/my')
+  })
+})
+
+describe('people are named by display name, with their role', () => {
+  it('falls back to the username when there is no display name', () => {
+    expect(displayName({ username: 'j.mwangi', display_name: 'Joseph Mwangi' })).toBe('Joseph Mwangi')
+    expect(displayName({ username: 'j.mwangi', display_name: '  ' })).toBe('j.mwangi')
+    expect(displayName(officer)).toBe('wanjiru')
+  })
+
+  it('labels a user in a list with the role that grants access', () => {
+    expect(userLabel({ username: 'j.mwangi', display_name: 'Joseph Mwangi', role: 'officer' })).toBe('Joseph Mwangi (Loan officer)')
+    expect(userLabel(member)).toBe('grace (Member)')
   })
 })

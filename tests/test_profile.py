@@ -48,8 +48,8 @@ def test_profile_describes_the_signed_in_officer(me):
     assert body["signed_in_with"] == "password"
     assert body["active_sessions"] == 2
     assert body["google_sign_in_available"] is False      # no client ID in the test env
-    assert set(body) == {"username", "role", "email", "google_sign_in_available", "member",
-                         "signed_in_with", "active_sessions", "created_at"}   # never a hash
+    assert set(body) == {"username", "role", "display_name", "email", "google_sign_in_available",
+                         "member", "signed_in_with", "active_sessions", "created_at"}   # never a hash
 
 
 def test_profile_shows_a_members_own_record(client):

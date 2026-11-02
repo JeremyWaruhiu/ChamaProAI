@@ -110,11 +110,11 @@ def test_linked_user_signs_in(anon_client, google, linked):
     name, email = linked
     r = anon_client.post(GOOGLE, json={"credential": google.token(email)})
     assert r.status_code == 200
-    assert r.json() == {"username": name, "role": "officer"}
+    assert r.json() == {"username": name, "role": "officer", "display_name": None}
     cookie = r.headers["set-cookie"]
     assert "HttpOnly" in cookie and "SameSite=strict" in cookie and "Path=/api" in cookie
     assert f"Max-Age={config.SESSION_HOURS * 3600}" in cookie
-    assert anon_client.get("/api/auth/me").json() == {"username": name, "role": "officer"}
+    assert anon_client.get("/api/auth/me").json() == {"username": name, "role": "officer", "display_name": None}
     assert anon_client.get("/api/interviews").status_code == 200
 
 
@@ -146,7 +146,7 @@ def test_role_comes_from_the_linked_user(anon_client, google):
         db.scalar(select(User).where(User.username == name)).email = email
         db.commit()
     r = anon_client.post(GOOGLE, json={"credential": google.token(email)})
-    assert r.json() == {"username": name, "role": "admin"}
+    assert r.json() == {"username": name, "role": "admin", "display_name": None}
 
 
 # --- Refusals: all the same generic 401, and no account is ever created --------------------
@@ -276,7 +276,8 @@ def test_migration_adds_email_and_keeps_rows(tmp_path):
     con.close()
     code = "from chamapro.api.db import init_db; init_db(); init_db()"
     r = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True,
-                       env={**os.environ, "CHAMAPRO_DB": str(db_file)})
+                       env={**os.environ, "CHAMAPRO_DB": str(db_file),
+                            "DATABASE_URL": f"sqlite:///{db_file}"})
     assert r.returncode == 0, r.stderr
     con = sqlite3.connect(db_file)
     assert "email" in {c[1] for c in con.execute("PRAGMA table_info(users)")}

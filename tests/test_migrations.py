@@ -60,7 +60,7 @@ def legacy(tmp_path):
 def test_fresh_database_reaches_head(tmp_path):
     engine = create_engine(f"sqlite:///{tmp_path / 'new.db'}")
     init_db(engine)
-    assert schema_revision(engine) == head_revision() == "0002"
+    assert schema_revision(engine) == head_revision() == "0003"
     names = set(inspect(engine).get_table_names())
     assert {"members", "loan_applications", "guarantors", "audit_log", "alembic_version"} <= names
     assert not list(tmp_path.glob("*.bak"))                  # nothing to back up
@@ -79,7 +79,7 @@ def test_legacy_rows_survive_exactly(legacy, tmp_path):
         assert [r[:len(cols)] for r in new_rows] == rows, t
     assert after["decisions"][1][len(before["decisions"][1]):] == \
         ["outcome", "approved_amount_kes", "guarantors_required", "officer_notes", "member_message"]
-    assert len(list(tmp_path.glob("chamapro.db.pre-0002-*.bak"))) == 1   # backed up once
+    assert len(list(tmp_path.glob("chamapro.db.pre-0003-*.bak"))) == 1   # backed up once
 
 
 def test_backup_holds_the_pre_migration_database(legacy, tmp_path):

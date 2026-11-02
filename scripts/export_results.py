@@ -26,6 +26,12 @@ sys.path.insert(0, str(ROOT / "scripts"))
 
 MODEL = ROOT / "models" / "classifier.joblib"
 META = ROOT / "models" / "classifier_meta.json"
+# The comparison model, trained on the same split and never deployed:
+# python scripts/train_and_save.py --estimator random_forest --name random_forest
+RF_MODEL = ROOT / "models" / "random_forest.joblib"
+RF_META = ROOT / "models" / "random_forest_meta.json"
+# What must match between the two model cards for the comparison to be fair.
+SAME_SPLIT = ("frame", "protocol", "seed", "n_train", "feature_order")
 MANIFEST = ROOT / "data" / "manifest.csv"
 # ASR hypotheses and the cascade's translations of them, per ASR system.
 ASR_RUNS = {
@@ -37,7 +43,7 @@ SHAP_SAMPLE = 500
 
 
 def rel(p: Path) -> str:
-    return str(p.relative_to(ROOT))
+    return str(p.relative_to(ROOT)) if p.is_relative_to(ROOT) else str(p)
 
 
 def r4(x) -> float:
@@ -74,8 +80,63 @@ def model_card() -> dict:
 
 # --- Held-out evaluation ---------------------------------------------------------
 
+def scored(clf, X, y) -> dict:
+    """Macro AUC, macro-F1 and per-class precision and recall of clf on (X, y)."""
+    from model import evaluate
+    ev = evaluate(y, clf.predict(X), clf.predict_proba(X))
+    return {"auc_macro_ovr": ev.get("auc_ovr_macro"), "macro_f1": ev["macro_f1"],
+            "per_class": {k: {"precision": v["precision"], "recall": v["recall"]}
+                          for k, v in ev["per_class"].items()},
+            "confusion_matrix": ev["confusion_matrix"]}
+
+
+# The headline metrics: AUC and macro-F1, and High-class recall, which the
+# protocol in experiments/03_classifier/model.py reports beside macro-F1.
+HEADLINE = {"auc_macro_ovr": lambda m: m.get("auc_macro_ovr"),
+            "macro_f1": lambda m: m.get("macro_f1"),
+            "high_recall": lambda m: ((m.get("per_class") or {}).get("High") or {}).get("recall")}
+
+
+def versus(deployed: dict, rf: dict) -> dict:
+    """Which model is better on each headline metric, and by how much (RF minus deployed)."""
+    out = {}
+    for metric, get in HEADLINE.items():
+        a, b = get(deployed), get(rf)
+        if a is None or b is None:
+            out[metric] = {"deployed": a, "random_forest": b, "difference": None, "better": None}
+            continue
+        diff = r4(b - a)
+        out[metric] = {"deployed": a, "random_forest": b, "difference": diff,
+                       "better": "tie" if diff == 0 else "random_forest" if diff > 0 else "deployed"}
+    return out
+
+
+def random_forest(meta: dict, X, y, deployed: dict, validation: str, frame: Path) -> dict:
+    """The saved RandomForest scored on the same held-out rows as the deployed model."""
+    sec = {"source": f"{rel(RF_MODEL)} scored on {rel(frame)}", "validation": validation,
+           "estimator": None, "trained_on": None, "auc_macro_ovr": None, "macro_f1": None,
+           "per_class": None, "per_class_recall": None, "confusion_matrix": None,
+           "versus_deployed": None, "notes": []}
+    if not (RF_MODEL.exists() and RF_META.exists()):
+        sec["notes"].append(f"{rel(RF_MODEL)} not found; train it with python scripts/train_and_save.py "
+                            "--estimator random_forest --name random_forest")
+        return sec
+    rf_meta = json.loads(RF_META.read_text(encoding="utf-8"))
+    sec.update(estimator=rf_meta.get("estimator"), trained_on=rf_meta.get("trained_on"))
+    differ = [k for k in SAME_SPLIT if rf_meta.get(k) != meta.get(k)]
+    if differ:
+        sec["notes"].append(f"not compared: {rel(RF_META)} differs from {rel(META)} in "
+                            f"{', '.join(differ)}, so it was not trained on the same split")
+        return sec
+    import joblib
+    out = scored(joblib.load(RF_MODEL), X, y)
+    sec.update(out, per_class_recall={k: v["recall"] for k, v in out["per_class"].items()},
+               versus_deployed=versus(deployed, out))
+    return sec
+
+
 def held_out(meta: dict) -> tuple[dict, dict, dict, dict]:
-    """(performance, class_balance, rf_recall, shap) on the Central Kenya holdout."""
+    """(performance, class_balance, random_forest, shap) on the Central Kenya holdout."""
     from model import DEFAULT_FRAME, RISK, comparator, evaluate, encode
 
     names = [RISK[i] for i in (0, 1, 2)]
@@ -83,16 +144,13 @@ def held_out(meta: dict) -> tuple[dict, dict, dict, dict]:
     validation = ("geographic holdout: trained on the other 42 counties, scored on "
                   "Central Kenya, which the model never saw (scripts/train_and_save.py "
                   f"protocol central_kenya_held_out, seed {meta.get('seed')})")
-    rf_note = ("experiments/03_classifier/model.py computes RandomForest per-class recall, "
-               "but no RandomForest model is saved and this export does not retrain")
     perf = {"source": f"{rel(MODEL)} scored on {rel(frame)}", "validation": validation,
             "n_test": None, "auc_macro_ovr": None, "macro_f1": None,
             "comparator_macro_f1": None, "per_class": None, "confusion_matrix": None,
             "labels": names, "notes": []}
     balance = {"source": rel(frame), "validation": validation, "labels": names,
                "train": None, "test": None, "notes": []}
-    rf = {"source": "experiments/03_classifier/model.py", "validation": validation,
-          "per_class_recall": None, "notes": [rf_note]}
+    rf = {"source": rel(RF_MODEL), "validation": validation, "per_class_recall": None, "notes": []}
     shap_out = {"source": f"shap.TreeExplainer on {rel(MODEL)}", "validation": validation,
                 "sample_size": None, "top_features": None, "notes": []}
 
@@ -100,7 +158,7 @@ def held_out(meta: dict) -> tuple[dict, dict, dict, dict]:
     if missing or meta.get("protocol") != "central_kenya_held_out":
         why = (f"missing {', '.join(rel(p) for p in missing)}" if missing else
                f"model protocol is {meta.get('protocol')!r}, so there is no held-out set")
-        for sec in (perf, balance, shap_out):
+        for sec in (perf, balance, rf, shap_out):
             sec["notes"].append(why)
         return perf, balance, rf, shap_out
 
@@ -120,17 +178,12 @@ def held_out(meta: dict) -> tuple[dict, dict, dict, dict]:
                              f"card records {meta.get('n_train')}; the frame may have changed")
 
     clf = joblib.load(MODEL)
-    proba = clf.predict_proba(Xte)
-    ev = evaluate(yte, clf.predict(Xte), proba)
-    perf.update(n_test=int(len(Xte)), macro_f1=ev["macro_f1"],
-                auc_macro_ovr=ev.get("auc_ovr_macro"),
-                per_class={k: {"precision": v["precision"], "recall": v["recall"]}
-                           for k, v in ev["per_class"].items()},
-                confusion_matrix=ev["confusion_matrix"])
+    perf.update(n_test=int(len(Xte)), **scored(clf, Xte, yte))
     if perf["auc_macro_ovr"] is None:
         perf["notes"].append("AUC undefined: a class is absent from the held-out set")
     perf["comparator_macro_f1"] = evaluate(yte, comparator(df.loc[central]))["macro_f1"]
     perf["comparator_source"] = "comparator() in experiments/03_classifier/model.py"
+    rf = random_forest(meta, Xte, yte, perf, validation, frame)
 
     try:
         import shap

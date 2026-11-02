@@ -1,5 +1,7 @@
 .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 460px), 1fr)); gap: var(--space-5); }
-.card { padding: var(--space-5) var(--space-6); display: grid; gap: var(--space-4); align-content: start; min-width: 0; }
+/* minmax(0, 1fr): a long path or a wide table never stretches the card past the screen. */
+.card { padding: var(--space-5) var(--space-6); display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--space-4); align-content: start; min-width: 0; }
+@media (max-width: 480px) { .card { padding: var(--space-4); } }
 .cardTitle { font-size: var(--text-lg); font-weight: 680; color: var(--ink); }
 
 .dl { display: grid; grid-template-columns: max-content 1fr; gap: var(--space-2) var(--space-4); margin: 0; font-size: var(--text-base); }
@@ -16,4 +18,10 @@
 .split { display: grid; gap: var(--space-2); }
 .splitTitle { font-weight: 650; font-size: var(--text-base); color: var(--ink-2); }
 .small { font-size: var(--text-sm); }
+.small summary { display: flex; align-items: center; min-height: 44px; cursor: pointer; }
 .na { color: var(--ink-3); font-style: italic; }
+
+/* A table wider than a phone scrolls inside its card, never the page. */
+.tableScroll { max-width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+.verdicts { display: grid; gap: var(--space-1); margin: 0; padding-left: var(--space-5); font-size: var(--text-base); }
+.verdictSummary { font-weight: 650; color: var(--ink); }

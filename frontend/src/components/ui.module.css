@@ -7,6 +7,8 @@
   background: var(--surface-2); color: var(--ink-2);
   font-size: var(--text-sm); font-weight: 650; line-height: 1.2; white-space: nowrap;
 }
+/* On a phone a long badge ("Decision: Refer to loan committee") wraps inside its cell. */
+@media (max-width: 720px) { .badge { max-width: 100%; white-space: normal; } }
 .tone-neutral { background: var(--surface-2); border-color: var(--line-strong); color: var(--ink-2); }
 .tone-wait { background: var(--wait-bg); border-color: var(--wait-line); color: var(--wait); }
 .tone-info { background: var(--info-bg); border-color: var(--info-line); color: var(--info); }

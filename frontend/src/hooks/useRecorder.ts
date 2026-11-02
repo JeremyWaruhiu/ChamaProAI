@@ -7,9 +7,18 @@ export type RecorderState = 'idle' | 'starting' | 'recording'
 // The backend converts either to 16 kHz mono WAV.
 const PREFERRED = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4']
 
-export const recordingSupported = () =>
-  typeof window !== 'undefined' && typeof MediaRecorder !== 'undefined'
-  && !!navigator.mediaDevices?.getUserMedia
+/** Why this page cannot record, or null if it can. Browsers give the
+ * microphone only to a secure context: https://, or localhost. On a phone
+ * that means the https tunnel, not the laptop's http://192.168... address,
+ * where navigator.mediaDevices does not exist at all. */
+export function micUnavailable(): 'insecure' | 'unsupported' | null {
+  if (typeof window === 'undefined') return 'unsupported'
+  if (window.isSecureContext === false) return 'insecure'
+  if (typeof MediaRecorder === 'undefined' || !navigator.mediaDevices?.getUserMedia) return 'unsupported'
+  return null
+}
+
+export const recordingSupported = () => micUnavailable() === null
 
 function pickMime(): string {
   return PREFERRED.find((t) => MediaRecorder.isTypeSupported(t)) ?? ''

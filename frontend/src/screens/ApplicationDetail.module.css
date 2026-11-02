@@ -1,4 +1,4 @@
-.back { display: inline-flex; align-items: center; gap: var(--space-1); text-decoration: none; }
+.back { display: inline-flex; align-items: center; gap: var(--space-1); min-height: 44px; text-decoration: none; }
 .grid { display: grid; gap: var(--space-5); grid-template-columns: minmax(0, 2fr) minmax(280px, 1fr); align-items: start; }
 .main, .aside { display: grid; gap: var(--space-5); min-width: 0; }
 @media (max-width: 960px) { .grid { grid-template-columns: 1fr; } }

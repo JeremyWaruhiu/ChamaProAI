@@ -2,7 +2,7 @@ import { AnimatePresence, m } from 'motion/react'
 import { useCallback, useEffect, useId, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
 import { api } from '../api/client'
 import type { ApplicationSummary, Me, Member } from '../api/types'
-import { ROLE_LABEL, useAuth } from '../lib/auth'
+import { ROLE_LABEL, displayName, useAuth } from '../lib/auth'
 import { fade, useReducedMotion } from '../lib/motion'
 import { navigate, paths, type Screen } from '../lib/router'
 import { matchApplications } from '../lib/selectors'
@@ -202,6 +202,7 @@ function SearchBox() {
 
 export function UserMenu({ user, onDark = false }: { user: Me; onDark?: boolean }) {
   const { signOut } = useAuth()
+  const name = displayName(user)
   const [open, setOpen] = useState(false)
   const menu = useRef<HTMLDivElement>(null)
   const button = useRef<HTMLButtonElement>(null)
@@ -236,10 +237,10 @@ export function UserMenu({ user, onDark = false }: { user: Me; onDark?: boolean 
     <div className={styles.userMenu}>
       <button ref={button} type="button" className={cx(styles.userButton, onDark && styles.userOnDark)}
               aria-haspopup="menu" aria-expanded={open} aria-controls={open ? menuId : undefined}
-              aria-label={t.topbar.userMenu(user.username)} onClick={() => setOpen((v) => !v)}>
-        <span className={styles.avatar} aria-hidden>{user.username.slice(0, 1).toUpperCase()}</span>
+              aria-label={t.topbar.userMenu(name)} onClick={() => setOpen((v) => !v)}>
+        <span className={styles.avatar} aria-hidden>{name.slice(0, 1).toUpperCase()}</span>
         <span className={styles.userText}>
-          <span className={styles.userName}>{user.username}</span>
+          <span className={styles.userName}>{name}</span>
           <span className={styles.userRole}>{ROLE_LABEL[user.role]}</span>
         </span>
         <Icon name="chevronDown" size={16} />
@@ -249,7 +250,8 @@ export function UserMenu({ user, onDark = false }: { user: Me; onDark?: boolean 
           <m.div ref={menu} id={menuId} role="menu" className={styles.menu} onKeyDown={onKey} {...fade(reduced)}>
             <p className={styles.menuHead}>
               <span className="subtle small">{t.topbar.signedInAs}</span>
-              <strong>{user.username}</strong>
+              <strong>{name}</strong>
+              {name !== user.username && <span className="subtle small">{user.username}</span>}
               <Badge tone={user.role === 'admin' ? 'attention' : user.role === 'member' ? 'info' : 'low'}>{ROLE_LABEL[user.role]}</Badge>
             </p>
             <a role="menuitem" href={paths.profile()} className={styles.menuItem} onClick={() => close()}>

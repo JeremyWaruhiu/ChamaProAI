@@ -66,6 +66,8 @@ class Applicant(Base):
     sex: Mapped[str | None] = mapped_column(String(10))              # female | male
     education: Mapped[int | None] = mapped_column(Integer)           # 0-8, score_interview.EDU_LADDER
     marital_status: Mapped[str | None] = mapped_column(String(10))   # married | single | widowed | divorced
+    # Set only by scripts/seed_demo.py, to find its own rows again; never sent to a browser.
+    seed_tag: Mapped[str | None] = mapped_column(String(40), index=True)
     created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
 
 
@@ -184,10 +186,13 @@ class User(Base):
     username: Mapped[str] = mapped_column(String(64), unique=True)
     password_hash: Mapped[str] = mapped_column(String(255))  # scrypt$n$r$p$salt$hash
     role: Mapped[str] = mapped_column(String(20))             # admin | officer | member
+    # The name shown beside the role; the username stays the login.
+    display_name: Mapped[str | None] = mapped_column(String(120))
     # Google account linked for "Sign in with Google"; stored lower-case.
     # Set with scripts/link_google.py; a Google login never creates a user.
     email: Mapped[str | None] = mapped_column(String(254), unique=True, index=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    seed_tag: Mapped[str | None] = mapped_column(String(40), index=True)   # as Applicant.seed_tag
     created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
 
     @validates("email")
@@ -218,6 +223,7 @@ class Member(Base):
     joined_on: Mapped[date] = mapped_column(Date)      # membership start, for the tenure rule
     # The member's own login, if they have one.
     user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), unique=True)
+    seed_tag: Mapped[str | None] = mapped_column(String(40), index=True)   # as Applicant.seed_tag
     created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
 
     user: Mapped[User | None] = relationship()
@@ -299,8 +305,11 @@ class AuditLog(Base):
 
 def make_engine(url: str) -> Engine:
     if make_url(url).get_backend_name() != "sqlite":
-        # Supabase's pooler closes idle connections; check before use.
-        return create_engine(url, pool_pre_ping=True)
+        # Supabase's pooler closes idle connections; recycle ahead of its idle
+        # timeout instead of paying a pre-ping round trip on every checkout
+        # (~200 ms from Nairobi to eu-west-1).
+        return create_engine(url, pool_size=5, max_overflow=5,
+                             pool_recycle=240, pool_timeout=10)
     eng = create_engine(url, connect_args={"check_same_thread": False, "timeout": 30})
 
     @event.listens_for(eng, "connect")

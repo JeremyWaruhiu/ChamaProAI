@@ -16,6 +16,16 @@ export function useAuth(): AuthState {
 
 export const ROLE_LABEL: Record<Role, string> = t.roles
 
+/** The name a person is shown by: their display name, else the username. */
+export function displayName(u: { username: string; display_name?: string | null }): string {
+  return u.display_name?.trim() || u.username
+}
+
+/** A user in a list of everyone: name and role, since the role, not the username, grants access. */
+export function userLabel(u: { username: string; display_name?: string | null; role: Role }): string {
+  return `${displayName(u)} (${ROLE_LABEL[u.role]})`
+}
+
 // Who may open which screen. The server enforces the same rules; this only
 // keeps people from landing on a page that would refuse them.
 const PUBLIC = new Set<Screen>(['landing', 'login'])

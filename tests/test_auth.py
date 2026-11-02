@@ -38,12 +38,12 @@ def test_login_success_sets_a_protected_cookie(anon_client, fresh_user):
     name, pw = fresh_user
     r = login(anon_client, name, pw)
     assert r.status_code == 200
-    assert r.json() == {"username": name, "role": "officer"}
+    assert r.json() == {"username": name, "role": "officer", "display_name": None}
     cookie = r.headers["set-cookie"]
     assert cookie.startswith(f"{auth.COOKIE}=")
     assert "HttpOnly" in cookie and "SameSite=strict" in cookie and "Path=/api" in cookie
     assert "Secure" not in cookie                              # localhost
-    assert anon_client.get("/api/auth/me").json() == {"username": name, "role": "officer"}
+    assert anon_client.get("/api/auth/me").json() == {"username": name, "role": "officer", "display_name": None}
 
 
 def test_cookie_is_secure_off_localhost(fresh_user):

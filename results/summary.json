@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-10-19T10:21:04+00:00",
+  "generated_at": "2026-11-02T08:52:00+00:00",
   "generator": "scripts/export_results.py",
   "model_card": {
     "source": "models/classifier_meta.json; SHA-256 computed over models/classifier.joblib",
@@ -86,12 +86,69 @@
     "notes": []
   },
   "random_forest": {
-    "source": "experiments/03_classifier/model.py",
+    "source": "models/random_forest.joblib scored on experiments/02_finaccess_prep/results/modelling_frame.csv",
     "validation": "geographic holdout: trained on the other 42 counties, scored on Central Kenya, which the model never saw (scripts/train_and_save.py protocol central_kenya_held_out, seed 42)",
-    "per_class_recall": null,
-    "notes": [
-      "experiments/03_classifier/model.py computes RandomForest per-class recall, but no RandomForest model is saved and this export does not retrain"
-    ]
+    "estimator": "random_forest",
+    "trained_on": "2026-11-02",
+    "auc_macro_ovr": 0.5808,
+    "macro_f1": 0.3986,
+    "per_class": {
+      "Low": {
+        "precision": 0.5994,
+        "recall": 0.5175
+      },
+      "Medium": {
+        "precision": 0.3191,
+        "recall": 0.3992
+      },
+      "High": {
+        "precision": 0.2893,
+        "recall": 0.2823
+      }
+    },
+    "per_class_recall": {
+      "Low": 0.5175,
+      "Medium": 0.3992,
+      "High": 0.2823
+    },
+    "confusion_matrix": [
+      [
+        428,
+        248,
+        151
+      ],
+      [
+        185,
+        194,
+        107
+      ],
+      [
+        101,
+        166,
+        105
+      ]
+    ],
+    "versus_deployed": {
+      "auc_macro_ovr": {
+        "deployed": 0.5683,
+        "random_forest": 0.5808,
+        "difference": 0.0125,
+        "better": "random_forest"
+      },
+      "macro_f1": {
+        "deployed": 0.3674,
+        "random_forest": 0.3986,
+        "difference": 0.0312,
+        "better": "random_forest"
+      },
+      "high_recall": {
+        "deployed": 0.5323,
+        "random_forest": 0.2823,
+        "difference": -0.25,
+        "better": "deployed"
+      }
+    },
+    "notes": []
   },
   "shap": {
     "source": "shap.TreeExplainer on models/classifier.joblib",

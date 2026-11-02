@@ -102,6 +102,23 @@ def test_change_role(admin_client):
     assert c.get("/api/interviews").status_code == 403
 
 
+def test_display_name(admin_client):
+    u, pw = create(admin_client, display_name="  Joseph   Mwangi ")
+    assert u["display_name"] == "Joseph Mwangi" and u["role"] == "officer"
+    c, _ = login(u["username"], pw)
+    assert c.get("/api/auth/me").json()["display_name"] == "Joseph Mwangi"
+    assert c.get("/api/auth/profile").json()["display_name"] == "Joseph Mwangi"
+    r = admin_client.put(f"/api/admin/users/{u['id']}/display-name", json={"display_name": "Joe Mwangi"})
+    assert r.status_code == 200 and r.json()["display_name"] == "Joe Mwangi"
+    r = admin_client.put(f"/api/admin/users/{u['id']}/display-name", json={"display_name": "   "})
+    assert r.json()["display_name"] is None                             # blank shows the username
+    (row,) = admin_client.get("/api/admin/audit", params={"action": "user.display_name",
+                                                          "entity_id": u["id"], "limit": 1}).json()
+    assert row["details"] == {"from": "Joe Mwangi", "to": None}
+    assert admin_client.put(f"/api/admin/users/{u['id']}/display-name",
+                            json={"display_name": "x" * 121}).status_code == 422
+
+
 def test_link_google_email(admin_client):
     a, _ = create(admin_client)
     b, _ = create(admin_client)

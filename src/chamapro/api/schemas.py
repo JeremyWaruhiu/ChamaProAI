@@ -243,6 +243,7 @@ class AuthConfig(BaseModel):
 class Me(ORM):
     username: str
     role: Role
+    display_name: str | None = Field(default=None, description="Shown beside the role; null shows the username")
 
 
 class ProfileMember(BaseModel):
@@ -254,6 +255,7 @@ class Profile(BaseModel):
     """The signed-in user's own account (GET /api/auth/profile)."""
     username: str
     role: Role
+    display_name: str | None = None
     email: str | None = Field(description="The Google account linked for sign-in, if any")
     google_sign_in_available: bool = Field(description="False when the server has no Google client ID")
     member: ProfileMember | None = Field(description="Member logins: the member record linked")
@@ -554,6 +556,7 @@ EMAIL = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 class UserOut(ORM):
     id: int
     username: str
+    display_name: str | None = None
     role: Role
     email: str | None
     is_active: bool
@@ -567,6 +570,7 @@ class UserCreate(BaseModel):
     username: str = Field(pattern=USERNAME)
     password: str = Field(min_length=10, max_length=1024)
     role: Role = "officer"
+    display_name: str | None = Field(default=None, max_length=120)
     email: str | None = Field(default=None, max_length=254)
     member_id: int | None = Field(default=None, description="Members only: link the login to a member")
 
@@ -577,6 +581,10 @@ class PasswordReset(BaseModel):
 
 class RoleChange(BaseModel):
     role: Role
+
+
+class DisplayNameChange(BaseModel):
+    display_name: str | None = Field(max_length=120, description="null or blank shows the username")
 
 
 class EmailLink(BaseModel):

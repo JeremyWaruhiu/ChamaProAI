@@ -23,9 +23,14 @@ from datetime import date
 from pathlib import Path
 
 # Must precede any chamapro import: config reads these once at import time.
+# DATABASE_URL and STORAGE_BACKEND are set outright, not left to .env: load_dotenv
+# never overrides a variable that is already set, and a .env pointing at Supabase
+# would otherwise put every test row (and the worker's fake transcripts) there.
 _TMP = Path(tempfile.mkdtemp(prefix="chamapro-test-"))
 os.environ["CHAMAPRO_DB"] = str(_TMP / "test.db")
+os.environ["DATABASE_URL"] = f"sqlite:///{_TMP / 'test.db'}"
 os.environ["CHAMAPRO_UPLOADS"] = str(_TMP / "uploads")
+os.environ["STORAGE_BACKEND"] = "local"
 
 import numpy as np  # noqa: E402
 import pytest  # noqa: E402

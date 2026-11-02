@@ -225,7 +225,8 @@ def profile(request: Request, user: User = Depends(auth.current_user),
     sessions = db.scalar(select(func.count()).select_from(AuthSession)
                          .where(AuthSession.user_id == user.id,
                                 AuthSession.expires_at > utcnow())) or 0
-    return s.Profile(username=user.username, role=user.role, email=user.email,
+    return s.Profile(username=user.username, role=user.role, display_name=user.display_name,
+                     email=user.email,
                      google_sign_in_available=bool(config.GOOGLE_CLIENT_ID),
                      member=member and s.ProfileMember(member_no=member.member_no,
                                                        full_name=member.full_name),

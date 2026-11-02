@@ -184,6 +184,8 @@ export const api = {
   resetPassword: (id: number, password: string) =>
     request<UserOut>(`/admin/users/${id}/password`, json('PUT', { password })),
   changeRole: (id: number, role: Role) => request<UserOut>(`/admin/users/${id}/role`, json('PUT', { role })),
+  setDisplayName: (id: number, name: string | null) =>
+    request<UserOut>(`/admin/users/${id}/display-name`, json('PUT', { display_name: name?.trim() || null })),
   linkGoogle: (id: number, email: string | null) =>
     request<UserOut>(`/admin/users/${id}/google-email`, json('PUT', { email: email?.trim() || null })),
   linkMember: (id: number, memberId: number | null) =>

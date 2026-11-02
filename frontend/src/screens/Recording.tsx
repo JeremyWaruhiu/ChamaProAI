@@ -11,7 +11,7 @@ import { SkeletonPage } from '../components/ui'
 import { useHealth } from '../hooks/useHealth'
 import { useInterview } from '../hooks/useInterview'
 import { useQuestions } from '../hooks/useQuestions'
-import { extensionFor, recordingSupported, useRecorder } from '../hooks/useRecorder'
+import { extensionFor, micUnavailable, useRecorder } from '../hooks/useRecorder'
 import { domainLabel, topicsOf } from '../lib/domains'
 import { applicantName, formatClock } from '../lib/format'
 import { fade, fadeUp, useReducedMotion } from '../lib/motion'
@@ -106,6 +106,7 @@ type Busy = null | 'uploading' | 'deleting' | 'saving'
 
 function AnswerPanel({ interview, q, onChange }: { interview: InterviewState; q: Question; onChange: () => Promise<void> }) {
   const rec = useRecorder()
+  const blocked = micUnavailable()
   const reduced = useReducedMotion()
   const [busy, setBusy] = useState<Busy>(null)
   const [waitingFor, setWaitingFor] = useState<number | null>(null)
@@ -247,7 +248,7 @@ function AnswerPanel({ interview, q, onChange }: { interview: InterviewState; q:
     body = (
       <div className={styles.recorder}>
         <p className={styles.instructions}>{R.askThen}</p>
-        {recordingSupported() ? (
+        {blocked ? <MicUnavailable reason={blocked} /> : (
           <>
             <button type="button" className={styles.recButton} onClick={rec.start} disabled={rec.state === 'starting'}
                     aria-describedby="rec-hint">
@@ -257,8 +258,6 @@ function AnswerPanel({ interview, q, onChange }: { interview: InterviewState; q:
             <p className={styles.recLabel}>{rec.state === 'starting' ? R.starting : R.record}</p>
             <p id="rec-hint" className="subtle small">{R.recordHint}</p>
           </>
-        ) : (
-          <p className="muted">{R.noMic}</p>
         )}
         {idleActions}
       </div>
@@ -277,6 +276,12 @@ function AnswerPanel({ interview, q, onChange }: { interview: InterviewState; q:
 }
 
 /** Twenty segments that light up with the microphone's level. */
+/** In place of the Record button when this page cannot use the microphone. */
+export function MicUnavailable({ reason }: { reason: 'insecure' | 'unsupported' }) {
+  if (reason === 'unsupported') return <p className="muted">{R.noMic}</p>
+  return <Notice tone="warning" title={R.insecureTitle}>{R.insecureBody(window.location.origin)}</Notice>
+}
+
 export function LevelMeter({ level, segments = 20 }: { level: number; segments?: number }) {
   const lit = Math.round(Math.max(0, Math.min(1, level)) * segments)
   return (
