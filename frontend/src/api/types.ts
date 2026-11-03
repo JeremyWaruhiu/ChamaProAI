@@ -294,6 +294,7 @@ export interface LiveStats {
     undetermined: number
     rate: number | null
   }
+  computed_at?: string // when these were read from the database; the server keeps them a minute
 }
 
 export interface Results {

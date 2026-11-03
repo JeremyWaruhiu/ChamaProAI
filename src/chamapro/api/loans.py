@@ -17,7 +17,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException, Query, Response as HTTPResponse
 from sqlalchemy import func, or_, select
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from . import audit, comparator, member_text
 from . import schemas as s
@@ -175,6 +175,14 @@ def timeline(db: Session, app: LoanApplication) -> list[s.TimelineEntry]:
             out.append(s.TimelineEntry(status=status, label=member_text.STATUS_LABEL[status],
                                        at=r.created_at))
     return out
+
+
+# Everything summary() reads, in the same query as the applications: without
+# it each row costs up to four more round trips (member, interview, assessment,
+# decision).
+SUMMARY_LOAD = (joinedload(LoanApplication.member),
+                joinedload(LoanApplication.interview).joinedload(Interview.assessment),
+                joinedload(LoanApplication.interview).joinedload(Interview.decision))
 
 
 def summary(app: LoanApplication) -> s.ApplicationSummary:
@@ -354,8 +362,9 @@ def create_application(body: s.ApplicationCreate, db: Session = Depends(get_db),
 def list_applications(status: s.ApplicationStatus | None = None, member_id: int | None = None,
                       limit: int = Query(100, ge=1, le=500), offset: int = Query(0, ge=0),
                       db: Session = Depends(get_db), _: User = Depends(require_officer)):
-    stmt = select(LoanApplication).order_by(LoanApplication.created_at.desc(),
-                                            LoanApplication.id.desc()).limit(limit).offset(offset)
+    stmt = (select(LoanApplication).options(*SUMMARY_LOAD)
+            .order_by(LoanApplication.created_at.desc(), LoanApplication.id.desc())
+            .limit(limit).offset(offset))
     if status is not None:
         stmt = stmt.where(LoanApplication.status == status)
     if member_id is not None:
@@ -450,6 +459,7 @@ def my_applications(db: Session = Depends(get_db), user: User = Depends(require_
     if member is None:
         return []
     apps = db.scalars(select(LoanApplication).where(LoanApplication.member_id == member.id)
+                      .options(joinedload(LoanApplication.interview))   # for mode_of
                       .order_by(LoanApplication.created_at.desc(), LoanApplication.id.desc()))
     return [s.MyApplicationSummary(id=a.id, amount_requested_kes=a.amount_requested_kes,
                                    purpose=a.purpose, term_months=a.term_months, status=a.status,

@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import logging
 import sqlite3
+from contextvars import ContextVar
 from datetime import date, datetime, timezone
 from pathlib import Path
 
@@ -305,11 +306,15 @@ class AuditLog(Base):
 
 def make_engine(url: str) -> Engine:
     if make_url(url).get_backend_name() != "sqlite":
-        # Supabase's pooler closes idle connections; recycle ahead of its idle
-        # timeout instead of paying a pre-ping round trip on every checkout
-        # (~200 ms from Nairobi to eu-west-1).
-        return create_engine(url, pool_size=5, max_overflow=5,
-                             pool_recycle=240, pool_timeout=10)
+        # Supabase's pooler closes idle connections, and recycling ahead of
+        # its idle timeout does not catch one dropped for any other reason: a
+        # dead pooled connection hangs the request that gets it. The pre-ping
+        # costs a round trip per checkout (~200 ms from Nairobi to eu-west-1),
+        # so a request checks out once (auth shares get_db's session).
+        # connect_timeout stops a stalled connect at 10 s instead of hanging.
+        return create_engine(url, pool_size=5, max_overflow=5, pool_recycle=240,
+                             pool_timeout=10, pool_pre_ping=True,
+                             connect_args={"connect_timeout": 10})
     eng = create_engine(url, connect_args={"check_same_thread": False, "timeout": 30})
 
     @event.listens_for(eng, "connect")
@@ -332,6 +337,16 @@ engine = make_engine(config.DATABASE_URL)   # connects on first use, not here
 if (_f := sqlite_file(engine)) is not None:
     _f.parent.mkdir(parents=True, exist_ok=True)
 SessionLocal = sessionmaker(engine, expire_on_commit=False)
+
+# Statements run for the current API request, for its log line (main.QueryLog).
+# None outside a request: the transcription worker's queries are not counted.
+query_count: ContextVar[list[int] | None] = ContextVar("query_count", default=None)
+
+
+@event.listens_for(engine, "before_cursor_execute")
+def _count_query(*_):
+    if (n := query_count.get()) is not None:
+        n[0] += 1
 
 
 def get_db():

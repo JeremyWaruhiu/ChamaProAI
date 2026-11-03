@@ -1,6 +1,7 @@
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
 import type { Results } from '../api/types'
+import { formatTime } from '../lib/format'
 import { NOT_MEASURED } from '../lib/measure'
 import { ResultsBody } from './Results'
 
@@ -23,6 +24,15 @@ describe('ResultsBody', () => {
     const out = renderToStaticMarkup(<ResultsBody data={{ generated_at: '2026-10-19T00:00:00Z', live }} />)
     expect(out).toContain('Live interviews')
     expect(out).toContain('Practice interviews are left out of every figure here (2 held)')
+  })
+
+  it('says when the live figures were computed, when the server says', () => {
+    const at = '2026-11-02T13:42:05.123+00:00'
+    const out = renderToStaticMarkup(<ResultsBody data={{ generated_at: '2026-10-19T00:00:00Z', live: { ...live, computed_at: at } }} />)
+    expect(out).toContain(`Computed at ${formatTime(at)}.`)
+    expect(out).toContain('kept for up to a minute')
+    expect(renderToStaticMarkup(<ResultsBody data={{ generated_at: '2026-10-19T00:00:00Z', live }} />))
+      .not.toContain('Computed at')
   })
 
   it('shows null metrics as "not yet measured" next to measured ones', () => {

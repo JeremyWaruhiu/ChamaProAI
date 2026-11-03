@@ -19,11 +19,11 @@ from datetime import timedelta
 
 from fastapi import Depends, HTTPException, Request
 from sqlalchemy import delete, select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from chamapro import config
 
-from .db import AuthSession, SessionLocal, User, normalise_email, utcnow
+from .db import AuthSession, User, get_db, normalise_email, utcnow
 
 log = logging.getLogger("chamapro.auth")
 
@@ -193,25 +193,23 @@ def cookie_secure(request: Request) -> bool:
 
 # --- Dependencies ------------------------------------------------------------------
 
-def current_user(request: Request) -> User:
-    """The signed-in user, or 401. Its own short database session, so it can be
-    used as a route dependency alongside get_db."""
+def current_user(request: Request, db: Session = Depends(get_db)) -> User:
+    """The signed-in user, or 401. FastAPI hands this and the route the same
+    get_db session, so a request checks out one connection, and the session
+    and its user are one query."""
     token = request.cookies.get(COOKIE)
     if not token:
         raise HTTPException(401, "not signed in")
-    with SessionLocal() as db:
-        s = db.get(AuthSession, token_hash(token))
-        if s is None:
-            raise HTTPException(401, "not signed in")
-        if s.expires_at <= utcnow():
-            db.delete(s)
-            db.commit()
-            raise HTTPException(401, "session expired; sign in again")
-        user = s.user
-        if not user.is_active:
-            raise HTTPException(401, "not signed in")
-        db.expunge(user)
-        return user
+    s = db.get(AuthSession, token_hash(token), options=[joinedload(AuthSession.user)])
+    if s is None:
+        raise HTTPException(401, "not signed in")
+    if s.expires_at <= utcnow():
+        db.delete(s)
+        db.commit()
+        raise HTTPException(401, "session expired; sign in again")
+    if not s.user.is_active:
+        raise HTTPException(401, "not signed in")
+    return s.user
 
 
 def require_officer(user: User = Depends(current_user)) -> User:

@@ -19,15 +19,26 @@ decisions, the pipeline scripts, an HTTP API (`src/chamapro/api/`) over the
 pipeline, and the web app (`frontend/`): a public landing page, the staff
 dashboard and a member portal.
 
+## Quick start
+
+1. Install: Python, ffmpeg and the frontend packages, and the models in `models/` ([Prerequisites](#prerequisites), [Setup](#setup)).
+2. `cp .env.example .env` and fill it in ([Environment variables](#environment-variables)); `DATABASE_URL` picks the database ([Docker](#docker)).
+3. Supabase only: `docker compose run --rm app alembic upgrade head` ([Switching to Supabase](#switching-to-supabase)).
+4. First admin: `docker compose run --rm app python scripts/create_user.py admin --role admin` ([Users](#users)).
+5. `docker compose up --build -d`, then open http://localhost:8000 ([Docker](#docker)).
+6. `curl -s localhost:8000/api/health` reports the classifier, API key and speech models.
+
 ## Layout
 
 ```
 .env.example                          variable names for secrets (copy to .env)
-requirements.txt                      Python dependencies, pinned (CPU-only torch, OpenVINO)
+LICENSE                               access statement (all rights reserved; see Licence)
+requirements.txt                      Python dependencies: torch, transformers, OpenVINO pinned, the rest lower bounds
+requirements.lock.txt                 the exact tested environment (pip freeze); the Docker image installs it
 data/
   README.md                           data provenance and how to obtain it
   raw/                                FinAccess .dta goes here (never committed)
-  explore/                            explorer outputs (generated, never committed)
+  explore/                            for explorer output (gitignored)
 docs/
   ETHICS.md                           consent and data-protection statement
 experiments/
@@ -44,19 +55,27 @@ scripts/                              pipeline stages; each is a CLI and importa
 src/chamapro/config.py                loads .env, exposes keys and paths
 src/chamapro/questions.json           question sets v1 (built from docs/) and v2 (edited here), served to the dashboard
 models/                               classifier and OpenVINO ASR exports (gitignored; see Setup)
-src/chamapro/api/                     FastAPI app over the pipeline (SQLite storage)
+src/chamapro/api/                     FastAPI app over the pipeline (SQLite or PostgreSQL/Supabase, chosen by DATABASE_URL)
+src/chamapro/migrations/              Alembic schema migrations (see Migrations)
 frontend/                             React web app (Vite + TypeScript); see frontend/README.md
 docs/screenshots/                     screenshots of the main screens, desktop and phone-360/430 (fictional data)
 tests/                                API and script tests (pytest)
 Dockerfile, docker-compose.yml        one-image deployment, CPU or Intel GPU (see Docker)
 scripts/demo_tunnel.sh                public https URL for an online demo (see Online demo)
-scripts/explore_finaccess.py            browse the FinAccess microdata
+scripts/explore_finaccess.py          browse the FinAccess microdata
 ```
 
 ## Prerequisites
 
-- **Python 3.11** (developed on 3.11.9). The commands below are for Windows
-  PowerShell; on macOS/Linux use `source .venv/bin/activate` and `cp`.
+- **Windows 11 with WSL2, Ubuntu 24.04.** The commands below are bash, run in
+  the Ubuntu shell. Native Windows is not supported: Smart App Control blocked
+  compiled Python extensions on the development machine, which is why
+  development moved to WSL2.
+- **Python 3.12** (developed on 3.12.3, Ubuntu 24.04's `python3`; CI and the
+  Docker image also use 3.12), with `python3-venv`.
+- **Node.js 24** for the dashboard (CI and the Docker build use 24).
+- **ffmpeg**, to convert what browsers record (webm, mp4); the upload tests
+  skip without it.
 - **Git**.
 - About 5 GB of free disk for the virtual environment and the Hugging Face
   model cache (NLLB-200 is downloaded on first run of experiment 01).
@@ -67,20 +86,25 @@ scripts/explore_finaccess.py            browse the FinAccess microdata
 
 ## Setup
 
-```powershell
+```bash
+sudo apt-get update && sudo apt-get install -y python3-venv ffmpeg git
 git clone https://github.com/JeremyWaruhiu/ChamaProAI.git
 cd ChamaProAI
-python -m venv .venv
-.venv\Scripts\activate
-pip install -r requirements.txt
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.lock.txt
 pip install -e .            # makes src/chamapro importable (needed by the API)
-copy .env.example .env      # then fill in the values
+cp .env.example .env        # then fill in the values
+(cd frontend && npm ci)     # the dashboard's packages, exactly as package-lock.json
 ```
 
-`requirements.txt` pins the environment the system is tested on, including
-the CPU-only build of PyTorch with its matching torchvision (a mismatched
-torchvision breaks `from transformers import pipeline`;
-`tests/test_environment.py` checks the installed versions against the pins).
+`requirements.lock.txt` is the exact environment the system is tested on (a
+`pip freeze`, the editable package left out); the Docker image installs the
+same file. CI installs `requirements.txt` instead: its pins (the CPU-only
+build of PyTorch with its matching torchvision, transformers, numpy, OpenVINO
+and the export tools) match the lock, and its other entries are lower bounds.
+A mismatched torchvision breaks `from transformers import pipeline`;
+`tests/test_environment.py` checks the installed versions against the pins.
 No CUDA is needed.
 
 Speech recognition runs on OpenVINO with int8 weights, on an Intel GPU where
@@ -88,7 +112,7 @@ there is one and on the CPU otherwise. Export the two models once (downloads
 about 3 GB into `.hf_cache/`, writes `models/paza-ov-int8/` and
 `models/whisper-en-ov-int8/`, both gitignored):
 
-```powershell
+```bash
 python scripts/export_openvino.py              # or --only kik / --only en
 ```
 
@@ -101,7 +125,7 @@ times slower on a CPU.
 
 | Variable         | Needed by      | Where to get it                                              |
 |------------------|----------------|--------------------------------------------------------------|
-| `GOOGLE_API_KEY` | experiment 01  | Google AI Studio -> Get API key                              |
+| `GOOGLE_API_KEY` | experiment 01; the pipeline's Gemini key when `GEMINI_API_KEY` is unset | Google AI Studio -> Get API key |
 | `HF_TOKEN`       | experiment 01  | huggingface.co -> Settings -> Access Tokens (read). You must also accept the terms of `openlanguagedata/flores_plus`. |
 | `KHAYA_API_KEY`  | experiment 01  | GhanaNLP Khaya studio (only if Kikuyu is supported)          |
 | `HF_HOME`        | optional       | Hugging Face cache location; defaults to `.hf_cache/` in the project |
@@ -118,8 +142,8 @@ active.
 Decides which Kikuyu->English translator the pipeline uses, measured on the
 first 100 FLORES+ `dev` sentence pairs with chrF++ (decision metric) and BLEU.
 
-```powershell
-python experiments\01_translation_bakeoff\run_bakeoff.py
+```bash
+python experiments/01_translation_bakeoff/run_bakeoff.py
 ```
 
 Options: `--systems gemini,nllb`, `--n 100`, `--delay 7` (seconds between
@@ -138,9 +162,9 @@ entirely and used as an unseen target population. Leakage variables are
 excluded; `--include-suspect` re-admits the borderline ones so their effect can
 be measured.
 
-```powershell
-python experiments\02_finaccess_prep\prep.py
-python experiments\02_finaccess_prep\prep.py --include-suspect
+```bash
+python experiments/02_finaccess_prep/prep.py
+python experiments/02_finaccess_prep/prep.py --include-suspect
 ```
 
 Writes `modelling_frame[_suspect].csv` (gitignored, derived from licensed data)
@@ -152,9 +176,9 @@ Trains the credit-risk classifier on the frame from experiment 02, compares it
 with a rule-based baseline, and reports SHAP explanations. Run experiment 02
 first.
 
-```powershell
-python experiments\03_classifier\model.py --tag _base_3c
-python experiments\03_classifier\model.py --frame experiments\02_finaccess_prep\results\modelling_frame_suspect.csv --tag _suspect_3c
+```bash
+python experiments/03_classifier/model.py --tag _base_3c
+python experiments/03_classifier/model.py --frame experiments/02_finaccess_prep/results/modelling_frame_suspect.csv --tag _suspect_3c
 ```
 
 Options: `--binary` (default/no-default, banded back into three classes),
@@ -181,9 +205,9 @@ Restricts to SACCO and chama borrowers and adds loan-module features. Central
 Kenya is too small to hold out here, so classification uses a stratified random
 split.
 
-```powershell
-python experiments\04_borrower_subset\prep_borrowers.py
-python experiments\03_classifier\model.py --frame experiments\04_borrower_subset\results\borrower_frame.csv --random-split --tag _e04_3c
+```bash
+python experiments/04_borrower_subset/prep_borrowers.py
+python experiments/03_classifier/model.py --frame experiments/04_borrower_subset/results/borrower_frame.csv --random-split --tag _e04_3c
 ```
 
 `model.py` always writes to `experiments/03_classifier/results/`; the committed
@@ -191,14 +215,16 @@ experiment 04 results were moved into `experiments/04_borrower_subset/results/`.
 
 ### FinAccess explorer
 
-The microdata is 20,871 rows x 3,816 variables, too large to open whole. The
-explorer writes a codebook and slices to `data/explore/` (gitignored).
+The microdata is 20,871 rows x 3,816 variables, too wide to browse by eye.
+The explorer prints to the terminal; only `dictionary --out` writes a file
+(`data/explore/` is gitignored for that).
 
-```powershell
-python tools\explore_finaccess.py --dictionary          # full codebook
-python tools\explore_finaccess.py --search "sacco|chama"
-python tools\explore_finaccess.py --values E2E
-python tools\explore_finaccess.py --export county,E2E,A18,Sex,B3Ii
+```bash
+python scripts/explore_finaccess.py overview                 # rows, columns, memory, dtypes
+python scripts/explore_finaccess.py dictionary --out data/explore/codebook.csv
+python scripts/explore_finaccess.py search chama             # variables by name or label
+python scripts/explore_finaccess.py show E2E                 # one variable, with value labels
+python scripts/explore_finaccess.py crosstab county E2E      # row percentages
 ```
 
 ## Data protection
@@ -272,8 +298,9 @@ extraction model's reply.
 
 ### Environment variables
 
-Set in `.env` (see `.env.example`): `GEMINI_API_KEY`, `GEMINI_MODEL`,
-`ASR_MODEL`, `ASR_LANGUAGE`, `HF_TOKEN`. `ASR_LANGUAGE=sw` uses Swahili as the
+Set in `.env` (`.env.example` lists only the experiment 01 keys and
+`GOOGLE_CLIENT_ID`; add these yourself): `GEMINI_API_KEY` (falls back to
+`GOOGLE_API_KEY`), `GEMINI_MODEL`, `ASR_MODEL`, `ASR_LANGUAGE`, `HF_TOKEN`. `ASR_LANGUAGE=sw` uses Swahili as the
 nearest proxy, since Whisper has no Kikuyu token.
 
 | Variable                 | Default                                 | Meaning |
@@ -409,20 +436,20 @@ the Docker image serves the built one.
 | GET    | `/api/me/applications`             | a member's own applications (members only) |
 | GET    | `/api/me/applications/{id}`        | status timeline, outcome, message and three plain-language reasons |
 | POST   | `/api/me/applications/{id}/guarantors` | `{guarantors: [{full_name, member_no, phone, relationship, amount_guaranteed_kes}]}`, when asked for |
-| GET/POST | `/api/admin/users`               | list users; create `{username, password, role, email?, member_id?}` (admin) |
+| GET/POST | `/api/admin/users`               | list users; create `{username, password, role, display_name?, email?, member_id?}` (admin) |
 | POST   | `/api/admin/users/{id}/deactivate`, `/activate` | (admin) |
-| PUT    | `/api/admin/users/{id}/password`, `/role`, `/google-email`, `/member` | reset a password, change role, link a Google email or a member record (admin) |
+| PUT    | `/api/admin/users/{id}/password`, `/role`, `/display-name`, `/google-email`, `/member` | reset a password, change role or display name, link a Google email or a member record (admin) |
 | GET    | `/api/admin/audit?actor_user_id=&action=&entity=&entity_id=&since=&until=` | the audit log, newest first (admin) |
 | GET    | `/api/health`                      | classifier, API key, ASR engine/device/model per language (no sign-in needed) |
-| POST   | `/api/auth/login`                  | `{username, password}`; sets the session cookie, returns `{username, role}` |
+| POST   | `/api/auth/login`                  | `{username, password}`; sets the session cookie, returns `{username, role, display_name}` |
 | POST   | `/api/auth/google`                 | `{credential}` (Google ID token); signs in the linked user; 404 when not configured |
 | GET    | `/api/auth/config`                 | `{google_client_id}`, null when Google sign-in is off (no sign-in needed) |
 | POST   | `/api/auth/logout`                 | ends the session and clears the cookie          |
-| GET    | `/api/auth/me`                     | `{username, role}` of the signed-in user, or 401 |
+| GET    | `/api/auth/me`                     | `{username, role, display_name}` of the signed-in user, or 401 |
 | GET    | `/api/auth/profile`                | your own account: email, linked Google account, member record, sessions (every role) |
 | POST   | `/api/auth/password`               | `{current_password, new_password}`; ends your other sessions (every role, rate-limited) |
 | POST   | `/api/auth/logout-all`             | ends every session of yours, this one included |
-| GET    | `/api/results`                     | model and evaluation summary plus live stats, practice interviews excluded (admin only) |
+| GET    | `/api/results`                     | model and evaluation summary plus live stats, practice interviews excluded; the live stats are cached for 60 s and `live.computed_at` says when they were read (admin only) |
 
 Every endpoint except `/api/health`, `/api/auth/config` and the sign-in endpoints needs a signed-in
 user: 401 without one, 403 for the wrong role. There are three roles. Officers
@@ -637,8 +664,10 @@ so never point it at production).
 - Corpus is 40 responses from one speaker; no speaker-independent claim holds.
 - ASR speed depends on the engine: see the ASR benchmark above. With the
   torch engine on a CPU it runs slower than real time.
-- Decoder repetition collapse affects ~10% of clips.
-- Cascade yield is 62.5%; asset-ownership responses currently yield nothing.
+- Decoder repetition collapse: none of the 40 Paza transcripts in the
+  evaluation, but 5 of 40 (12.5%) with whisper-small (`results/summary.json`).
+- Cascade yield (answers that come out translated) is 80% with Paza, lowest
+  for asset ownership (2 of 5) and chama (3 of 5); whisper-small's is 62.5%.
 - Feature extraction requires connectivity; capture and typed entry do not.
 - Question set v2 has no Kikuyu wording yet (`text_kik` is ""); the dashboard
   shows the English until a native speaker supplies it.
@@ -651,7 +680,7 @@ so never point it at production).
 
 Prerequisites: setup above, a `.env` with `GEMINI_API_KEY`, the trained
 classifier in `models/` (`python scripts/train_and_save.py`), and Node.js
-20.19 or later for the dashboard.
+24 for the dashboard.
 
 1. **Seed the demo interviews** (about a second, no model needed):
 
@@ -668,7 +697,7 @@ classifier in `models/` (`python scripts/train_and_save.py`), and Node.js
 3. **Start the dashboard** in a second terminal:
 
        cd frontend
-       npm install          # first time only
+       npm ci               # first time only
        npm run dev
 
 4. **Create a user** the first time (see [Users](#users)):
@@ -676,8 +705,9 @@ classifier in `models/` (`python scripts/train_and_save.py`), and Node.js
        python scripts/create_user.py admin --role admin
 
 5. Open **http://localhost:5173** and sign in. Check
-   http://localhost:8000/api/health shows `"status": "ok"`. Admins see a
-   **Model & Evaluation** link in the interview list header; officers do not.
+   http://localhost:8000/api/health shows `"status": "ok"`. Admins start on
+   the admin overview and find **Model & Evaluation** in the sidebar's
+   administration section; officers do not see it.
 
 A demo run:
 
@@ -851,3 +881,27 @@ reconnects on its own when the connection returns; if the URL stops working,
 press Ctrl-C and run `scripts/demo_tunnel.sh` again for a new one.
 
 Afterwards: Ctrl-C the tunnel, then `docker compose down`.
+
+## Licence and third-party components
+
+Copyright (c) 2026 Jeremy Kang'ethe Waruhiu. All rights reserved. The
+repository is shared publicly for academic assessment at Strathmore
+University; no licence to reuse, modify or redistribute it is granted without
+written permission. See [LICENSE](LICENSE).
+
+The system uses third-party components that keep their own terms and are not
+covered by that statement:
+
+| Component | Used for | Terms |
+|-----------|----------|-------|
+| [microsoft/paza-whisper-large-v3-turbo](https://huggingface.co/microsoft/paza-whisper-large-v3-turbo) | Kikuyu speech recognition | MIT |
+| [openai/whisper-large-v3-turbo](https://huggingface.co/openai/whisper-large-v3-turbo) | English speech recognition | MIT |
+| Gemini API (Google) | translation and feature extraction | Google's API terms of service |
+| FinAccess 2024 microdata (FSD Kenya) | training the classifier | licensed for research use; not redistributed here (see [data/README.md](data/README.md)) |
+
+The Python and npm packages the project installs (`requirements.lock.txt`,
+`frontend/package-lock.json`) are likewise under their own licences.
+
+## Versions
+
+The version submitted with the final report is tagged `v1.0`.

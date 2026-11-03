@@ -25,7 +25,10 @@ router = APIRouter(prefix="/api/admin", responses=ERRORS)
 
 
 def user_out(db: Session, u: User) -> s.UserOut:
-    m = db.scalar(select(Member).where(Member.user_id == u.id))
+    return as_user_out(u, db.scalar(select(Member).where(Member.user_id == u.id)))
+
+
+def as_user_out(u: User, m: Member | None) -> s.UserOut:
     return s.UserOut(id=u.id, username=u.username, display_name=u.display_name, role=u.role,
                      email=u.email,
                      is_active=u.is_active, created_at=u.created_at,
@@ -91,7 +94,10 @@ def link_member(db: Session, u: User, member_id: int | None, actor: User) -> Non
 
 @router.get("/users", response_model=list[s.UserOut])
 def list_users(db: Session = Depends(get_db), _: User = Depends(require_admin)):
-    return [user_out(db, u) for u in db.scalars(select(User).order_by(User.username))]
+    # Each user with their member record, if any, in one query (user_id is unique).
+    rows = db.execute(select(User, Member).outerjoin(Member, Member.user_id == User.id)
+                      .order_by(User.username))
+    return [as_user_out(u, m) for u, m in rows]
 
 
 @router.post("/users", status_code=201, response_model=s.UserOut)

@@ -11,6 +11,9 @@ import { t } from '../strings'
 export const REQUEST_TIMEOUT_MS = 15_000
 /** Assessment translates, extracts and scores in one call: about 30 s, so it gets longer. */
 export const ASSESS_TIMEOUT_MS = 90_000
+/** The live statistics behind Model & Evaluation and the admin overview: a few
+ * queries, each a round trip to Supabase, when the server's copy has expired. */
+export const RESULTS_TIMEOUT_MS = 30_000
 
 /** Every failure, network or HTTP, arrives as one of these with a readable message. */
 export class ApiError extends Error {
@@ -155,7 +158,7 @@ export const api = {
   decide: (interviewId: number, body: DecisionCreate) =>
     request<Decision>(`/interviews/${interviewId}/decision`, json('POST', body)),
   audioUrl: (responseId: number) => `/api/responses/${responseId}/audio`,
-  results: () => request<Results>('/results'),
+  results: () => request<Results>('/results', undefined, RESULTS_TIMEOUT_MS),
 
   // members and loan applications (staff)
   members: (q?: string, limit = 50) => request<Member[]>(`/members${query({ q: q?.trim(), limit })}`),

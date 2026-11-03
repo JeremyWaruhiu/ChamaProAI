@@ -6,7 +6,7 @@ import {
 } from '../components/Charts'
 import { ErrorNotice } from '../components/Notice'
 import { Badge, PageHeader, SkeletonPage } from '../components/ui'
-import { formatDateTime } from '../lib/format'
+import { formatDateTime, formatTime } from '../lib/format'
 import { VERSUS_METRICS, overall, verdict } from '../lib/compare'
 import { NOT_MEASURED, fmt, isMeasured, pct } from '../lib/measure'
 import { RISK_ORDER } from '../lib/risk'
@@ -183,6 +183,7 @@ export function ResultsBody({ data }: { data: ResultsData }) {
         <p className={`muted ${styles.small}`}>
           {T.agreement(live.decision_agreement.agreements, live.decision_agreement.decisions, live.decision_agreement.rule)}
           {T.practiceLeftOut(live.practice_interview_count)}
+          {live.computed_at && T.computedAt(formatTime(live.computed_at))}
         </p>
         <Caption source={T.liveSource(live.source)} validation={T.liveValidation} />
       </Card>

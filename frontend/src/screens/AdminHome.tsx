@@ -6,7 +6,7 @@ import { ErrorNotice } from '../components/Notice'
 import { Badge, Card, DetailList, EmptyState, Kpi, PageHeader, SkeletonList } from '../components/ui'
 import { cx } from '../lib/cx'
 import { useLoad } from '../hooks/useLoad'
-import { formatDateTime } from '../lib/format'
+import { formatDateTime, formatTime } from '../lib/format'
 import { isMeasured, pct } from '../lib/measure'
 import { RISK_ORDER } from '../lib/risk'
 import { paths } from '../lib/router'
@@ -34,7 +34,7 @@ export function AdminHome() {
 
   return (
     <>
-      <PageHeader title={H.title} lead={H.lead}
+      <PageHeader title={H.title} lead={<>{H.lead}{live?.computed_at && H.computedAt(formatTime(live.computed_at))}</>}
                   actions={<a href={paths.results()} className="btn btn-secondary"><Icon name="chart" /> {t.nav.results}</a>} />
 
       {results.error && <ErrorNotice doing={H.statsFailed} error={results.error} onRetry={results.reload} />}

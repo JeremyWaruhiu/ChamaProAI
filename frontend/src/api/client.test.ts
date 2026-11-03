@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { ASSESS_TIMEOUT_MS, ApiError, REQUEST_TIMEOUT_MS, api, setUnauthorizedHandler } from './client'
+import {
+  ASSESS_TIMEOUT_MS, ApiError, REQUEST_TIMEOUT_MS, RESULTS_TIMEOUT_MS, api, setUnauthorizedHandler,
+} from './client'
 
 /** A fetch that never answers until its signal aborts, like a server stuck restarting. */
 function hangingFetch() {
@@ -34,6 +36,19 @@ describe('request timeout', () => {
     expect(settled).toBe(false)
     await vi.advanceTimersByTimeAsync(ASSESS_TIMEOUT_MS - REQUEST_TIMEOUT_MS)
     expect(((await result) as ApiError).timedOut).toBe(true)
+  })
+
+  it('gives the live statistics 30 seconds', async () => {
+    expect(RESULTS_TIMEOUT_MS).toBe(30_000)
+    vi.stubGlobal('fetch', hangingFetch())
+    let settled = false
+    const result = api.results().catch((e: unknown) => e).finally(() => { settled = true })
+    await vi.advanceTimersByTimeAsync(REQUEST_TIMEOUT_MS)
+    expect(settled).toBe(false)
+    await vi.advanceTimersByTimeAsync(RESULTS_TIMEOUT_MS - REQUEST_TIMEOUT_MS)
+    const e = (await result) as ApiError
+    expect(e.timedOut).toBe(true)
+    expect(e.message).toMatch(/within 30 seconds/)
   })
 
   it('does not time out a request that answered', async () => {

@@ -32,6 +32,9 @@ os.environ["CHAMAPRO_DB"] = str(_TMP / "test.db")
 os.environ["DATABASE_URL"] = f"sqlite:///{_TMP / 'test.db'}"
 os.environ["CHAMAPRO_UPLOADS"] = str(_TMP / "uploads")
 os.environ["STORAGE_BACKEND"] = "local"
+# Google sign-in is off unless a test turns it on (test_google_auth.py), whatever
+# GOOGLE_CLIENT_ID a developer's .env holds.
+os.environ["GOOGLE_CLIENT_ID"] = ""
 
 import numpy as np  # noqa: E402
 import pytest  # noqa: E402
@@ -68,11 +71,16 @@ def _abort_if_unsafe(when: str) -> None:
 
 _abort_if_unsafe("before anything ran")
 
-from chamapro.api import auth  # noqa: E402
+from chamapro.api import auth, live_cache  # noqa: E402
 from chamapro.api import pipeline as pl  # noqa: E402
 from chamapro.api import loans  # noqa: E402
 from chamapro.api.db import Assessment, Interview, Member, SessionLocal, User  # noqa: E402
 from chamapro.api.main import app  # noqa: E402
+
+# Test logins are hashed at a lower scrypt cost: ~1 ms instead of ~55 ms, paid
+# twice for every login a test makes (creating it, signing in). A stored hash
+# carries its own parameters, so verification runs the same code.
+auth.SCRYPT_N = 2 ** 10
 
 _abort_if_unsafe("before anything ran")   # again, now that the engine exists
 
@@ -249,6 +257,13 @@ def _reset_login_limiter():
     auth.limiter.clear()
     yield
     auth.limiter.clear()
+
+
+@pytest.fixture(autouse=True)
+def _no_cached_live_stats():
+    """Every test reads /api/results fresh; rows a test writes with raw SQL
+    would not drop the cache."""
+    live_cache.invalidate()
 
 
 @pytest.fixture

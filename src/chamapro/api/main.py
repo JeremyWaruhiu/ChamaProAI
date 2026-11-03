@@ -7,6 +7,7 @@ from __future__ import annotations
 import json
 import logging
 import math
+import time
 import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -20,22 +21,23 @@ from fastapi.responses import (FileResponse, JSONResponse, RedirectResponse,
                                Response as HTTPResponse)
 from sqlalchemy import case, delete, func, select
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, contains_eager, joinedload, selectinload
 
 from chamapro import config
 
-from . import admin, audit, auth, comparator, loans, storage
+from . import admin, audit, auth, comparator, live_cache, loans, storage
 from . import pipeline as pl
 from . import schemas as s
 from .auth import require_admin, require_officer
 from .comparator import RECOMMENDED_DECISION
 from .db import (Applicant, Assessment, AuthSession, Decision, Interview, LoanApplication,
-                 Member, Response, User, get_db, init_db, utcnow)
+                 Member, Response, User, get_db, init_db, query_count, utcnow)
 from .questions import CURRENT_SET, QUESTION_SETS, question
 
 if not logging.getLogger().handlers:
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
 log = logging.getLogger("chamapro.api")
+request_log = logging.getLogger("chamapro.requests")
 
 ERRORS = {code: {"model": s.Error} for code in (401, 403, 404, 409, 413, 415, 422, 502, 503)}
 # Every endpoint except /api/health and /api/auth/login needs a signed-in user;
@@ -54,8 +56,37 @@ async def lifespan(app: FastAPI):
     pl.stop_worker()
 
 
+class QueryLog:
+    """Logs each API request's database statements and time to response
+    (chamapro.requests). Against Supabase a page's cost is mostly round
+    trips, ~200 ms each, so the count is the number to watch."""
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http" or not scope["path"].startswith("/api/"):
+            return await self.app(scope, receive, send)
+        n, start, status = [0], time.perf_counter(), [None]
+        token = query_count.set(n)
+
+        async def send_and_log(message):
+            await send(message)
+            if message["type"] == "http.response.start":
+                status[0] = message["status"]
+            elif message["type"] == "http.response.body" and not message.get("more_body"):
+                # Logged when the response is sent, before any background task.
+                request_log.info("%s %s %s: %d queries, %.0f ms", scope["method"], scope["path"],
+                                 status[0], n[0], (time.perf_counter() - start) * 1000)
+        try:
+            await self.app(scope, receive, send_and_log)
+        finally:
+            query_count.reset(token)
+
+
 app = FastAPI(title="ChamaPro AI", version="0.1.0", lifespan=lifespan,
               responses={422: {"model": s.Error}, 500: {"model": s.Error}})
+app.add_middleware(QueryLog)
 app.add_middleware(CORSMiddleware,
                    allow_origin_regex=r"https?://(localhost|127\.0\.0\.1)(:\d+)?",
                    allow_methods=["*"], allow_headers=["*"])
@@ -273,37 +304,48 @@ def logout_all(request: Request, user: User = Depends(auth.current_user),
 
 def live_stats(db: Session) -> dict:
     """Aggregate counts from the database; no row-level data leaves here.
-    Practice interviews are left out of every figure."""
+    Practice interviews are left out of every figure. Three queries, four
+    once there are applications, however many rows there are: each one is a
+    round trip to Supabase."""
     live = Interview.mode == "live"
-    n_assessed = db.scalar(select(func.count(Assessment.id))
-                           .join(Interview, Interview.id == Assessment.interview_id).where(live)) or 0
-    dist = dict(db.execute(select(Assessment.risk_class, func.count(Assessment.id))
-                           .join(Interview, Interview.id == Assessment.interview_id).where(live)
-                           .group_by(Assessment.risk_class)).all())
-    completeness = db.scalar(select(func.avg(Assessment.extraction_completeness))
-                             .join(Interview, Interview.id == Assessment.interview_id).where(live))
-    pairs = db.execute(select(Assessment.risk_class, Decision.decision)
-                       .join(Decision, Decision.interview_id == Assessment.interview_id)
-                       .join(Interview, Interview.id == Assessment.interview_id).where(live)).all()
-    agree = sum(RECOMMENDED_DECISION.get(rc) == d for rc, d in pairs)
+    of_live = (Interview, Interview.id == Assessment.interview_id)
+    n_interviews, n_practice, completeness = db.execute(select(
+        select(func.count(Interview.id)).where(live).scalar_subquery(),
+        select(func.count(Interview.id)).where(Interview.mode == "practice").scalar_subquery(),
+        select(func.avg(Assessment.extraction_completeness)).join(*of_live).where(live)
+        .scalar_subquery())).one()
+    # Live assessments counted by risk class and decision (None: not decided yet).
+    groups = db.execute(select(Assessment.risk_class, Decision.decision, func.count(Assessment.id))
+                        .join(*of_live)
+                        .outerjoin(Decision, Decision.interview_id == Assessment.interview_id)
+                        .where(live).group_by(Assessment.risk_class, Decision.decision)).all()
+    dist = {}
+    for rc, _, n in groups:
+        dist[rc] = dist.get(rc, 0) + n
+    decided = [(rc, d, n) for rc, d, n in groups if d is not None]
+    n_decisions = sum(n for *_, n in decided)
+    agree = sum(n for rc, d, n in decided if RECOMMENDED_DECISION.get(rc) == d)
     apps = db.scalars(select(LoanApplication)
                       .join(Interview, Interview.id == LoanApplication.interview_id)
-                      .join(Assessment, Assessment.interview_id == Interview.id).where(live)).all()
+                      .join(Assessment, Assessment.interview_id == Interview.id).where(live)
+                      .options(contains_eager(LoanApplication.interview)
+                               .contains_eager(Interview.assessment),
+                               joinedload(LoanApplication.member),
+                               selectinload(LoanApplication.guarantors))).all()
     rule = [loans.comparator_of(a).agreement for a in apps]
     compared = rule.count("agree") + rule.count("diverge")
     return {
         "source": "live database; practice interviews excluded",
-        "interview_count": db.scalar(select(func.count(Interview.id)).where(live)) or 0,
-        "practice_interview_count": db.scalar(select(func.count(Interview.id))
-                                              .where(Interview.mode == "practice")) or 0,
-        "assessment_count": n_assessed,
+        "interview_count": n_interviews or 0,
+        "practice_interview_count": n_practice or 0,
+        "assessment_count": sum(dist.values()),
         "risk_class_distribution": {**dict.fromkeys(RECOMMENDED_DECISION, 0), **dist},
         "mean_extraction_completeness": None if completeness is None else round(float(completeness), 4),
         "decision_agreement": {
             "rule": "agree when Low->approve, Medium->refer, High->decline",
-            "decisions": len(pairs),
+            "decisions": n_decisions,
             "agreements": agree,
-            "rate": round(agree / len(pairs), 4) if pairs else None,
+            "rate": round(agree / n_decisions, 4) if n_decisions else None,
         },
         "rule_agreement": {
             "rule": comparator.RULE,
@@ -318,7 +360,8 @@ def live_stats(db: Session) -> dict:
 
 @app.get("/api/results", responses=ERRORS, dependencies=[Depends(require_admin)])
 def results(db: Session = Depends(get_db)):
-    """Exported evaluation summary plus live system stats. Read-only."""
+    """Exported evaluation summary plus live system stats (cached for a
+    minute; live.computed_at says when they were read). Read-only."""
     path = config.RESULTS_SUMMARY_PATH
     if not path.is_file():
         raise HTTPException(404, "results summary not found; run "
@@ -327,7 +370,7 @@ def results(db: Session = Depends(get_db)):
         summary = json.loads(path.read_text(encoding="utf-8"))
     except json.JSONDecodeError:
         raise HTTPException(503, f"{path.name} is not valid JSON; rerun scripts/export_results.py")
-    return {**summary, "live": live_stats(db)}
+    return {**summary, "live": live_cache.get(lambda: live_stats(db))}
 
 
 @app.get("/api/questions", response_model=list[s.Question], responses=ERRORS, dependencies=OFFICER)

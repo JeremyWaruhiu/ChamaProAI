@@ -10,6 +10,11 @@ export function formatDateTime(iso: string): string {
   })
 }
 
+/** 16:42:05: for a time within the last few minutes, such as when figures were computed. */
+export function formatTime(iso: string): string {
+  return new Date(iso).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+}
+
 export function formatClock(seconds: number): string {
   const s = Math.max(0, Math.floor(seconds))
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`

@@ -17,7 +17,7 @@ a one-line reason. Wireframe figure numbers refer to Chapter 4.
 | Question set v2: eight questions, one per topic, each targeting named classifier features; age, sex, education and marital status move to an applicant form | Changed | The 40-sentence draft asked many things the classifier never uses and left some features to chance. Form plus v2 cover the 40 features exactly once (tested). v1 is kept so the recorded Kikuyu demo and the evaluation still load. |
 | Practice interviews: a banner on every screen of the interview, the decision labelled practice, excluded from live statistics | Added | Officers need to rehearse on the real screens without a training run counting as a lending decision or skewing the figures on Model & Evaluation. |
 | English interviews (interview language Kikuyu or English) | Added | Some applicants prefer English. English answers are transcribed by the English Whisper model and are not translated. |
-| A request that gets no answer within 15 seconds (90 s for the assessment) shows an error with a Retry button | Added | The wireframes show no failure states; a stalled server must never leave a screen spinning forever. |
+| A request that gets no answer within 15 seconds (30 s for the live statistics on Model & Evaluation and the admin overview, 90 s for the assessment) shows an error with a Retry button | Added | The wireframes show no failure states; a stalled server must never leave a screen spinning forever. |
 
 ## Figure 4.8 — Login
 
