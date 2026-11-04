@@ -34,7 +34,11 @@ from .pipeline import score_interview
 
 MAX_QUESTIONS = 2
 OVERRIDE_KEYS = ("term_months", "monthly_income_kes", "expected_monthly_return_kes", "chama_loan_use",
-                 "chama_instalment_kes", "extra_guarantor", "accepted_amount_kes")
+                 "chama_instalment_kes", "extra_guarantor", "accepted_amount_kes", "household_size", "children")
+# Answers that replace a profile value the classifier reads.
+FEATURE_OVERRIDES = ("monthly_income_kes", "chama_loan_use", "household_size", "children")
+# What can clear a Medium score: an answer about the person. A term says nothing about them.
+CLEARS_MEDIUM = frozenset({"C2", "C3", "C4"})
 INCOME_FEATURES = ("log_monthly_income", "income_missing")
 # Words in a purpose that mean the loan earns money. The member's own words decide
 # nothing but whether C3 is worth asking, and an answer only ever adds to affordability.
@@ -66,6 +70,7 @@ def thresholds() -> dict:
             "AFFORDABILITY_RATIO": config.AFFORDABILITY_RATIO,
             "AFFORDABILITY_NEAR_BAND": config.AFFORDABILITY_NEAR_BAND,
             "PROFILE_STALE_DAYS": config.PROFILE_STALE_DAYS,
+            "UNVERIFIED_INCREASE_TOLERANCE": config.UNVERIFIED_INCREASE_TOLERANCE,
             "SAVINGS_MULTIPLIER": comparator.SAVINGS_MULTIPLIER,
             "MIN_GUARANTORS": comparator.MIN_GUARANTORS,
             "MIN_TENURE_MONTHS": comparator.MIN_TENURE_MONTHS}
@@ -145,6 +150,10 @@ class Facts:
     answered: frozenset[str] = frozenset()      # those given a value
     declined: frozenset[str] = frozenset()      # asked, no value
     final: bool = False                         # no more questions: settle on what is here
+    outstanding_principal_kes: int = 0          # on the member's active loans
+    profile_income_kes: int | None = None
+    income_stated: bool = False                 # the income came from the conversation
+    refer_reason: str | None = None             # the caller is stopping here: a person decides
 
 
 @dataclass(frozen=True)
@@ -168,6 +177,22 @@ class Worked:
         return any(g.pledge_id is None for g in self.chosen)
 
 
+def income_ceiling(profile_income_kes: int | None) -> int | None:
+    """The most a member's word carries; None when the profile holds no figure to go by."""
+    if profile_income_kes is None:
+        return None
+    return int(round(profile_income_kes * (1 + config.UNVERIFIED_INCREASE_TOLERANCE), 6))
+
+
+def income_needs_officer(f: Facts) -> bool:
+    """A stated income too far above the profile, or with no figure to compare it with.
+    It is still scored and shown; only a person can act on it."""
+    if not f.income_stated or f.income_kes is None:
+        return False
+    ceiling = income_ceiling(f.profile_income_kes)
+    return ceiling is None or f.income_kes > ceiling
+
+
 def income_is_top_driver(contributions) -> bool:
     if not isinstance(contributions, list):
         return False
@@ -177,7 +202,7 @@ def income_is_top_driver(contributions) -> bool:
 
 def work_out(f: Facts) -> Worked:
     held = f.deposits_kes if f.deposits_kes is not None else f.declared_savings_kes
-    rule_max = comparator.SAVINGS_MULTIPLIER * max(held, 0)
+    rule_max = max(comparator.SAVINGS_MULTIPLIER * max(held, 0) - f.outstanding_principal_kes, 0)
     obligations = f.loan_instalments_kes + f.chama_instalment_kes
     instalment = disposable = limit = affordable = passes = None
     near = False
@@ -209,7 +234,7 @@ def check_rows(f: Facts, w: Worked) -> list[dict]:
             declared_savings_kes=None if f.deposits_kes is not None else f.declared_savings_kes),
         row("membership", f.months_member >= need_months, months=f.months_member, minimum=need_months),
         row("savings_multiple", f.amount_kes <= w.rule_max_kes, amount_kes=f.amount_kes, maximum_kes=w.rule_max_kes,
-            multiplier=comparator.SAVINGS_MULTIPLIER),
+            multiplier=comparator.SAVINGS_MULTIPLIER, outstanding_principal_kes=f.outstanding_principal_kes),
         row("guarantors", len(w.chosen) >= comparator.MIN_GUARANTORS, usable=len(w.chosen),
             minimum=comparator.MIN_GUARANTORS, any_at_all=f.any_guarantor),
         row("guarantor_capacity", w.capacity_passes, need_kes=w.capacity_need_kes, own_free_kes=f.own_free_kes,
@@ -222,8 +247,10 @@ def check_rows(f: Facts, w: Worked) -> list[dict]:
             ratio=config.AFFORDABILITY_RATIO, rate=config.LOAN_INTEREST_MONTHLY, term_months=f.term_months),
         row("auto_limit", f.amount_kes <= config.AUTO_APPROVE_LIMIT_KES, amount_kes=f.amount_kes,
             limit_kes=config.AUTO_APPROVE_LIMIT_KES),
-        row("risk", f.risk_class == "Low" or (f.risk_class == "Medium" and bool(f.answered)),
-            risk_class=f.risk_class, clarifications_answered=sorted(f.answered)),
+        row("income_increase", not income_needs_officer(f), stated=f.income_stated, monthly_income_kes=f.income_kes,
+            profile_income_kes=f.profile_income_kes, most_accepted_kes=income_ceiling(f.profile_income_kes),
+            tolerance=config.UNVERIFIED_INCREASE_TOLERANCE),
+        row("risk", model_allows(f), risk_class=f.risk_class, clarifications_answered=sorted(f.answered)),
         row("no_arrears", not f.in_arrears, in_arrears=f.in_arrears),
     ]
 
@@ -252,9 +279,9 @@ def question_triggers(f: Facts, w: Worked) -> dict[str, bool]:
 def clarifications(f: Facts, w: Worked, fired: dict[str, bool]) -> list[str]:
     """At most two question ids, in priority order: those whose condition holds, that
     have not been asked, and whose answer could still change the outcome."""
-    if f.final or f.months_member < comparator.MIN_TENURE_MONTHS and f.deposits_kes is not None:
+    if f.final or f.refer_reason or f.months_member < comparator.MIN_TENURE_MONTHS and f.deposits_kes is not None:
         return []
-    if f.deposits_kes is None:
+    if f.deposits_kes is None or income_needs_officer(f):
         ask = {"C1"}            # an officer decides whatever else is said; the record needs a term
     elif not f.any_guarantor:
         return []
@@ -283,7 +310,7 @@ class Settled:
 
 
 def model_allows(f: Facts) -> bool:
-    return f.risk_class == "Low" or (f.risk_class == "Medium" and bool(f.answered))
+    return f.risk_class == "Low" or (f.risk_class == "Medium" and bool(f.answered & CLEARS_MEDIUM))
 
 
 def settle(f: Facts, w: Worked, questions: list[str]) -> Settled:
@@ -294,8 +321,12 @@ def settle(f: Facts, w: Worked, questions: list[str]) -> Settled:
         return Settled("not_now", "membership", months_left=comparator.MIN_TENURE_MONTHS - f.months_member)
     if not f.any_guarantor:
         return Settled("not_now", "no_guarantors")
+    if f.refer_reason:
+        return Settled("refer", f.refer_reason)
     if questions:
         return Settled("clarify", "clarify")
+    if income_needs_officer(f):
+        return Settled("refer", "income_unconfirmed")
     if f.risk_class == "High":
         return Settled("refer", "officer_review")
     if f.in_arrears:
@@ -415,14 +446,16 @@ def group_age_days(p: MemberProfile | None, group: str, confirmed: datetime | No
     return max((today - max(dates).astimezone(config.NAIROBI).date()).days, 0)
 
 
-def loan_standing(db: Session, member_id: int, today: date) -> tuple[int, bool]:
-    """(the instalments of their active loans, whether any loan is behind or defaulted)."""
+def loan_standing(db: Session, member_id: int, today: date) -> tuple[int, bool, int]:
+    """(the instalments of their active loans, whether any loan is behind or defaulted,
+    the principal still outstanding on their active loans)."""
     rows = db.scalars(select(LoanAccount).where(LoanAccount.member_id == member_id,
                                                 LoanAccount.status.in_(ledger.STILL_OWED))).all()
     paid = ledger.paid_on_loans(db, [x.id for x in rows])
     active = [x for x in rows if x.status == "active"]
     behind = any(x.status == "defaulted" or ledger.days_in_arrears(x, paid.get(x.id, 0), today) > 0 for x in rows)
-    return sum(x.monthly_instalment_kes for x in active), behind
+    outstanding = sum(ledger.outstanding_principal(x, paid.get(x.id, 0)) for x in active)
+    return sum(x.monthly_instalment_kes for x in active), behind, outstanding
 
 
 def named_member(db: Session, m: Member, named: dict | None) -> Member | None:
@@ -440,15 +473,18 @@ def named_member(db: Session, m: Member, named: dict | None) -> Member | None:
 
 def guarantor_options(db: Session, m: Member, named: Member | None) -> tuple[tuple[GuarantorOption, ...], bool, int]:
     """(usable guarantors, whether there is any at all, the member's own free deposits).
-    A pledge from someone with no phone cannot be used, as in sacco.offers_for."""
+    A pledge from someone with no phone cannot be used, as in sacco.offers_for. A pledge
+    backs no more than its guarantor agreed to: with no ceiling set, nothing automatically."""
     pledges = db.scalars(select(GuarantorPledge).where(GuarantorPledge.borrower_member_id == m.id,
                                                        GuarantorPledge.status == "active")
                          .options(joinedload(GuarantorPledge.guarantor)).order_by(GuarantorPledge.id)).all()
     pledged = {p.guarantor_member_id for p in pledges}
     extra = named if named is not None and named.id not in pledged else None
     caps = ledger.capacities(db, {m.id, *pledged, *([extra.id] if extra else [])})
+    held = ledger.held_under_pledges(db, [p.id for p in pledges])
     options = [GuarantorOption(p.guarantor_member_id, p.guarantor.member_no, p.guarantor.full_name, p.guarantor.phone,
-                               caps[p.guarantor_member_id].available_kes, p.id)
+                               min(caps[p.guarantor_member_id].available_kes,
+                                   max((p.max_amount_kes or 0) - held.get(p.id, 0), 0)), p.id)
                for p in pledges if p.guarantor.phone]
     if extra is not None:
         options.append(GuarantorOption(extra.id, extra.member_no, extra.full_name, extra.phone or "",
@@ -461,16 +497,18 @@ ANSWER_KEY = {"C1": "term_months", "C2": "monthly_income_kes", "C3": "expected_m
 
 
 def evaluate(db: Session, member: Member, request: LoanRequest, overrides: dict | None = None,
-             final: bool = False, today: date | None = None) -> Evaluation:
+             final: bool = False, today: date | None = None, refer_reason: str | None = None) -> Evaluation:
     """Read everything, score, settle. Writes nothing, and the profile stays as it is.
-    final: settle on what is known, with no more questions (accepting an offer)."""
+    final: settle on what is known, with no more questions (accepting an offer).
+    refer_reason: the caller is stopping here and a person decides (a reason code);
+    the rules a member has not met yet still come first."""
     today = today or nairobi_today()
     overrides = clean_overrides(overrides, request)
     known = profiles.profile_features(db, member, today)
     p = member.profile
     features = {**known.features}
     provenance = {**known.provenance}
-    for key in ("monthly_income_kes", "chama_loan_use"):
+    for key in FEATURE_OVERRIDES:
         if overrides.get(key) is not None:
             features[key] = overrides[key]
             provenance[key] = "conversation"
@@ -485,7 +523,7 @@ def evaluate(db: Session, member: Member, request: LoanRequest, overrides: dict 
     named = named_member(db, member, overrides.get("extra_guarantor"))
     options, any_guarantor, own_free = guarantor_options(db, member, named)
     deposits = ledger.deposits_balance(db, member.id)
-    instalments, behind = loan_standing(db, member.id, today)
+    instalments, behind, outstanding = loan_standing(db, member.id, today)
     confirmed = last_confirmed(db, member.id)
     asked = {q for q, key in ANSWER_KEY.items() if key in overrides}
     answered = {q for q in asked if overrides[ANSWER_KEY[q]] is not None}
@@ -510,7 +548,9 @@ def evaluate(db: Session, member: Member, request: LoanRequest, overrides: dict 
         income_verified=provenance.get("monthly_income_kes") in ("verified", "conversation"),
         chama_use_known=features["chama_loan_use"] is not None,
         credit_age_days=group_age_days(p, "credit", confirmed, today), in_arrears=behind,
-        asked=frozenset(asked), answered=frozenset(answered), declined=frozenset(asked - answered), final=final)
+        asked=frozenset(asked), answered=frozenset(answered), declined=frozenset(asked - answered), final=final,
+        outstanding_principal_kes=outstanding, profile_income_kes=known.features["monthly_income_kes"],
+        income_stated=overrides.get("monthly_income_kes") is not None, refer_reason=refer_reason)
     worked = work_out(facts)
     fired = question_triggers(facts, worked)
     questions = clarifications(facts, worked, fired)
@@ -522,6 +562,7 @@ def evaluate(db: Session, member: Member, request: LoanRequest, overrides: dict 
         "effective": {"amount_kes": facts.amount_kes, "term_months": facts.term_months},
         "checks": check_rows(facts, worked),
         "maximums": {"rule_kes": worked.rule_max_kes, "affordable_kes": worked.affordable_max_kes},
+        "refer_reason": refer_reason,
         "clarifications": {"conditions": fired, "asked": sorted(asked), "answered": sorted(answered),
                            "returned": questions,
                            "income_age_days": group_age_days(p, "income", confirmed, today),

@@ -614,16 +614,18 @@ picks the outcome. Every decision keeps a trace of each check with its values.
 Members, on their own record only, rate limited:
 
     POST /api/self-service/evaluate                   what would happen, and what to ask; writes nothing
-    POST /api/self-service/commit                     act on it; needs Idempotency-Key
+    POST /api/self-service/commit                     act on it; needs Idempotency-Key and the consent_version an evaluation gives
     POST /api/self-service/applications/{id}/accept   take a reduced offer
     POST /api/self-service/applications/{id}/decline  turn it down
+    POST /api/self-service/applications/{id}/review   "ask an officer to review this": a referral
+    PATCH /api/me/pledges/{id}                        a guarantor's own limit: {max_amount_kes}
 
 Officers and admins, audited, each write with an `Idempotency-Key` header:
 
     POST /api/members/{id}/deposits                   {account, amount_kes, reference?}
     POST /api/members/{id}/withdrawals                from share_capital or transactional, never deposits
     POST /api/members/{id}/refund-deposits            a departing member; refused while they owe or guarantee
-    POST /api/members/{id}/pledges                    {guarantor_member_no}
+    POST /api/members/{id}/pledges                    {guarantor_member_no, max_amount_kes}
     POST /api/pledges/{id}/withdraw
     POST /api/applications/{id}/payout                an approved application, to the transactional account
     POST /api/loans/{id}/repayments                   {amount_kes}, from the transactional account
@@ -633,6 +635,42 @@ Officers and admins, audited, each write with an `Idempotency-Key` header:
 
 The thresholds are in `.env.example`. Changing one from its default adds a hash of the
 values to the policy version, so one version always means one set of thresholds.
+
+### The conversation
+
+A member applies by talking to a deterministic state machine
+(`src/chamapro/conversation/machine.py`). Every line it says comes from
+`conversation/templates.yaml`, and the engine above makes every decision. Gemini only
+reads what the member said, and is off unless asked for. The parsers always run:
+English and Kikuyu numbers, and a yes/no lexicon.
+
+    POST /api/conversations                           {language: en|kik}; the first bot turns
+    POST /api/conversations/{id}/reply                multipart form: text, or an audio upload
+    GET  /api/conversations/{id}                      the whole transcript
+    GET  /api/conversations/{id}/turns/{seq}/audio    what a bot turn said, as MP3
+
+A member sees only their own, and starts and replies are rate limited. A reply returns
+what was understood (transcript, translation, extraction, per-stage latency), the next
+bot turns, and an `explain` object once the engine has run. That object holds the risk
+class, the probabilities, the top SHAP values with plain labels, each check with its
+values, and which features came from records, the profile or the conversation. Other
+members' figures are left out of it.
+
+Rehearse in the terminal, on a throwaway database. Nothing reaches Gemini without `--live`:
+
+    python scripts/converse.py --member "Wanjiru Kamau" --language en
+    python scripts/converse.py --member "Njeri Mwangi" --language kik --live
+
+On a server, `CONVERSATION_GEMINI_LIVE=1` is the same switch. Until a native speaker fills
+the `kik` entries in `templates.yaml`, a Kikuyu conversation shows the English text flagged
+`kik_pending` and speaks it in the English voice. `conversation/kikuyu_numbers.py` and
+`conversation/lexicon.py` list the Kikuyu vocabulary assumed, for the same review.
+
+Speech: `TTS_KIK_MODEL` and `TTS_EN_MODEL` (transformers `VitsModel`), on the CPU unless
+`TTS_DEVICE` says otherwise. Audio is cached in `data/tts_cache/` by a hash of model and
+text, as MP3 through ffmpeg, and the fixed lines are made in the background at startup.
+If speech fails, the turn still comes back, as text with `audio_url` null. Member voice
+replies are kept by the same storage backend as interview audio.
 
 ### Users
 
@@ -1030,6 +1068,8 @@ covered by that statement:
 |-----------|----------|-------|
 | [microsoft/paza-whisper-large-v3-turbo](https://huggingface.co/microsoft/paza-whisper-large-v3-turbo) | Kikuyu speech recognition | MIT |
 | [openai/whisper-large-v3-turbo](https://huggingface.co/openai/whisper-large-v3-turbo) | English speech recognition | MIT |
+| [facebook/mms-tts-kik](https://huggingface.co/facebook/mms-tts-kik) | Kikuyu speech output | **CC-BY-NC 4.0: non-commercial use only** |
+| [facebook/mms-tts-eng](https://huggingface.co/facebook/mms-tts-eng) | English speech output | **CC-BY-NC 4.0: non-commercial use only** |
 | Gemini API (Google) | translation and feature extraction | Google's API terms of service |
 | FinAccess 2024 microdata (FSD Kenya) | training the classifier | licensed for research use; not redistributed here (see [data/README.md](data/README.md)) |
 

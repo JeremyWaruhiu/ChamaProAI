@@ -32,6 +32,11 @@
 .subTitle { margin: var(--space-4) 0 var(--space-2); font-size: var(--text-base); font-weight: 680; }
 .people { gap: var(--space-2); }
 .person { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-2); }
+.ceiling { display: flex; flex-wrap: wrap; flex-basis: 100%; align-items: center; justify-content: space-between; gap: var(--space-2); }
+.ceilingForm { display: grid; flex-basis: 100%; gap: var(--space-2); min-width: 0; }
+.ceilingActions { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+.notices { display: grid; gap: var(--space-2); margin: 0; padding: 0; list-style: none; }
+.notices li { display: grid; gap: 2px; }
 
 .loans { gap: var(--space-3); }
 .loan + .loan { padding-top: var(--space-3); border-top: 1px solid var(--line); }

@@ -26,6 +26,7 @@ from chamapro.api.db import (AccountEntry, Assessment, AuditLog, Decision, Guara
                              Interview, LoanAccount, LoanApplication, Member, MemberProfileHistory, SelfServiceRun,
                              SessionLocal, User, engine, init_db, nairobi_today, utcnow)
 from chamapro.api.decisions import Facts, GuarantorOption, LoanRequest
+from chamapro.conversation import templates
 from conftest import assessed, needs_classifier, new_application, new_member
 from test_member_access import leaks
 from test_query_counts import queries  # noqa: F401  (a fixture)
@@ -55,7 +56,7 @@ def asked_list(**over):
     return decisions.clarifications(f, w, decisions.question_triggers(f, w))
 
 
-ANSWERED = dict(asked=frozenset({"C1"}), answered=frozenset({"C1"}))
+ANSWERED = dict(asked=frozenset({"C2"}), answered=frozenset({"C2"}))
 
 # (case, facts, outcome, reason code, amount). Every outcome, and every way to each.
 POLICY_TABLE = [
@@ -72,6 +73,15 @@ POLICY_TABLE = [
     ("Medium with an answer gets the offer too", dict(risk_class="Medium", requested_kes=45000, amount_kes=45000,
                                                       deposits_kes=10000, own_free_kes=10000, **ANSWERED),
      "approve_reduced", "reduced_rule", 30000),
+    ("Medium with only a term answered", dict(risk_class="Medium", asked=frozenset({"C1"}), answered=frozenset({"C1"})),
+     "refer", "officer_review", None),
+    ("a raise within the tolerance", dict(income_stated=True, profile_income_kes=40000, income_kes=52000), "approve", "approve", 40000),
+    ("a raise beyond the tolerance", dict(income_stated=True, profile_income_kes=40000, income_kes=52001), "refer",
+     "income_unconfirmed", None),
+    ("a stated income with no figure to go by", dict(income_stated=True, profile_income_kes=None), "refer", "income_unconfirmed", None),
+    ("the caller's cap on questions", dict(refer_reason="question_cap", term_months=None), "refer", "question_cap", None),
+    ("an answer never understood", dict(refer_reason="not_understood"), "refer", "not_understood", None),
+    ("the member refused the smaller amount", dict(refer_reason="offer_declined"), "refer", "offer_declined", None),
     ("High risk", dict(risk_class="High"), "refer", "officer_review", None),
     ("Medium with nothing left to ask", dict(risk_class="Medium"), "refer", "officer_review", None),
     ("self-declared savings", dict(deposits_kes=None, declared_savings_kes=90000), "refer", "self_declared", None),
@@ -106,7 +116,8 @@ def test_policy_table(over, outcome, code, amount):
 def test_the_table_covers_every_outcome_and_reason():
     outcomes = {c[2] for c in POLICY_TABLE}
     assert outcomes == {"approve", "approve_reduced", "refer", "not_now", "clarify"}
-    assert {c[3] for c in POLICY_TABLE} == set(member_text.DECISION_REASONS["en"])
+    # review_requested is not the policy's: a member asks for it after an outcome.
+    assert {c[3] for c in POLICY_TABLE} | {"review_requested"} == set(member_text.DECISION_REASONS["en"])
 
 
 def test_not_now_says_how_many_months_are_left():
@@ -331,12 +342,15 @@ def post_entry(member_id, amount, kind="deposits", entry_type="deposit"):
         db.commit()
 
 
+CEILING = 100_000       # high enough to say nothing: the tests of a ceiling set their own
+
+
 def add_guarantor(borrower_id, free=30000):
     gid, _, _ = new_member(login=False)
     if free:
         post_entry(gid, free)
     with SessionLocal() as db:
-        ledger.add_pledge(db, borrower_id, gid)
+        ledger.add_pledge(db, borrower_id, gid, CEILING)
         db.commit()
     return gid
 
@@ -376,7 +390,8 @@ def key():
 
 
 def committed_body(ev_outcome, amount=None, **over):
-    return {**BODY, "expected_outcome": ev_outcome, "expected_amount_kes": amount, **over}
+    return {**BODY, "expected_outcome": ev_outcome, "expected_amount_kes": amount,
+            "consent_version": templates.consent_version(), **over}
 
 
 def age_income(mid, days):
@@ -441,10 +456,11 @@ def test_the_trace_has_every_check_with_its_values(client, model):
     t = ev.trace
     assert ev.outcome == "approve" and t["policy_version"] == config.POLICY_BASE_VERSION
     assert [c["check"] for c in t["checks"]] == ["deposits_on_record", "membership", "savings_multiple", "guarantors",
-                                                 "guarantor_capacity", "affordability", "auto_limit", "risk", "no_arrears"]
+                                                 "guarantor_capacity", "affordability", "auto_limit", "income_increase", "risk",
+                                                 "no_arrears"]
     assert all(c["passed"] for c in t["checks"])
     by = {c["check"]: c["values"] for c in t["checks"]}
-    assert by["savings_multiple"] == {"amount_kes": 30000, "maximum_kes": 30000, "multiplier": 3}
+    assert by["savings_multiple"] == {"amount_kes": 30000, "maximum_kes": 30000, "multiplier": 3, "outstanding_principal_kes": 0}
     assert by["affordability"]["instalment_kes"] == 2666 and by["affordability"]["limit_kes"] == 15000
     assert by["guarantor_capacity"]["need_kes"] == 20000
     assert t["thresholds"]["AUTO_APPROVE_LIMIT_KES"] == 50000 and t["model"]["risk_class"] == "Low"
@@ -534,8 +550,13 @@ def test_medium_needs_an_answered_clarification(client, model):
     assert (ev.outcome, ev.settled.reason_code) == ("refer", "officer_review")
     ev = evaluate(mid, LoanRequest(40000, "School fees"))
     assert ev.outcome == "clarify" and ev.questions == ["C1"]
-    assert evaluate(mid, LoanRequest(40000, "School fees"), {"term_months": 12}).outcome == "approve"
+    # A term says nothing about the person: only C2, C3 and C4 clear a Medium.
+    ev = evaluate(mid, LoanRequest(40000, "School fees"), {"term_months": 12})
+    assert (ev.outcome, ev.settled.reason_code) == ("refer", "officer_review")
     assert evaluate(mid, LoanRequest(40000, "School fees"), {"term_months": None}).outcome == "refer"
+    for answer in ({"monthly_income_kes": 45000}, {"expected_monthly_return_kes": 1000}, {"chama_loan_use": 0}):
+        assert evaluate(mid, overrides=answer).outcome == "approve", answer
+    assert evaluate(mid, overrides={"monthly_income_kes": None}).outcome == "refer"
 
 
 def test_the_model_rescoring_on_an_answer_moves_the_outcome(client, model):
@@ -544,10 +565,14 @@ def test_the_model_rescoring_on_an_answer_moves_the_outcome(client, model):
     age_income(mid, 300)
     ev = evaluate(mid)
     assert ev.risk_class == "High" and ev.outcome == "clarify" and ev.questions == ["C2"]
-    ev = evaluate(mid, overrides={"monthly_income_kes": 45000})
-    assert ev.risk_class == "Low" and ev.outcome == "approve"
+    # Believed up to 30% over the profile: 13,000, which the stand-in model still calls High.
     ev = evaluate(mid, overrides={"monthly_income_kes": 12000})
-    assert (ev.outcome, ev.risk_class) == ("refer", "High")
+    assert (ev.outcome, ev.risk_class, ev.settled.reason_code) == ("refer", "High", "officer_review")
+    # Further than that, it is scored and shown, and a person acts on it.
+    ev = evaluate(mid, overrides={"monthly_income_kes": 45000})
+    assert ev.risk_class == "Low" and (ev.outcome, ev.settled.reason_code) == ("refer", "income_unconfirmed")
+    assert "income needs officer confirmation" in ev.reason
+    assert next(c for c in ev.trace["checks"] if c["check"] == "income_increase")["values"]["most_accepted_kes"] == 13000
 
 
 def test_no_ledger_is_no_record_whatever_the_member_declares(client, model):
@@ -606,7 +631,7 @@ def test_an_automatic_approval_writes_everything_and_pays_out(client, model):
         assert a.risk_class == "Low" and a.assessed_by == "system" and a.contributions == CONTRIBUTIONS
         assert a.feature_vector == {"age": 40.0, "log_monthly_income": 10.0, "children": None}
         assert a.provenance["monthly_income_kes"] == "verified" and a.overrides == {}
-        assert a.policy_trace["outcome"] == "approve" and len(a.policy_trace["checks"]) == 9
+        assert a.policy_trace["outcome"] == "approve" and len(a.policy_trace["checks"]) == 10
         assert d.decided_by == "system" and d.policy_version == config.POLICY_BASE_VERSION
         assert d.outcome == "approve" and d.approved_amount_kes == 40000 and d.guarantors_required == 2
         assert d.member_message.startswith("You can have KSh 40,000 now")
@@ -773,7 +798,7 @@ def test_a_not_now_is_recorded_and_says_so(client, model):
 def test_no_term_is_recorded_on_a_referral_and_the_trace_says_none_was_given(client, model):
     mid, member, _ = borrower(deposits=None)
     body = {"amount_kes": 40000, "purpose": "School fees", "overrides": {"term_months": None},
-            "expected_outcome": "refer", "expected_amount_kes": None}
+            "expected_outcome": "refer", "expected_amount_kes": None, "consent_version": templates.consent_version()}
     out = member.post("/api/self-service/commit", headers=key(), json=body).json()
     assert out["term_months"] == self_service.TERM_FOR_THE_RECORD
     with SessionLocal() as db:
@@ -789,7 +814,8 @@ OVER_RULE = {"amount_kes": 45000, "purpose": "School fees", "term_months": 12}
 def offered(deposits=10000):
     mid, member, gs = borrower(deposits=deposits)
     r = member.post("/api/self-service/commit", headers=key(),
-                    json={**OVER_RULE, "expected_outcome": "approve_reduced", "expected_amount_kes": deposits * 3})
+                    json={**OVER_RULE, "expected_outcome": "approve_reduced", "expected_amount_kes": deposits * 3,
+                          "consent_version": templates.consent_version()})
     assert r.status_code == 201, r.text
     return mid, member, gs, r.json()
 
@@ -1044,22 +1070,22 @@ def test_pledges_add_and_withdraw(client):
     mid, _, _ = new_member(login=False)
     gid, gno, _ = new_member(login=False)
     k = key()
-    r = client.post(f"/api/members/{mid}/pledges", headers=k, json={"guarantor_member_no": gno.lower()})
+    r = client.post(f"/api/members/{mid}/pledges", headers=k, json={"guarantor_member_no": gno.lower(), "max_amount_kes": 5000})
     assert r.status_code == 201 and r.json()["status"] == "active" and r.json()["guarantor_member_id"] == gid
     pledge = r.json()["id"]
-    assert client.post(f"/api/members/{mid}/pledges", headers=k, json={"guarantor_member_no": gno.lower()}).json()["id"] == pledge
-    r = client.post(f"/api/members/{mid}/pledges", headers=key(), json={"guarantor_member_no": gno})
+    assert client.post(f"/api/members/{mid}/pledges", headers=k, json={"guarantor_member_no": gno.lower(), "max_amount_kes": 5000}).json()["id"] == pledge
+    r = client.post(f"/api/members/{mid}/pledges", headers=key(), json={"guarantor_member_no": gno, "max_amount_kes": 5000})
     assert r.status_code == 409 and "already" in r.json()["detail"]
-    assert client.post(f"/api/members/{mid}/pledges", headers=key(), json={"guarantor_member_no": "NOPE"}).status_code == 422
+    assert client.post(f"/api/members/{mid}/pledges", headers=key(), json={"guarantor_member_no": "NOPE", "max_amount_kes": 5000}).status_code == 422
     r = client.post(f"/api/pledges/{pledge}/withdraw", headers=key())
     assert r.status_code == 200 and r.json()["status"] == "withdrawn"
     assert client.post(f"/api/pledges/{pledge}/withdraw", headers=key()).status_code == 409
-    assert client.post(f"/api/members/{mid}/pledges", headers=key(), json={"guarantor_member_no": gno}).status_code == 201
+    assert client.post(f"/api/members/{mid}/pledges", headers=key(), json={"guarantor_member_no": gno, "max_amount_kes": 5000}).status_code == 201
     with SessionLocal() as db:
         actions = list(db.scalars(select(AuditLog.action).where(AuditLog.entity == "guarantor_pledge", AuditLog.entity_id == pledge)))
         assert actions == ["pledge.create", "pledge.withdraw"]
         me = db.get(Member, mid).member_no
-    assert client.post(f"/api/members/{mid}/pledges", headers=key(), json={"guarantor_member_no": me}).status_code == 422
+    assert client.post(f"/api/members/{mid}/pledges", headers=key(), json={"guarantor_member_no": me, "max_amount_kes": 5000}).status_code == 422
 
 
 def approved_with_guarantors(client, member_id, g_ids, amount=20000, share=10000):
@@ -1186,7 +1212,8 @@ def test_refunding_a_departing_member(client):
     other, other_no, _ = new_member(login=False)
     with SessionLocal() as db:
         no = db.get(Member, mid).member_no
-    pledge_for = client.post(f"/api/members/{other}/pledges", headers=key(), json={"guarantor_member_no": no}).json()["id"]
+    pledge_for = client.post(f"/api/members/{other}/pledges", headers=key(),
+                             json={"guarantor_member_no": no, "max_amount_kes": 5000}).json()["id"]
     k = key()
     r = client.post(f"/api/members/{mid}/refund-deposits", headers=k)
     assert r.status_code == 201, r.text
@@ -1265,7 +1292,8 @@ def test_a_guarantor_recovered_in_full_can_leave(client):
 
 LEDGER_ROUTES = [("POST", "/api/members/{id}/deposits", {"amount_kes": 1}), ("POST", "/api/members/{id}/withdrawals",
                  {"account": "transactional", "amount_kes": 1}), ("POST", "/api/members/{id}/refund-deposits", None),
-                 ("POST", "/api/members/{id}/pledges", {"guarantor_member_no": "X"}), ("POST", "/api/pledges/{id}/withdraw", None),
+                 ("POST", "/api/members/{id}/pledges", {"guarantor_member_no": "X", "max_amount_kes": 1000}),
+                 ("POST", "/api/pledges/{id}/withdraw", None),
                  ("POST", "/api/applications/{id}/payout", None), ("POST", "/api/loans/{id}/repayments", {"amount_kes": 1}),
                  ("POST", "/api/loans/{id}/reverse", {"reason": "because"})]
 
@@ -1411,7 +1439,7 @@ def test_opening_one_gives_the_trace_and_shap(client, model):
     row = next(r for r in rows if r["application_id"] == out["application_id"])
     d = client.get(f"/api/automatic-decisions/{row['id']}").json()
     assert d["contributions"] == CONTRIBUTIONS and d["probabilities"]["Low"] == 0.5
-    assert len(d["trace"]["checks"]) == 9 and d["trace"]["maximums"]["rule_kes"] == 90000
+    assert len(d["trace"]["checks"]) == 10 and d["trace"]["maximums"]["rule_kes"] == 90000
     assert d["provenance"]["monthly_income_kes"] == "verified" and d["overrides"] == {}
     assert d["member_message"].startswith("You can have") and d["model_sha256"] == "0" * 64
     assert d["features"]["monthly_income_kes"] == 45000
@@ -1546,7 +1574,7 @@ def demo(tmp_path_factory):
 
 DAIRY = LoanRequest(40000, "A dairy cow")
 SCHOOL = LoanRequest(60000, "School fees", 12)
-FEES_INCOME = {"monthly_income_kes": 30000}
+FEES_INCOME = {"monthly_income_kes": 22000}      # within 30% of the 18,000 on her profile
 
 
 @needs_classifier
@@ -1569,7 +1597,7 @@ def test_njeri_is_asked_her_income_and_is_rescored(demo):
     db, members, _ = demo
     before = decisions.evaluate(db, members["njeri"], SCHOOL)
     assert before.outcome == "clarify" and before.questions == ["C2"] and before.risk_class == "Medium"
-    assert before.facts.income_kes == 10000 and before.provenance["monthly_income_kes"] == "declared"
+    assert before.facts.income_kes == 18000 and before.provenance["monthly_income_kes"] == "declared"
     assert before.trace["clarifications"]["income_age_days"] == 240
     assert before.trace["clarifications"]["income_top_three_driver"] is True
     drivers = [c["feature"] for c in before.contributions]
@@ -1578,12 +1606,17 @@ def test_njeri_is_asked_her_income_and_is_rescored(demo):
     after = decisions.evaluate(db, members["njeri"], SCHOOL, FEES_INCOME)
     assert after.risk_class == "Low" and after.provenance["monthly_income_kes"] == "conversation"
     assert (after.outcome, after.amount_kes, after.settled.reason_code) == ("approve_reduced", 45000, "reduced_rule")
-    assert after.worked.rule_max_kes == 45000 and after.worked.affordable_max_kes == 112550
+    assert after.worked.rule_max_kes == 45000 and after.worked.affordable_max_kes == 82533
     # The answer moved the income's own attribution, in the model's own numbers.
     shap = lambda ev: next(c["shap"] for c in ev.contributions if c["feature"] == "log_monthly_income")  # noqa: E731
     assert shap(after) != shap(before)
     assert before.feature_vector["log_monthly_income"] != after.feature_vector["log_monthly_income"]
-    assert db.get(Member, members["njeri"].id).profile.monthly_income_kes == 10000
+    assert db.get(Member, members["njeri"].id).profile.monthly_income_kes == 18000
+
+    # Further than the 30% the member's word carries: scored and shown, and an officer decides.
+    told = decisions.evaluate(db, members["njeri"], SCHOOL, {"monthly_income_kes": 30000})
+    assert told.risk_class == "Low" and (told.outcome, told.settled.reason_code) == ("refer", "income_unconfirmed")
+    assert "income needs officer confirmation" in told.reason
 
 
 @needs_classifier
@@ -1602,6 +1635,6 @@ def test_wanjiru_and_njeri_end_to_end(demo):
     done = self_service.accept_offer(db, app, "njeri-accept", actor)
     assert done["outcome"] == "approve" and done["amount_kes"] == 45000 and done["monthly_instalment_kes"] == 3999
     assert ledger.balances(db, members["njeri"].id)["transactional"] == 45000
-    assert app.interview.assessment.overrides == {"monthly_income_kes": 30000, "accepted_amount_kes": 45000}
+    assert app.interview.assessment.overrides == {"monthly_income_kes": 22000, "accepted_amount_kes": 45000}
     assert app.interview.assessment.risk_class == "Low"
     assert db.scalar(select(func.count(Assessment.id))) == 3

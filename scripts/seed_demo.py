@@ -80,7 +80,7 @@ from chamapro.api import audit, decisions, ledger, loans, self_service, storage
 from chamapro.api import schemas as s
 from chamapro.api.auth import hash_password
 from chamapro.api.db import (APPLICATION_STATUSES, SYSTEM_ROLE, Applicant, Assessment, Guarantor, Interview,
-                             LoanApplication, Member, Response, SessionLocal, User, init_db,
+                             LoanApplication, Member, Response, SessionLocal, User, engine, init_db,
                              nairobi_today, utcnow, normalise_phone)
 
 import score_interview  # scripts/, next to this file
@@ -588,14 +588,15 @@ SELF_SERVICE_PEOPLE = {
                              "lost_as_guarantor": {"sacco": 0, "chama": 0},
                              "sacco_loan_use": 1, "chama_loan_use": 0}},
     # Her income was entered eight months ago and never checked. Medium on the old
-    # figure, with income among the top three drivers; asks 60,000 for school fees,
+    # figure, with income among the top three drivers; a raise to 22,000 is within the
+    # 30% a member's word carries (23,400), and is Low. Asks 60,000 for school fees,
     # and 15,000 of deposits allow 45,000.
     "njeri": {"full_name": "Njeri Mwangi", "joined": 36, "login": "n.mwangi", "deposits": 15000,
               "verified": ["personal", "household", "assets", "credit"], "confirmed_days_ago": 20,
               "updated_days_ago": {"income": 240},
               "form": {"age": 38, "sex": "female", "education": 3, "marital_status": "married"},
               "features": {"household_size": 6, "children": 4, "children_under5": 1, "children_in_school": 3,
-                           "monthly_income_kes": 10000, "agri_income_kes": 0, "income_sources": {"employed": 1},
+                           "monthly_income_kes": 18000, "agri_income_kes": 0, "income_sources": {"employed": 1},
                            "non_monetary_savings": {"land_or_buildings": 1}, "purchases_last_12m": {},
                            "lost_as_guarantor": {"sacco": 0, "chama": 0},
                            "sacco_loan_use": 0, "chama_loan_use": 1}},
@@ -1003,6 +1004,11 @@ def report(kind: str, res: Seeded) -> None:
         print(f"{kind} interview {res.interview_id} already complete; nothing to do")
 
 
+def database_written() -> str:
+    """The database this run really wrote, whatever DB_PATH says: DATABASE_URL wins over it."""
+    return engine.url.render_as_string(hide_password=True)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--csv", type=Path, default=config.DATA_DIR / "asr_paza.csv")
@@ -1033,11 +1039,11 @@ def main():
         except (OSError, ValueError, KeyError) as e:
             sys.exit(f"seed failed, nothing written: {e}")
         report("Kikuyu", res)
-        print(f"  {res.total} responses, database {config.DB_PATH}")
+        print(f"  {res.total} responses, database {database_written()}")
 
     res = seed_practice()
     report("practice", res)
-    print(f"  {res.total} typed English answers, database {config.DB_PATH}")
+    print(f"  {res.total} typed English answers, database {database_written()}")
 
     if not a.no_accounts:
         report_accounts(seed_accounts())

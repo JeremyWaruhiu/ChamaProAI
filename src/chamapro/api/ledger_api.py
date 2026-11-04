@@ -19,7 +19,7 @@ from chamapro import config
 from . import audit, idempotency, ledger, loans
 from . import schemas as s
 from .auth import require_officer
-from .db import AccountEntry, GuarantorPledge, LoanAccount, LoanApplication, Member, User, get_db, utcnow
+from .db import AccountEntry, GuarantorPledge, LoanAccount, LoanApplication, Member, MemberNotice, User, get_db, utcnow
 
 ERRORS = {code: {"model": s.Error} for code in (401, 403, 404, 409, 422)}
 router = APIRouter(prefix="/api", responses=ERRORS)
@@ -107,13 +107,14 @@ def add_pledge(member_id: int, body: s.PledgeCreate, key: IdemKey, db: Session =
 
     def work(_) -> s.PledgeState:
         try:
-            pledge = ledger.add_pledge(db, m.id, guarantor.id)
+            pledge = ledger.add_pledge(db, m.id, guarantor.id, body.max_amount_kes)
         except IntegrityError:
             db.rollback()
             raise HTTPException(409, f"{guarantor.member_no} already stands as this member's guarantor") from None
         audit.record(db, user, "pledge.create", "guarantor_pledge", pledge.id, borrower_member_id=m.id,
-                     guarantor_member_id=guarantor.id)
-        return s.PledgeState(id=pledge.id, borrower_member_id=m.id, guarantor_member_id=guarantor.id, status="active")
+                     guarantor_member_id=guarantor.id, max_amount_kes=body.max_amount_kes)
+        return s.PledgeState(id=pledge.id, borrower_member_id=m.id, guarantor_member_id=guarantor.id, status="active",
+                             max_amount_kes=body.max_amount_kes)
     return idempotency.run_once(db, user, key, f"pledge:{member_id}", body.model_dump(), work)
 
 
@@ -130,7 +131,8 @@ def withdraw_pledge(pledge_id: int, key: IdemKey, db: Session = Depends(get_db),
         ledger.withdraw_pledge(pledge)
         audit.record(db, user, "pledge.withdraw", "guarantor_pledge", pledge.id)
         return s.PledgeState(id=pledge.id, borrower_member_id=pledge.borrower_member_id,
-                             guarantor_member_id=pledge.guarantor_member_id, status="withdrawn")
+                             guarantor_member_id=pledge.guarantor_member_id, status="withdrawn",
+                             max_amount_kes=pledge.max_amount_kes)
     return idempotency.run_once(db, user, key, f"pledge-withdraw:{pledge_id}", {}, work, status_code=200)
 
 
@@ -212,6 +214,12 @@ def reverse_loan(loan_id: int, body: s.ReversalPost, key: IdemKey, db: Session =
             raise HTTPException(409, f"this automatic payout can be reversed for {config.REVERSAL_HOURS} hours, "
                                      "and that time has passed")
         entries = ledger.reverse_loan(db, loan, user)
+        told = db.scalars(select(MemberNotice.member_id).where(MemberNotice.loan_account_id == loan.id,
+                                                               MemberNotice.kind == "guarantee_started")).all()
+        borrower = db.get(Member, loan.member_id).full_name
+        db.add_all([MemberNotice(member_id=i, kind="guarantee_ended", loan_account_id=loan.id,
+                                 text=f"You are no longer guaranteeing {borrower}'s loan of "
+                                      f"KSh {loan.principal_kes:,}: it was reversed.") for i in told])
         audit.record(db, user, "loan.reverse", "loan_account", loan.id, entry_ids=[e.id for e in entries],
                      application_id=loan.application_id, reason=body.reason.strip())
         if app is not None:

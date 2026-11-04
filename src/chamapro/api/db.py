@@ -1,7 +1,7 @@
 """Storage: applicants, interviews, responses, assessments, users, members,
 member profiles, savings accounts and their ledger, issued loans, standing
 guarantors, loan applications, guarantors, interview bookings, SACCO events, the
-volunteer pilot's records, automatic decisions, idempotency keys and the audit log.
+volunteer pilot's records, automatic decisions, conversations, member notices, idempotency keys and the audit log.
 
 SQLite by default; PostgreSQL (Supabase) by setting DATABASE_URL. The schema
 is owned by the Alembic migrations in chamapro/migrations, not by this file:
@@ -11,7 +11,8 @@ An assessment row is the audit record (Chapter 4): it stores the exact feature
 vector the classifier saw, never something re-derived later. The officer's
 decision is a separate record. Database triggers (SQLite and PostgreSQL)
 reject any UPDATE or DELETE on either, on the audit log, on a member's profile
-history and on the savings ledger, so the guarantee holds even outside the API.
+history, on the savings ledger and on conversation turns, so the guarantee holds even
+outside the API.
 """
 from __future__ import annotations
 
@@ -557,8 +558,10 @@ class LoanAccount(Base):
 
 class GuarantorPledge(Base):
     """A member standing ready to guarantee another member's loans. It holds no
-    amount: capacity is worked out when an application needs it, and a pledge
-    becomes a guarantors row, reviewed like any other."""
+    amount of the guarantor's money: capacity is worked out when an application needs it,
+    and a pledge becomes a guarantors row, reviewed like any other. max_amount_kes is the
+    most they agree to stand behind this borrower for, across all that borrower's loans;
+    with none set, a pledge backs no automatic decision and an officer's review still can."""
     __tablename__ = "guarantor_pledges"
     __table_args__ = (
         CheckConstraint(_one_of("status", PLEDGE_STATUSES), name="ck_guarantor_pledges_status"),
@@ -571,6 +574,7 @@ class GuarantorPledge(Base):
     borrower_member_id: Mapped[int] = mapped_column(ForeignKey("members.id"))
     guarantor_member_id: Mapped[int] = mapped_column(ForeignKey("members.id"))
     status: Mapped[str] = mapped_column(String(10), default="active")
+    max_amount_kes: Mapped[int | None] = mapped_column(Integer)
     created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
 
     borrower: Mapped[Member] = relationship(foreign_keys=[borrower_member_id])
@@ -673,11 +677,104 @@ class SelfServiceRun(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     application_id: Mapped[int] = mapped_column(ForeignKey("loan_applications.id"), index=True)
     interview_id: Mapped[int] = mapped_column(ForeignKey("interviews.id"), unique=True)
-    trigger: Mapped[str] = mapped_column(String(12))     # commit | acceptance
+    trigger: Mapped[str] = mapped_column(String(12))     # commit | acceptance | review
     created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow, index=True)
 
     application: Mapped[LoanApplication] = relationship()
     interview: Mapped[Interview] = relationship()
+
+
+class MemberNotice(Base):
+    """Something the SACCO told a member, shown on My SACCO: a guarantor learning that
+    their pledge has become a guarantee, or that the loan behind it has gone."""
+    __tablename__ = "member_notices"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    member_id: Mapped[int] = mapped_column(ForeignKey("members.id"), index=True)
+    kind: Mapped[str] = mapped_column(String(24))
+    text: Mapped[str] = mapped_column(Text)
+    loan_account_id: Mapped[int | None] = mapped_column(ForeignKey("loan_accounts.id"))
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
+
+
+CONVERSATION_STATUSES = ("open", "completed", "abandoned")
+CONVERSATION_LANGUAGES = ("en", "kik")
+TURN_SPEAKERS = ("bot", "member")
+TURN_INPUT_MODES = ("voice", "text")
+
+
+class Conversation(Base):
+    """A member's loan conversation. state and context are where it has got to; the
+    turns are what was said. Its decision is an ordinary self-service run, so nothing
+    here reaches the statistics or the interview lists. busy_until keeps two replies
+    from being worked on at once and lapses if a process dies holding it."""
+    __tablename__ = "conversations"
+    __table_args__ = (
+        CheckConstraint(_one_of("status", CONVERSATION_STATUSES), name="ck_conversations_status"),
+        CheckConstraint(_one_of("language", CONVERSATION_LANGUAGES), name="ck_conversations_language"),
+        Index("uq_conversations_one_open", "member_id", unique=True,
+              sqlite_where=text("status = 'open'"), postgresql_where=text("status = 'open'")),
+    )
+    id: Mapped[int] = mapped_column(primary_key=True)
+    member_id: Mapped[int] = mapped_column(ForeignKey("members.id"), index=True)
+    language: Mapped[str] = mapped_column(String(3))
+    status: Mapped[str] = mapped_column(String(10), default="open")
+    state: Mapped[str] = mapped_column(String(14))
+    context: Mapped[dict] = mapped_column(JSON, default=dict)
+    # Null until answered. The text they were shown is in the turns, the version says which it was.
+    consent_given: Mapped[bool | None] = mapped_column(Boolean)
+    consent_version: Mapped[str | None] = mapped_column(String(32))
+    consent_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
+    policy_version: Mapped[str] = mapped_column(String(32))
+    self_service_run_id: Mapped[int | None] = mapped_column(ForeignKey("self_service_runs.id"))
+    application_id: Mapped[int | None] = mapped_column(ForeignKey("loan_applications.id"))
+    turn_count: Mapped[int] = mapped_column(Integer, default=0)
+    busy_until: Mapped[datetime | None] = mapped_column(UTCDateTime)
+    last_activity_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
+    started_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
+    ended_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
+
+    member: Mapped[Member] = relationship()
+    turns: Mapped[list[ConversationTurn]] = relationship(order_by="ConversationTurn.seq",
+                                                         back_populates="conversation")
+
+
+class ConversationTurn(Base):
+    """Append-only: database triggers reject UPDATE and DELETE. Audio is written before
+    the row, so nothing here is ever filled in later. Bot turns: audio_ref is the TTS
+    cache key and spoken_text what was read out, which can differ from what was shown.
+    Member turns: audio_ref is the storage reference of their recording."""
+    __tablename__ = "conversation_turns"
+    __table_args__ = (
+        UniqueConstraint("conversation_id", "seq", name="uq_conversation_turns_seq"),
+        CheckConstraint(_one_of("speaker", TURN_SPEAKERS), name="ck_conversation_turns_speaker"),
+        CheckConstraint(f"input_mode IS NULL OR {_one_of('input_mode', TURN_INPUT_MODES)}",
+                        name="ck_conversation_turns_input_mode"),
+    )
+    id: Mapped[int] = mapped_column(primary_key=True)
+    conversation_id: Mapped[int] = mapped_column(ForeignKey("conversations.id"), index=True)
+    seq: Mapped[int] = mapped_column(Integer)
+    speaker: Mapped[str] = mapped_column(String(6))
+    template_id: Mapped[str | None] = mapped_column(String(20))     # the question a member turn answered
+    text: Mapped[str] = mapped_column(Text)
+    text_en: Mapped[str | None] = mapped_column(Text)
+    kik_pending: Mapped[bool] = mapped_column(Boolean, default=False)
+    audio_ref: Mapped[str | None] = mapped_column(String(300))
+    tts_model: Mapped[str | None] = mapped_column(String(120))
+    spoken_text: Mapped[str | None] = mapped_column(Text)
+    input_mode: Mapped[str | None] = mapped_column(String(5))
+    asr_transcript: Mapped[str | None] = mapped_column(Text)
+    asr_model: Mapped[str | None] = mapped_column(String(120))
+    translation: Mapped[str | None] = mapped_column(Text)
+    extraction: Mapped[dict | None] = mapped_column(JSON)
+    explain: Mapped[dict | None] = mapped_column(JSON)
+    actions: Mapped[list | None] = mapped_column(JSON)
+    asr_ms: Mapped[int | None] = mapped_column(Integer)
+    extract_ms: Mapped[int | None] = mapped_column(Integer)
+    evaluate_ms: Mapped[int | None] = mapped_column(Integer)
+    tts_ms: Mapped[int | None] = mapped_column(Integer)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
+
+    conversation: Mapped[Conversation] = relationship(back_populates="turns")
 
 
 class IdempotencyKey(Base):

@@ -79,3 +79,5 @@ docs/part_c_progress.md
 # covers them already; named so they stay ignored if that rule is narrowed.
 data/demo.db
 data/demo_uploads/
+# Spoken bot turns, regenerable: data/** covers them too.
+data/tts_cache/

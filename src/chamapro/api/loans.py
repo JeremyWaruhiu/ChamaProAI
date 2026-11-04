@@ -26,8 +26,8 @@ from chamapro import config
 from . import audit, comparator, ledger, member_text
 from . import schemas as s
 from .auth import require_member, require_officer
-from .db import (Assessment, AuditLog, Decision, Guarantor, GuarantorPledge, Interview,
-                 InterviewBooking, LoanAccount, LoanApplication, Member, MemberAccount, MemberProfile,
+from .db import (Assessment, AuditLog, Conversation, Decision, Guarantor, GuarantorPledge, Interview,
+                 InterviewBooking, LoanAccount, LoanApplication, Member, MemberAccount, MemberNotice, MemberProfile,
                  MemberProfileHistory, PracticeInterview, Response, User, get_db, utcnow)
 from .questions import CURRENT_SET, QUESTION_SETS
 
@@ -346,6 +346,11 @@ def held_by_automatic_decision(app: LoanApplication) -> bool:
     return app.interview is not None and app.interview.mode == "self_service"
 
 
+def told_not_now(app: LoanApplication) -> bool:
+    """An automatic "not now" that nobody has acted on: the member can still book."""
+    return app.status == "declined" and app.interview.decision is not None and app.interview.decision.outcome == "not_now"
+
+
 def mode_of(app: LoanApplication) -> str:
     """practice when its interview is; an application without one yet is live."""
     return app.interview.mode if app.interview else "live"
@@ -487,7 +492,7 @@ def has_records(db: Session, m: Member) -> bool:
     sources = [(MemberProfileHistory.member_id, m.id), (MemberProfile.member_id, m.id),
                (MemberAccount.member_id, m.id), (LoanAccount.member_id, m.id),
                (GuarantorPledge.borrower_member_id, m.id), (GuarantorPledge.guarantor_member_id, m.id),
-               (Guarantor.member_id, m.id)]
+               (Guarantor.member_id, m.id), (Conversation.member_id, m.id), (MemberNotice.member_id, m.id)]
     return any(db.scalar(select(col).where(col == value).limit(1)) is not None for col, value in sources)
 
 

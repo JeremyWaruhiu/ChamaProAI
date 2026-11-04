@@ -59,6 +59,8 @@ to match a real respondent's whole row is drawn again.
       .sacco            a defaulted loan and has a guarantee_recovery from deposits
     active guarantees   two guarantors per active loan, each for half, who must have the
                         capacity; a loan too large for anyone left is made smaller
+    pledge ceilings     what the guarantor has in deposits, to the thousand below, at
+                        most the KSh 50,000 an automatic loan can reach
     standing guarantors two or three pledges per member, each from a member with at
                         least KSh 1,000 of capacity left over
     verification        each field group: verified by an officer with probability 0.6,
@@ -98,6 +100,7 @@ SEED = 20261104
 MEMBERS = 150
 FIRST_PHONE, FIRST_MEMBER_NO = 101, 2001
 MIN_PLEDGE_CAPACITY = 1000
+LARGEST_PLEDGE_CEILING = 50000
 VERIFIED_SHARE = 0.6
 MONTHLY_INTEREST = 0.01
 MARITAL = {"marital_married": "married", "marital_single": "single",
@@ -491,6 +494,10 @@ def guarantee_active_loans(people: list[Person], rng: random.Random) -> dict[str
     return left
 
 
+def pledge_ceiling(deposits_kes: int) -> int:
+    return max(min(deposits_kes, LARGEST_PLEDGE_CEILING) // 1000 * 1000, MIN_PLEDGE_CAPACITY)
+
+
 def add_pledges(people: list[Person], left: dict[str, int], rng: random.Random) -> None:
     able = [k for k in sorted(left) if left[k] >= MIN_PLEDGE_CAPACITY]
     for p in people:
@@ -743,7 +750,8 @@ def write_plan(db: Session, plan: Plan, members: dict[str, Member], verifiers: d
     for p in plan.people:
         for key in p.pledges:
             db.add(GuarantorPledge(borrower_member_id=members[p.key].id, guarantor_member_id=members[key].id,
-                                   status="active", created_at=day_stamp(max(people[key].joined_on, p.joined_on))))
+                                   status="active", created_at=day_stamp(max(people[key].joined_on, p.joined_on)),
+                                   max_amount_kes=pledge_ceiling(people[key].deposits())))
     db.flush()
 
     # Peter's approved application is the one that has been paid out.

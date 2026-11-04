@@ -210,6 +210,8 @@ export const api = {
 
   // My SACCO: the profile, the ledger, loans and standing guarantors
   mySacco: () => request<SaccoView>('/me/sacco'),
+  setPledgeCeiling: (id: number, max_amount_kes: number) =>
+    request<SaccoView>(`/me/pledges/${id}`, json('PATCH', { max_amount_kes })),
   memberSacco: (id: number) => request<SaccoView>(`/members/${id}/sacco`),
   registerProfile: (body: ProfileBody) => request<SaccoView>('/me/profile', json('POST', body)),
   editProfile: (body: ProfileBody) => request<SaccoView>('/me/profile', json('PATCH', body)),

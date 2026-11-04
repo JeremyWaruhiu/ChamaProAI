@@ -85,6 +85,15 @@ DECISION_REASONS = {"en": {
     "self_declared": "Your savings are not on the SACCO's records yet, so a loan officer needs to look at this "
                      "application with you." + BOOK,
     "officer_review": "A loan officer will look at this application with you." + BOOK,
+    "income_unconfirmed": "Your income needs officer confirmation: it is well above the figure on your record, "
+                          "or we have no figure to compare it with." + BOOK,
+    "question_cap": "We have asked as many questions as we can here, so a loan officer will look at this "
+                    "application with you." + BOOK,
+    "not_understood": "We could not be sure of one of your answers, so a loan officer will look at this "
+                      "application with you." + BOOK,
+    "offer_declined": "You would rather not take the amount we could offer, so a loan officer will look at this "
+                      "application with you." + BOOK,
+    "review_requested": "You asked for a loan officer to review this, so one will." + BOOK,
     "arrears": "You have a loan payment outstanding, so a loan officer needs to look at this application with you." + BOOK,
     "details_missing": "We do not have everything we need to answer this ourselves, so a loan officer will look at "
                        "it with you." + BOOK,

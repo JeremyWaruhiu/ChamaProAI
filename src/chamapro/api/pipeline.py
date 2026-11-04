@@ -47,6 +47,8 @@ _asr_en_lock = threading.Lock()
 # A deque under a condition (not queue.Queue) so a deleted clip can be pulled
 # out of the queue and the clip being transcribed right now is known.
 _cond = threading.Condition()
+# Held while a model runs, by the worker and by a conversation's reply alike.
+_inference = threading.Lock()
 _pending: deque[int] = deque()
 _current: int | None = None
 _stopping = False
@@ -146,9 +148,10 @@ def transcribe_response(response_id: int) -> None:
         asr = english_asr() if language == "en" else _asr
         if asr is None:
             raise RuntimeError("ASR model not loaded")
-        out = transcribe.transcribe_clip(str(store.local_path(ref)), asr.pipe,
-                                         ASR_LANGUAGES[language], duration=duration,
-                                         **asr_settings())
+        with _inference:
+            out = transcribe.transcribe_clip(str(store.local_path(ref)), asr.pipe,
+                                             ASR_LANGUAGES[language], duration=duration,
+                                             **asr_settings())
     except Exception as e:
         log.exception("transcription failed for response %s", response_id)
         update = {"status": "failed", "error": f"{type(e).__name__}: {e}"}
@@ -170,6 +173,18 @@ def transcribe_response(response_id: int) -> None:
         for k, v in update.items():
             setattr(r, k, v)
         db.commit()
+
+
+def transcribe_now(path: Path, language: str, duration: float) -> tuple[str, str]:
+    """(the text, the model) of one clip, while the caller waits: a conversation's reply.
+    It takes its turn with the worker's clips, between them, not behind the whole queue."""
+    asr = english_asr() if language == "en" else _asr
+    if asr is None:
+        raise RuntimeError("ASR model not loaded")
+    with _inference:
+        out = transcribe.transcribe_clip(str(path), asr.pipe, ASR_LANGUAGES[language], duration=duration,
+                                         **asr_settings())
+    return out["text"], asr.label
 
 
 class TranscriptionBusy(Exception):

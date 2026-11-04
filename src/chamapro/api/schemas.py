@@ -1151,6 +1151,7 @@ class PledgeOut(BaseModel):
     has_capacity: bool | None = Field(default=None, description="For one's own guarantors")
     capacity_kes: int | None = Field(default=None, description="Staff only: another member's savings show in it")
     guaranteed_kes: int | None = Field(default=None, description="For those this member guarantees")
+    max_amount_kes: int | None = Field(default=None, description="The guarantor's ceiling: for the guarantor and staff")
 
 
 class LoanOut(BaseModel):
@@ -1165,6 +1166,21 @@ class LoanOut(BaseModel):
     days_in_arrears: int = Field(description="Computed; 0 when up to date")
 
 
+class NoticeOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    kind: str
+    text: str
+    created_at: datetime
+
+
+class ProfileUpdateRequest(BaseModel):
+    """What a member told a conversation that differs from the profile. Not applied."""
+    requested: dict
+    conversation_id: int | None
+    created_at: datetime
+
+
 class SaccoView(BaseModel):
     """My SACCO; an officer reads the same page about any member."""
     member_id: int
@@ -1177,6 +1193,8 @@ class SaccoView(BaseModel):
     my_guarantors: list[PledgeOut]
     i_guarantee: list[PledgeOut]
     loans: list[LoanOut]
+    notices: list[NoticeOut] = []
+    update_requests: list[ProfileUpdateRequest] | None = Field(default=None, description="Staff only")
 
 
 class GuarantorOffer(BaseModel):
@@ -1223,8 +1241,16 @@ class EntryPosted(BaseModel):
 
 
 class PledgeCreate(BaseModel):
+    """The officer records what the guarantor agreed, and how far."""
     model_config = ConfigDict(extra="forbid")
     guarantor_member_no: str = Field(min_length=1, max_length=32)
+    max_amount_kes: int = KES
+
+
+class PledgeCeiling(BaseModel):
+    """The guarantor's own: the most they will stand behind this borrower for."""
+    model_config = ConfigDict(extra="forbid")
+    max_amount_kes: int = KES
 
 
 class PledgeState(BaseModel):
@@ -1232,6 +1258,7 @@ class PledgeState(BaseModel):
     borrower_member_id: int
     guarantor_member_id: int
     status: Literal["active", "withdrawn"]
+    max_amount_kes: int | None
 
 
 class RepaymentPost(BaseModel):
@@ -1274,6 +1301,8 @@ class ConversationAnswers(BaseModel):
     chama_instalment_kes: int | None = Field(default=None, ge=0, le=100_000_000)
     extra_guarantor: ExtraGuarantor | None = None
     accepted_amount_kes: int | None = Field(default=None, gt=0, le=100_000_000)
+    household_size: int | None = Field(default=None, ge=1, le=60)
+    children: int | None = Field(default=None, ge=0, le=60)
 
 
 class SelfServiceRequest(BaseModel):
@@ -1297,6 +1326,8 @@ class SelfServiceCommit(SelfServiceRequest):
     expected_outcome: SelfServiceOutcome = Field(description="What the member was told: if a fresh evaluation "
                                                              "differs, nothing is written")
     expected_amount_kes: int | None = None
+    consent_version: str = Field(max_length=32, description="The member agreed to this wording of the consent "
+                                                            "to an automated decision, as an evaluation gives it")
 
 
 class ClarificationOut(BaseModel):
@@ -1320,6 +1351,8 @@ class SelfServiceEvaluation(BaseModel):
     extra_guarantor_found: bool | None = Field(description="Null unless a guarantor was named")
     reasons: list[str] = Field(description="What counted, in words, once there is an outcome")
     policy_version: str
+    consent_version: str
+    consent_text: str
 
 
 class SelfServiceCommitted(BaseModel):
@@ -1337,6 +1370,120 @@ class SelfServiceCommitted(BaseModel):
     policy_version: str
 
 
+# --- The conversation ---------------------------------------------------------------------
+
+ConversationLanguage = Literal["en", "kik"]
+
+
+class ConversationCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    language: ConversationLanguage
+
+
+class ConversationBrief(BaseModel):
+    id: int
+    language: ConversationLanguage
+    status: Literal["open", "completed", "abandoned"]
+    state: str = Field(description="The question waiting for an answer; END when it is over")
+    consent_given: bool | None
+    consent_version: str | None
+    policy_version: str
+    application_id: int | None
+    self_service_run_id: int | None
+    started_at: datetime
+    ended_at: datetime | None
+
+
+class TurnLatency(BaseModel):
+    """In milliseconds. Null: that stage did not run for this turn. tts is 0 on a cache hit."""
+    asr: int | None
+    translate_extract: int | None
+    evaluate: int | None
+    tts: int | None
+
+
+class ConversationAction(BaseModel):
+    id: Literal["request_review", "book_interview"]
+    label: str
+    kik_pending: bool
+    application_id: int | None = Field(description="request_review: POST /api/self-service/applications/{id}/review. "
+                                                   "book_interview: POST /api/me/applications/{id}/booking, or with "
+                                                   "none, a new application")
+
+
+class ExplainCheck(BaseModel):
+    check: str
+    passed: bool | None
+    values: dict
+
+
+class ExplainShap(BaseModel):
+    feature: str
+    label: str
+    shap: float
+    in_favour: bool
+
+
+class ExplainSources(BaseModel):
+    records: list[str]
+    profile: list[str]
+    conversation: list[str]
+    missing: list[str]
+
+
+class Explain(BaseModel):
+    """How this was worked out. Other members' figures are not in it."""
+    outcome: SelfServiceOutcome
+    reason_code: str
+    reason: str
+    risk_class: str
+    probabilities: dict[str, float]
+    top_shap: list[ExplainShap]
+    personal_features_left_out: int = Field(description="Age, sex and marital status are not labelled for a member")
+    checks: list[ExplainCheck]
+    maximums: dict[str, int | None]
+    sources: ExplainSources
+    policy_version: str
+
+
+class TurnOut(BaseModel):
+    seq: int
+    speaker: Literal["bot", "member"]
+    template_id: str | None = Field(description="Bot: the template. Member: the question answered")
+    text: str
+    text_en: str | None
+    kik_pending: bool = Field(description="Kikuyu was asked for and this template has none yet: "
+                                          "the text is English, spoken in the English voice")
+    audio_url: str | None
+    input_mode: Literal["voice", "text"] | None
+    asr_transcript: str | None
+    asr_model: str | None
+    translation: str | None
+    extraction: dict | None
+    explain: Explain | None
+    actions: list[ConversationAction]
+    latency_ms: TurnLatency
+    created_at: datetime
+
+
+class ConversationStarted(BaseModel):
+    conversation: ConversationBrief
+    resumed: bool
+    turns: list[TurnOut]
+
+
+class ConversationReply(BaseModel):
+    conversation: ConversationBrief
+    member_turn: TurnOut
+    bot_turns: list[TurnOut]
+    explain: Explain | None = Field(description="Present when this reply was evaluated")
+
+
+class ConversationDetail(BaseModel):
+    conversation: ConversationBrief
+    turns: list[TurnOut]
+
+
 # --- Officer: automatic decisions -----------------------------------------------------------
 
 class AutomaticDecision(BaseModel):
@@ -1345,7 +1492,7 @@ class AutomaticDecision(BaseModel):
     member_id: int
     member_no: str
     member_name: str
-    trigger: Literal["commit", "acceptance"]
+    trigger: Literal["commit", "acceptance", "review"]
     outcome: Outcome
     amount_requested_kes: int
     amount_kes: int | None = Field(description="The amount approved or offered")

@@ -33,6 +33,8 @@ SAME_FIELD = ("household_size", "children", "children_under5", "children_in_scho
               "monthly_income_kes", "agri_income_kes", "income_sources", "non_monetary_savings",
               "purchases_last_12m", "chama_loan_use")
 FEATURE_GROUP = {f: FIELD_GROUP[f] for f in SAME_FIELD}
+# In the history: asked for, not done. Nothing in the profile changed with it.
+UPDATE_REQUEST = "update_request"
 
 
 def age_on(born: date, today: date) -> int:
@@ -193,6 +195,20 @@ def confirm_profile(db: Session, m: Member, actor: User | None) -> MemberProfile
     db.flush()
     record_change(db, m.profile, "confirm", [], actor)
     return m.profile
+
+
+def request_update(db: Session, m: Member, values: dict, conversation_id: int, actor: User | None) -> None:
+    """The member told the conversation something else. The profile stays as it is and
+    its verification with it; the history keeps what they asked for, for an officer to
+    act on, and the audit log, which cannot be erased, keeps the group names only."""
+    p = m.profile
+    if p is None:
+        return
+    groups = [g for g in PROFILE_GROUPS if any(FIELD_GROUP[f] == g for f in values)]
+    db.add(MemberProfileHistory(member_id=m.id, change=UPDATE_REQUEST, groups=groups,
+                                snapshot={**snapshot(p), "requested": values, "conversation_id": conversation_id},
+                                actor_user_id=actor.id if actor else None))
+    audit.record(db, actor, f"profile.{UPDATE_REQUEST}", "member", m.id, groups=groups, conversation_id=conversation_id)
 
 
 def holds_data(p: MemberProfile, group: str) -> bool:

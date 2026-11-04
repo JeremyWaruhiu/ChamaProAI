@@ -122,18 +122,42 @@ PILOT_MAX_ASSESSMENTS_PER_DAY: int = int(os.getenv("PILOT_MAX_ASSESSMENTS_PER_DA
 # The policy's thresholds (api/decisions.py). A decision records the version, and
 # changing any of these from its default adds a hash of the values to it, so one
 # version always means one set of thresholds.
-POLICY_BASE_VERSION = "2026.11.1"
+POLICY_BASE_VERSION = "2026.11.2"
 POLICY_DEFAULTS = {"AUTO_APPROVE_LIMIT_KES": 50_000, "LOAN_INTEREST_MONTHLY": 0.01,
-                   "AFFORDABILITY_RATIO": 1 / 3, "AFFORDABILITY_NEAR_BAND": 0.15, "PROFILE_STALE_DAYS": 180}
+                   "AFFORDABILITY_RATIO": 1 / 3, "AFFORDABILITY_NEAR_BAND": 0.15, "PROFILE_STALE_DAYS": 180,
+                   "UNVERIFIED_INCREASE_TOLERANCE": 0.30}
 AUTO_APPROVE_LIMIT_KES: int = int(os.getenv("AUTO_APPROVE_LIMIT_KES") or POLICY_DEFAULTS["AUTO_APPROVE_LIMIT_KES"])
 LOAN_INTEREST_MONTHLY: float = float(os.getenv("LOAN_INTEREST_MONTHLY") or POLICY_DEFAULTS["LOAN_INTEREST_MONTHLY"])
 AFFORDABILITY_RATIO: float = float(os.getenv("AFFORDABILITY_RATIO") or POLICY_DEFAULTS["AFFORDABILITY_RATIO"])
 AFFORDABILITY_NEAR_BAND: float = float(os.getenv("AFFORDABILITY_NEAR_BAND") or POLICY_DEFAULTS["AFFORDABILITY_NEAR_BAND"])
 PROFILE_STALE_DAYS: int = int(os.getenv("PROFILE_STALE_DAYS") or POLICY_DEFAULTS["PROFILE_STALE_DAYS"])
+# How far above the profile a stated income is taken at the member's word.
+UNVERIFIED_INCREASE_TOLERANCE: float = float(os.getenv("UNVERIFIED_INCREASE_TOLERANCE")
+                                             or POLICY_DEFAULTS["UNVERIFIED_INCREASE_TOLERANCE"])
 REVERSAL_HOURS: int = int(os.getenv("REVERSAL_HOURS") or 24)    # how long an automatic payout can be undone
 # Self-service requests per member per hour, then 429. Each evaluation runs the classifier.
 SELF_SERVICE_EVALUATIONS_PER_HOUR: int = int(os.getenv("SELF_SERVICE_EVALUATIONS_PER_HOUR") or 60)
 SELF_SERVICE_COMMITS_PER_HOUR: int = int(os.getenv("SELF_SERVICE_COMMITS_PER_HOUR") or 10)
+
+# --- Conversation ------------------------------------------------------------
+SACCO_NAME: str = os.getenv("SACCO_NAME") or "ChamaPro SACCO"
+CONVERSATION_IDLE_MINUTES: int = int(os.getenv("CONVERSATION_IDLE_MINUTES") or 15)     # then abandoned
+CONVERSATION_MAX_QUESTIONS: int = int(os.getenv("CONVERSATION_MAX_QUESTIONS") or 3)    # clarifications, then refer
+CONVERSATION_MAX_AUDIO_SECONDS: int = int(os.getenv("CONVERSATION_MAX_AUDIO_SECONDS") or 60)
+CONVERSATION_STARTS_PER_HOUR: int = int(os.getenv("CONVERSATION_STARTS_PER_HOUR") or 20)
+CONVERSATION_REPLIES_PER_HOUR: int = int(os.getenv("CONVERSATION_REPLIES_PER_HOUR") or 120)
+# Off by default, so that nothing reaches Gemini by accident: only the parsers run.
+# scripts/converse.py turns it on with --live; a server, with this variable.
+CONVERSATION_GEMINI_LIVE: bool = os.getenv("CONVERSATION_GEMINI_LIVE") == "1"
+CONVERSATION_GEMINI_SECONDS: float = float(os.getenv("CONVERSATION_GEMINI_SECONDS") or 8)
+
+# --- Speech output -----------------------------------------------------------
+# Both models are CC-BY-NC 4.0: see README, "Licence and third-party components".
+TTS_ENABLED: bool = os.getenv("TTS_ENABLED", "1") != "0"
+TTS_KIK_MODEL: str = os.getenv("TTS_KIK_MODEL") or "facebook/mms-tts-kik"
+TTS_EN_MODEL: str = os.getenv("TTS_EN_MODEL") or "facebook/mms-tts-eng"
+TTS_DEVICE: str = os.getenv("TTS_DEVICE") or "cpu"
+TTS_CACHE_DIR: Path = _project_path(os.getenv("TTS_CACHE_DIR") or "data/tts_cache")
 
 # --- Interview bookings ------------------------------------------------------
 # Kenya keeps no daylight saving, so the fixed offset is right wherever the

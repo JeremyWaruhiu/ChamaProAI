@@ -196,11 +196,27 @@ def active_guarantees(db: Session, guarantor_id: int) -> dict[int, int]:
                            .group_by(LoanAccount.member_id)).all())
 
 
-def add_pledge(db: Session, borrower_id: int, guarantor_id: int) -> GuarantorPledge:
+def held_under_pledges(db: Session, pledge_ids: Iterable[int]) -> dict[int, int]:
+    """What each pledge is already holding, on loans still owed and on applications not
+    yet issued, for its ceiling. One query."""
+    ids = set(pledge_ids)
+    if not ids:
+        return {}
+    return dict(db.execute(select(Guarantor.pledge_id, func.sum(Guarantor.amount_guaranteed_kes))
+                           .outerjoin(LoanAccount, LoanAccount.id == Guarantor.loan_account_id)
+                           .outerjoin(LoanApplication, LoanApplication.id == Guarantor.application_id)
+                           .where(Guarantor.pledge_id.in_(ids), Guarantor.status != "rejected",
+                                  or_(LoanAccount.status.in_(STILL_OWED),
+                                      and_(Guarantor.loan_account_id.is_(None),
+                                           LoanApplication.status.in_(OPEN_APPLICATION))))
+                           .group_by(Guarantor.pledge_id)).all())
+
+
+def add_pledge(db: Session, borrower_id: int, guarantor_id: int, max_amount_kes: int | None = None) -> GuarantorPledge:
     if borrower_id == guarantor_id:
         raise LedgerError("a member cannot pledge to guarantee their own loans")
     pledge = GuarantorPledge(borrower_member_id=borrower_id, guarantor_member_id=guarantor_id,
-                             status="active")
+                             status="active", max_amount_kes=max_amount_kes)
     db.add(pledge)
     db.flush()
     return pledge
@@ -436,6 +452,19 @@ def add_months(day: date, months: int) -> date:
 
 def total_due(loan: LoanAccount) -> int:
     return loan.monthly_instalment_kes * loan.term_months
+
+
+def outstanding_principal(loan: LoanAccount, paid_kes: int, rate: float | None = None) -> int:
+    """The principal left on a reducing balance after this much has been paid: each full
+    instalment first pays the month's interest, and a part-paid one comes off the principal."""
+    rate = config.LOAN_INTEREST_MONTHLY if rate is None else rate
+    covered, part = divmod(paid_kes, loan.monthly_instalment_kes)
+    if covered >= loan.term_months:
+        return 0
+    balance = float(loan.principal_kes)
+    for _ in range(covered):
+        balance = balance * (1 + rate) - loan.monthly_instalment_kes
+    return min(max(math.ceil(round(balance - part, 6)), 0), loan.principal_kes)
 
 
 def days_in_arrears(loan: LoanAccount, paid_kes: int, today: date | None = None) -> int:

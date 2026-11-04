@@ -16,15 +16,16 @@ from datetime import date
 
 import pytest
 from alembic import command
-from sqlalchemy import create_engine, event, inspect, select, text
+from sqlalchemy import create_engine, event, func, inspect, select, text
 from sqlalchemy.engine import make_url
 from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.orm import Session
 
 from chamapro import config
 from chamapro.api import decisions, ledger, profiles, self_service
-from chamapro.api.db import (Applicant, AuditLog, Decision, Guarantor, Interview, LoanAccount,
-                             LoanApplication, Member, User, alembic_config, head_revision, init_db)
+from chamapro.api.db import (Applicant, AuditLog, Conversation, ConversationTurn, Decision, Guarantor, Interview,
+                             LoanAccount, LoanApplication, Member, MemberNotice, User, alembic_config, head_revision, init_db)
+from chamapro.conversation import service
 
 SERVER = os.getenv("CHAMAPRO_TEST_POSTGRES_URL")
 pytestmark = pytest.mark.skipif(not SERVER, reason="set CHAMAPRO_TEST_POSTGRES_URL to run")
@@ -396,8 +397,8 @@ def test_two_loans_cannot_spend_the_same_capacity(engine, stand_in_model):
         db.add(actor)
         g1, g2 = add_person(db, "G1", 12000), add_person(db, "G2", 12000)
         a, b = add_person(db, "A", 10000, True), add_person(db, "B", 10000, True)
-        ledger.add_pledge(db, a.id, g1.id), ledger.add_pledge(db, a.id, g2.id)
-        ledger.add_pledge(db, b.id, g2.id), ledger.add_pledge(db, b.id, g1.id)
+        ledger.add_pledge(db, a.id, g1.id, 100000), ledger.add_pledge(db, a.id, g2.id, 100000)
+        ledger.add_pledge(db, b.id, g2.id, 100000), ledger.add_pledge(db, b.id, g1.id, 100000)
         db.commit()
         ids = actor.id, a.id, b.id, g1.id, g2.id
     actor_id, a_id, b_id, g1_id, g2_id = ids
@@ -420,7 +421,7 @@ def test_a_double_submit_at_the_same_moment_pays_out_once(engine, stand_in_model
         db.add(actor)
         m = add_person(db, "D", 30000, True)
         g1, g2 = add_person(db, "DG1", 30000), add_person(db, "DG2", 30000)
-        ledger.add_pledge(db, m.id, g1.id), ledger.add_pledge(db, m.id, g2.id)
+        ledger.add_pledge(db, m.id, g1.id, 100000), ledger.add_pledge(db, m.id, g2.id, 100000)
         db.commit()
         actor_id, member_id = actor.id, m.id
     out = together(engine, [commit_for(member_id, actor_id, 40000, "double") for _ in range(4)])
@@ -492,3 +493,86 @@ def test_0006_migrates_and_the_ledger_stays_guarded(engine):
     with Session(engine) as db, pytest.raises(IntegrityError, match="ck_account_entries"):
         m2 = add_person(db, "M2")
         ledger.post_entry(db, m2.id, "deposits", "loan_reversal", 100, f"PG-{secrets.token_hex(4)}")
+
+
+# --- The conversation -----------------------------------------------------------------------
+
+def conversing(db, label, deposits=30000):
+    """A member with a login, two pledges and a saved profile, who can be approved."""
+    user = User(username=f"pg_{secrets.token_hex(3)}", password_hash="x", role="member")
+    db.add(user)
+    db.flush()
+    m = add_person(db, label, deposits, True)
+    m.user_id = user.id
+    for i in (1, 2):
+        g = add_person(db, f"{label}G{i}", 30000)
+        ledger.add_pledge(db, m.id, g.id, 100000)
+    db.commit()
+    return m.id, user.id
+
+
+def test_a_whole_conversation_on_postgres(engine, stand_in_model):
+    with Session(engine, expire_on_commit=False) as db:
+        member_id, user_id = conversing(db, "CV")
+        member, user = db.get(Member, member_id), db.get(User, user_id)
+        conv, resumed = service.start(db, member, "kik")
+        assert not resumed and conv.state == "CONSENT" and conv.turn_count == 2
+        for words in ("ĩĩ", "nĩ guo", "Ngũkwenda ngiri mĩrongo ĩna ngũre ng'ombe", "mĩeri ikũmi na igĩrĩ"):
+            service.reply(db, conv, member, user, text=words)
+        assert conv.state == "CONFIRM" and conv.consent_given is True
+        _, bots, _ = service.reply(db, conv, member, user, text="ĩĩ")
+        assert [t.template_id for t in bots] == ["O1", "END"] and conv.status == "completed"
+        assert ledger.balances(db, member_id)["transactional"] == 40000
+        assert db.scalar(select(func.count(MemberNotice.id)).where(MemberNotice.loan_account_id.is_not(None),
+                                                                   MemberNotice.text.contains("CV"))) == 2
+        turn = db.scalar(select(ConversationTurn).where(ConversationTurn.conversation_id == conv.id,
+                                                        ConversationTurn.seq == 1))
+        turn_id, conv_id = turn.id, conv.id
+    for sql, params in (("UPDATE conversation_turns SET text = 'x' WHERE id = :i", {"i": turn_id}),
+                        ("DELETE FROM conversation_turns WHERE id = :i", {"i": turn_id}),
+                        ("TRUNCATE conversation_turns", {})):
+        with engine.connect() as c:
+            with pytest.raises(IntegrityError, match="conversation_turns is append-only"):
+                c.execute(text(sql), params)
+            c.rollback()
+    with Session(engine) as db:
+        assert db.get(Conversation, conv_id).state == "END"
+
+
+def test_one_open_conversation_a_member_on_postgres(engine, stand_in_model):
+    with Session(engine, expire_on_commit=False) as db:
+        member_id, _ = conversing(db, "ON")
+        service.start(db, db.get(Member, member_id), "en")
+        db.add(Conversation(member_id=member_id, language="en", status="open", state="CONSENT", policy_version="x",
+                            context={}, turn_count=0))
+        with pytest.raises(IntegrityError, match="uq_conversations_one_open"):
+            db.commit()
+
+
+def test_two_replies_at_the_same_moment_only_one_is_worked_on(engine, stand_in_model):
+    with Session(engine, expire_on_commit=False) as db:
+        member_id, user_id = conversing(db, "TW")
+        conv, _ = service.start(db, db.get(Member, member_id), "en")
+        conv_id = conv.id
+
+    def job(db):
+        c, m, u = db.get(Conversation, conv_id), db.get(Member, member_id), db.get(User, user_id)
+        return service.reply(db, c, m, u, text="yes")[1][0].template_id
+    out = together(engine, [job, job, job, job])
+    with Session(engine) as db:
+        conv = db.get(Conversation, conv_id)
+        # A loser either lost the lease or arrived once the winner was done, and answered the next question.
+        assert conv.state in ("G2", "R1") and conv.busy_until is None
+        seqs = list(db.scalars(select(ConversationTurn.seq).where(ConversationTurn.conversation_id == conv_id)
+                               .order_by(ConversationTurn.seq)))
+        assert seqs == list(range(1, conv.turn_count + 1))
+    assert sum(isinstance(r, service.ConversationBusy) for r in out) >= 1 and sum(isinstance(r, str) for r in out) >= 1, out
+
+
+def test_0007_downgrades_only_without_conversations(engine):
+    with Session(engine) as db:
+        assert db.scalar(select(func.count(Conversation.id))) > 0
+    with engine.connect() as c:
+        pol = c.execute(text("SELECT relrowsecurity FROM pg_class WHERE relname IN "
+                             "('conversations', 'conversation_turns', 'member_notices')")).scalars().all()
+    assert pol == [True, True, True]

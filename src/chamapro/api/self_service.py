@@ -5,7 +5,9 @@ commit(evaluation, key) writes a loan application, an interview holding its immu
 assessment (with the features, provenance, overrides, SHAP and the policy's full trace)
 and a decision by the system user. On an automatic approval the member's standing
 guarantors become guarantors rows accepted under their pledge, and the loan is paid out.
-A reduced offer waits for the member, a referral for an officer.
+A reduced offer waits for the member, a referral for an officer. Every automatic outcome
+can be sent to an officer to review (Data Protection Act s.35), and a guarantor whose
+pledge is used hears about it on My SACCO.
 
 Nothing trusts the evaluation handed in: under the locks, the engine runs again on what
 the database now says, and if that is not what the member was told, nothing is written.
@@ -15,7 +17,7 @@ trace, the class, the SHAP values and any guarantor's capacity are for staff.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import JSONResponse
@@ -24,12 +26,13 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, joinedload
 
 from chamapro import config
+from chamapro.conversation import templates
 
 from . import audit, comparator, decisions, idempotency, ledger, loans, member_text
 from . import schemas as s
 from .auth import LoginLimiter, require_member, require_officer
 from .db import (SYSTEM_USERNAME, Applicant, Assessment, Decision, Guarantor, GuarantorPledge, Interview, LoanAccount,
-                 LoanApplication, Member, SelfServiceRun, User, get_db, utcnow)
+                 LoanApplication, Member, MemberNotice, SelfServiceRun, User, get_db, utcnow)
 from .decisions import Evaluation, LoanRequest
 from .ledger_api import IdemKey, reversal_deadline
 from .pilot import required_member
@@ -92,9 +95,11 @@ def has_open_application(db: Session, member_id: int) -> bool:
                             LoanApplication.status.not_in(FINISHED), LoanAccount.id.is_(None)).limit(1)) is not None
 
 
-def record_run(db: Session, ev: Evaluation, app: LoanApplication, member: Member, system: User, trigger: str) -> Decision:
+def record_run(db: Session, ev: Evaluation, app: LoanApplication, member: Member, system: User, trigger: str,
+               move_application: bool = True) -> Decision:
     """The immutable record of one automatic decision: an interview with no answers,
-    its assessment and its decision. The application moves on to it."""
+    its assessment and its decision. The application moves on to it, unless the loan
+    it decided is already out and this is only a request to look at it."""
     iv = Interview(applicant=Applicant(name=member.full_name, age=ev.features.get("age"), sex=member.sex,
                                        education=ev.features.get("education_level"),
                                        marital_status=ev.features.get("marital_status")),
@@ -113,7 +118,8 @@ def record_run(db: Session, ev: Evaluation, app: LoanApplication, member: Member
     db.flush()
     run = SelfServiceRun(application_id=app.id, interview_id=iv.id, trigger=trigger)
     db.add(run)
-    app.interview_id = iv.id
+    if move_application:
+        app.interview_id = iv.id
     db.flush()
     audit.record(db, system, "assessment.create", "assessment", a.id, interview_id=iv.id, risk_class=a.risk_class)
     audit.record(db, system, "decision.create", "decision", d.id, interview_id=iv.id, application_id=app.id,
@@ -136,6 +142,10 @@ def accept_guarantors_and_pay(db: Session, ev: Evaluation, app: LoanApplication,
                      pledge_id=g.pledge_id)
     loan = ledger.pay_out(db, app, ev.amount_kes, system)
     audit.record(db, system, "loan.pay_out", "loan_account", loan.id, application_id=app.id, automatic=True)
+    borrower = db.get(Member, app.member_id).full_name
+    for g, _ in ev.guarantor_shares():
+        db.add(MemberNotice(member_id=g.member_id, kind="guarantee_started", loan_account_id=loan.id,
+                            text=f"You are now guaranteeing {borrower}'s loan of KSh {loan.principal_kes:,}."))
     return loan
 
 
@@ -178,7 +188,7 @@ def commit(db: Session, evaluation: Evaluation, idempotency_key: str, actor: Use
     try:
         member = db.get(Member, evaluation.member_id)
         locked = lock_everyone(db, member, overrides)
-        fresh = decisions.evaluate(db, member, request, overrides)
+        fresh = decisions.evaluate(db, member, request, overrides, refer_reason=evaluation.facts.refer_reason)
         wanted = expected or (evaluation.outcome, evaluation.amount_kes)
         if (fresh.outcome, fresh.amount_kes) != wanted:
             raise DecisionChanged(fresh)
@@ -237,6 +247,54 @@ def accept_offer(db: Session, app: LoanApplication, idempotency_key: str, actor:
         raise CannotCommit("That could not be saved just now. Please try again.") from e
 
 
+def request_review(db: Session, app: LoanApplication, idempotency_key: str, actor: User) -> dict:
+    """"Ask an officer to review this": a referral, recorded like any automatic decision,
+    with the model scored afresh on the same answers. A loan already out stays out, and
+    the application still points at the decision that paid it, so its reversal window is
+    as it was; an officer can reverse or call the member from the new row. A reduced offer
+    closes, and an application that was turned away is open again, with an officer."""
+    try:
+        row, stored = idempotency.claim(db, actor, idempotency_key, "self_service.review", {"application": app.id})
+    except idempotency.KeyReused as e:
+        raise CannotCommit(str(e)) from None
+    if row is None:
+        return stored
+    try:
+        member = db.get(Member, app.member_id)
+        db.refresh(app)
+        if app.status == "reversed":
+            raise CannotCommit("This loan has been reversed, so there is nothing left to review.")
+        d = app.interview.decision if app.interview is not None else None
+        asked_before = db.scalar(select(SelfServiceRun.id).where(SelfServiceRun.application_id == app.id,
+                                                                 SelfServiceRun.trigger == "review").limit(1))
+        if (d is None or d.outcome == "refer" or asked_before is not None or app.status == "interview_pending"
+                or not loans.held_by_automatic_decision(app)):
+            raise CannotCommit("This application is already with a loan officer.")
+        paid_out = db.scalar(select(LoanAccount.id).where(LoanAccount.application_id == app.id)) is not None
+        overrides = app.interview.assessment.overrides or {}
+        request = LoanRequest(app.amount_requested_kes, app.purpose, app.term_months)
+        fresh = decisions.evaluate(db, member, request, overrides, refer_reason="review_requested")
+        # The reasons a member cannot apply yet come first in the policy; this is a person looking anyway.
+        settled = decisions.Settled("refer", "review_requested")
+        ev = replace(fresh, settled=settled, questions=[],
+                     reason=member_text.decision_reason("review_requested", {}),
+                     trace={**fresh.trace, "outcome": "refer", "reason_code": "review_requested", "amount_kes": None})
+        system = system_user(db)
+        record_run(db, ev, app, member, system, "review", move_application=not paid_out)
+        if not paid_out:
+            loans.set_status(db, app, "decided", actor, review_requested=True)
+        audit.record(db, actor, "self_service.review_request", "loan_application", app.id, loan_paid_out=paid_out)
+        # The loan already out has an officer's reversal, not an interview, ahead of it.
+        reply = idempotency.finish(row, committed_reply(ev, app, None).model_copy(update={"can_book_interview": not paid_out}))
+        db.commit()
+        return reply
+    except (CannotCommit, ledger.LedgerError, IntegrityError) as e:
+        db.rollback()
+        if isinstance(e, CannotCommit):
+            raise
+        raise CannotCommit("That could not be saved just now. Please try again.") from e
+
+
 # --- What a member sees -------------------------------------------------------------------
 
 def member_view(ev: Evaluation) -> s.SelfServiceEvaluation:
@@ -251,7 +309,8 @@ def member_view(ev: Evaluation) -> s.SelfServiceEvaluation:
         maximum_by_savings_kes=w.rule_max_kes, maximum_affordable_kes=w.affordable_max_kes,
         extra_guarantor_found=ev.extra_guarantor_found,
         reasons=member_text.reasons(ev.risk_class, ev.contributions) if final else [],
-        policy_version=ev.policy_version)
+        policy_version=ev.policy_version, consent_version=templates.consent_version(),
+        consent_text=templates.text_of("CONSENT"))
 
 
 def limited(limiter: LoginLimiter, key: str) -> None:
@@ -289,6 +348,9 @@ def self_service_commit(body: s.SelfServiceCommit, key: IdemKey, db: Session = D
     is written: evaluate again."""
     member = required_member(db, user)
     limited(commits, f"member:{member.id}")
+    if body.consent_version != templates.consent_version():
+        raise HTTPException(422, "consent_version: an automatic decision needs consent to the current wording; "
+                                 "it comes with an evaluation")
     try:
         return JSONResponse(commit(db, evaluated(db, member, body), key, user,
                                    expected=(body.expected_outcome, body.expected_amount_kes)), status_code=201)
@@ -332,6 +394,22 @@ def self_service_decline(application_id: int, key: IdemKey, db: Session = Depend
         loans.set_status(db, app, "declined", user, offer_declined=True)
         return loans.my_view(db, app)
     return idempotency.run_once(db, user, key, f"self_service.decline:{application_id}", {}, work, status_code=200)
+
+
+@router.post("/self-service/applications/{application_id}/review", status_code=201,
+             response_model=s.SelfServiceCommitted)
+def self_service_review(application_id: int, key: IdemKey, db: Session = Depends(get_db),
+                        user: User = Depends(require_member)):
+    """"Ask an officer to review this": on any automatic outcome but a referral, which is
+    already with an officer."""
+    app = my_offer(db, user, application_id)
+    limited(commits, f"member:{app.member_id}")
+    try:
+        return JSONResponse(request_review(db, app, key, user), status_code=201)
+    except decisions.ClassifierMissing:
+        raise HTTPException(503, "We could not look at this just now. Please try again later.") from None
+    except CannotCommit as e:
+        raise HTTPException(409, str(e)) from None
 
 
 # --- The officer's page -------------------------------------------------------------------

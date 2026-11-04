@@ -803,6 +803,14 @@ export interface PledgeOut {
   has_capacity?: boolean | null
   capacity_kes?: number | null
   guaranteed_kes?: number | null
+  max_amount_kes?: number | null
+}
+
+export interface NoticeOut {
+  id: number
+  kind: string
+  text: string
+  created_at: string
 }
 
 export interface LoanOut {
@@ -828,6 +836,7 @@ export interface SaccoView {
   my_guarantors: PledgeOut[]
   i_guarantee: PledgeOut[]
   loans: LoanOut[]
+  notices: NoticeOut[]
 }
 
 export interface GuarantorOffers {
@@ -844,7 +853,7 @@ export interface AutomaticDecision {
   member_id: number
   member_no: string
   member_name: string
-  trigger: 'commit' | 'acceptance'
+  trigger: 'commit' | 'acceptance' | 'review'
   outcome: Outcome
   amount_requested_kes: number
   amount_kes: number | null

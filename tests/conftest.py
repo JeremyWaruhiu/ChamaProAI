@@ -35,6 +35,11 @@ os.environ["STORAGE_BACKEND"] = "local"
 # Google sign-in is off unless a test turns it on (test_google_auth.py), whatever
 # GOOGLE_CLIENT_ID a developer's .env holds.
 os.environ["GOOGLE_CLIENT_ID"] = ""
+# No model is downloaded and nothing reaches Gemini, whatever .env holds. Tests that hear
+# speech install a fake engine (test_conversation.py).
+os.environ["TTS_ENABLED"] = "0"
+os.environ["TTS_CACHE_DIR"] = str(_TMP / "tts_cache")
+os.environ["CONVERSATION_GEMINI_LIVE"] = "0"
 
 import numpy as np  # noqa: E402
 import pytest  # noqa: E402

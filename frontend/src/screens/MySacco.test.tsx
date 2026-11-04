@@ -2,6 +2,8 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ApplyOptions, SaccoView } from '../api/types'
+import { api } from '../api/client'
+import { ToastProvider } from '../components/Toast'
 import { ProfileForm, Registration, SaccoPanels } from './MySacco'
 
 const OPTIONS: ApplyOptions = {
@@ -33,12 +35,50 @@ const VIEW: SaccoView = {
   i_guarantee: [{ id: 3, member_no: 'M-2004', full_name: 'Some Borrower', created_at: '2026-01-01T00:00:00+00:00', guaranteed_kes: 10000 }],
   loans: [{ id: 9, application_id: 3, principal_kes: 60000, disbursed_on: '2026-09-01', term_months: 18, monthly_instalment_kes: 3940,
             status: 'active', paid_kes: 3940, days_in_arrears: 12 }],
+  notices: [],
 }
 
 beforeEach(() => vi.stubGlobal('matchMedia', vi.fn(() => ({ matches: true, addEventListener() {}, removeEventListener() {} }))))
 afterEach(() => { cleanup(); vi.unstubAllGlobals() })
 
 describe('My SACCO', () => {
+  it('shows a guarantor the notice, and not to staff reading the same page', () => {
+    const text = "You are now guaranteeing Wanjiru Kamau's loan of KSh 40,000."
+    const view = { ...VIEW, notices: [{ id: 1, kind: 'guarantee_started', text, created_at: '2026-11-04T06:00:00+00:00' }] }
+    render(<SaccoPanels view={view} options={OPTIONS} />)
+    expect(screen.getByText('For your attention')).toBeTruthy()
+    expect(screen.getByText(text)).toBeTruthy()
+    cleanup()
+    render(<SaccoPanels view={view} options={OPTIONS} staff />)
+    expect(screen.queryByText(text)).toBeNull()
+  })
+
+  it('lets a guarantor set their own limit, and refuses a bad one', async () => {
+    const saved = { ...VIEW, i_guarantee: [{ ...VIEW.i_guarantee[0], max_amount_kes: 12000 }] }
+    const patch = vi.spyOn(api, 'setPledgeCeiling').mockResolvedValue(saved)
+    const onView = vi.fn()
+    render(<ToastProvider><SaccoPanels view={VIEW} options={OPTIONS} onView={onView} /></ToastProvider>)
+    expect(screen.getByText('No limit set: not used for automatic loans')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'Set limit' }))
+    const input = screen.getByLabelText(/The most you will guarantee for Some Borrower/)
+    fireEvent.change(input, { target: { value: 'lots' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+    expect(screen.getByText('Enter an amount of at least KSh 1.')).toBeTruthy()
+    expect(patch).not.toHaveBeenCalled()
+    fireEvent.change(input, { target: { value: '12000' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(onView).toHaveBeenCalledWith(saved))
+    expect(patch).toHaveBeenCalledWith(3, 12000)
+    patch.mockRestore()
+  })
+
+  it('shows staff the limit but no way to change it', () => {
+    const view = { ...VIEW, i_guarantee: [{ ...VIEW.i_guarantee[0], max_amount_kes: 12000 }] }
+    render(<SaccoPanels view={view} options={OPTIONS} staff />)
+    expect(screen.getByText('Up to KSh 12,000')).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Change' })).toBeNull()
+  })
+
   it('says when the profile was last confirmed, and what has been checked', () => {
     render(<SaccoPanels view={VIEW} options={OPTIONS} />)
     expect(screen.getByText(/Last confirmed .* \(34 days ago\)/)).toBeTruthy()

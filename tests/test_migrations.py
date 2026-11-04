@@ -60,7 +60,7 @@ def legacy(tmp_path):
 def test_fresh_database_reaches_head(tmp_path):
     engine = create_engine(f"sqlite:///{tmp_path / 'new.db'}")
     init_db(engine)
-    assert schema_revision(engine) == head_revision() == "0006"
+    assert schema_revision(engine) == head_revision() == "0007"
     names = set(inspect(engine).get_table_names())
     assert {"members", "loan_applications", "guarantors", "audit_log", "alembic_version"} <= names
     assert not list(tmp_path.glob("*.bak"))                  # nothing to back up
@@ -80,7 +80,7 @@ def test_legacy_rows_survive_exactly(legacy, tmp_path):
         assert [r[:len(cols)] for r in new_rows if r[1] != "system"] == rows, t
     assert after["decisions"][1][len(before["decisions"][1]):] == \
         ["outcome", "approved_amount_kes", "guarantors_required", "officer_notes", "member_message", "policy_version"]
-    assert len(list(tmp_path.glob("chamapro.db.pre-0006-*.bak"))) == 1   # backed up once
+    assert len(list(tmp_path.glob("chamapro.db.pre-0007-*.bak"))) == 1   # backed up once
 
 
 def test_backup_holds_the_pre_migration_database(legacy, tmp_path):
@@ -434,7 +434,7 @@ def test_0006_runs_through_init_db_with_rows_pointing_at_the_rebuilt_tables(tmp_
     filled_0005(path)
     engine = create_engine(f"sqlite:///{path}")
     init_db(engine)
-    assert schema_revision(engine) == "0006"
+    assert schema_revision(engine) == "0007"
     con = sqlite3.connect(path)
     assert con.execute("SELECT count(*) FROM guarantors WHERE loan_account_id = 1").fetchone() == (1,)
     con.close()

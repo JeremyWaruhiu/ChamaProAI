@@ -120,7 +120,7 @@ def test_the_sacco_page_does_not_query_per_row(client, queries, staff):
     body = r.json()
     assert len(body["my_guarantors"]) == 5 and len(body["i_guarantee"]) == 5 and len(body["loans"]) == 4
     assert [len(a["entries"]) for a in body["accounts"]] == [10, 10, 10]   # 17 of each; the newest ten
-    assert after <= 15
+    assert after <= 17
 
 
 def test_guarantor_offers_do_not_query_per_pledge(client, queries):

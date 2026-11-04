@@ -227,7 +227,9 @@ def cancel_booking(booking_id: int, db: Session = Depends(get_db),
     record(db, user, "booking.cancel", b)
     app = b.application
     if app.status == "interview_pending" and loans.held_by_automatic_decision(app):
-        loans.set_status(db, app, "decided", user, booking_id=b.id)     # back to the referral
+        # Back to what the decision said: a referral, or "not now".
+        back = "declined" if app.interview.decision.outcome == "not_now" else "decided"
+        loans.set_status(db, app, back, user, booking_id=b.id)
     elif app.status == "interview_pending" and app.interview_id is None:
         loans.set_status(db, app, "draft", user, booking_id=b.id)
     db.commit()

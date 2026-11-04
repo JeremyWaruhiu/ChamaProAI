@@ -418,6 +418,9 @@ nothing scrolls sideways.
 
 ### Open questions
 
+Settled in phase 3, which see: typed income, Medium after C1, existing loans and the 3 x rule,
+notice to guarantors, and Data Protection Act s.35. The capacity oracle and erasure remain open.
+
 - **A member can type their income.** A C2 answer replaces the profile for the score and
   for affordability, unchecked, and up to KSh 50,000 can then leave automatically. In the
   demo, KSh 10,000 becoming KSh 30,000 moves Njeri from Medium to Low. The specification
@@ -450,3 +453,124 @@ nothing scrolls sideways.
 | `GET /api/automatic-decisions`, `/{id}` | The officers' page. Two queries for the list, however many rows. |
 | `policy_version` on `DecisionOut`; `self_service` in `mode`; `offered` and `reversed` in application status; `reversed` in loan status; `not_now` in outcome | What the screens must now show. Officers cannot choose `not_now` or start a `self_service` interview. |
 | Row-level security, with no policies, on the two new tables | As on every other table. |
+
+## The conversation backend and speech output (phase 3 of 5)
+
+Migration `0007`. Policy version `2026.11.2`. A member applies by conversation, by text or
+voice, in English or Kikuyu. There is no chat screen yet: phase 4 builds it on the API here.
+The classifier is unchanged and is not retrained. Gemini writes nothing the bot says and
+decides nothing.
+
+### Rulings on the phase 2 questions
+
+| Ruling | How it is built |
+|---|---|
+| Income: increases to `UNVERIFIED_INCREASE_TOLERANCE` (0.30) over the profile accepted; more is rescored, shown, and referred | `decisions.income_needs_officer`. Reason code `income_unconfirmed`, whose message says "income needs officer confirmation". A check row in the trace gives the figures. A decrease is always accepted. |
+| Only C2, C3, C4 clear Medium | `decisions.CLEARS_MEDIUM`. |
+| 3 x rule: 3 x deposits minus outstanding principal on active SACCO loans | `ledger.outstanding_principal`, on the reducing balance at the configured rate. Used by the engine only; see below. |
+| Pledges have a ceiling, and a pledge used on an automatic approval posts a notice | `guarantor_pledges.max_amount_kes`, `member_notices`, shown on My SACCO. The ceiling covers everything the pledge holds for that borrower, on loans still owed and on applications not yet issued. |
+| s.35 | Consent is the second thing the bot says, and is stored with a version that is a hash of its wording. `POST .../review` makes a referral on any automatic outcome. "Not now" can be booked directly. |
+| At most 3 clarification questions, then refer | `CONVERSATION_MAX_QUESTIONS`. Reason code `question_cap`. If the third answer settles it, there is no referral. |
+| `seed_demo.py` prints the database written | `database_written()`, from the engine, password hidden. |
+
+Njeri's profile income is now KSh 18,000 (Medium, income in the top three drivers). KSh 22,000
+is 22% up, inside the band (the ceiling is KSh 23,400), and the real classifier calls it Low, so
+it gets the reduced offer of KSh 45,000. KSh 30,000 refers.
+
+### Conversation
+
+`conversation/machine.py`. Each state is the question last asked:
+
+    G1 -> CONSENT -> G2 -> R1 -> [CHECK_AMOUNT] -> evaluate -> C1..C6 -> CONFIRM -> commit -> O1..O4 -> END
+
+`conversations` holds where it has got to; `conversation_turns` is append-only by database
+triggers on both databases. A reply does its slow work with no transaction open. `busy_until`,
+taken in its own commit, stops a second reply being worked on at once, and lapses if a process
+dies. Speech comes next, and then a single commit writes the member's turn, the bot's turns and
+the new state. The turn is never filled in later. A decision commits on its own under a key made
+from the conversation's id, so a failure before the last commit changes nothing about the
+conversation, and answering again finds the decision instead of paying twice.
+
+A reduced offer on CONFIRM goes through the phase 2 path as it stands: commit (offered), then
+accept. A referral or "not now" commits at once, with no CONFIRM.
+
+### Decisions the brief left open
+
+| Decision | Why |
+|---|---|
+| Phase 1 has no "profile update request", though the brief says "as phase 1 does". Added as a `member_profile_history` row, `change = update_request`, holding the unchanged snapshot and what was asked for | The nearest thing phase 1 has, and already append-only. The audit log gets group names only. Staff read them in `update_requests` on the member's SACCO page; no screen shows them yet. |
+| A yes at G2 is not a confirmation of the profile and does not answer C2 | A confirmation would reset the income's age, and Njeri would never reach C2. So a member with a stale income hears it twice. An income corrected at G2 does count as C2 and is held to the tolerance. |
+| A stated income with no profile figure refers (`income_unconfirmed`) | There is nothing to compare it with, and it is the same hole the ruling closes. |
+| CHECK_AMOUNT guards every money figure (R1, C2, C3, C4), not only the loan amount | A wrong income moves the score as a wrong amount does. It does not count towards the 3 questions. |
+| Consent unclear twice is treated as not given | It must never be inferred. |
+| A yes to CONSENT or CONFIRM from the model alone needs confidence of at least 0.8; a model and lexicon that disagree mean REASK | Those two answers give consent and move money. Other model readings need 0.5. |
+| "Then refer" before there is an amount says OFFICER_HELP, with no O3 | O3 says an officer will look at "your application", and there is no application to look at. |
+| C6 "no" refers (`offer_declined`) rather than offering the same figure | They have just turned it down. |
+| A chama "yes" with no instalment is REASK | Treating it as KSh 0 would overstate what they can afford. |
+| A referral's actions offer booking only; review of one is a 409 | It is already with an officer. Every other automatic outcome offers review. |
+| Review of a paid-out loan is recorded as a referral and the loan stands; the application keeps pointing at the decision that paid it | An officer can reverse it within the window. Moving the application would disturb that. |
+| A pledge from before `0007` has no ceiling and backs no automatic decision. An officer's branch review can still use it | Nobody can say what the guarantor would have agreed to. The officer's API now requires a ceiling for new pledges, and the guarantor can set their own. |
+| A reversal posts a second notice to the guarantors | Otherwise "You are now guaranteeing" stays on their page and is false. |
+| Five extra template ids: `C2_NEW`, `O4_GUARANTORS`, `OFFICER_HELP`, `ACTION_REVIEW`, `ACTION_BOOK` | C2 and O4 as written have nothing true to say with no income on record, or no months to wait; the rest have no text in the brief. All need Kikuyu too. |
+| `POST /api/self-service/commit` needs `consent_version` | Otherwise the HTTP route is a way round the consent. An evaluation returns the wording and the version. |
+| Gemini on a server: `CONVERSATION_GEMINI_LIVE=1` | uvicorn has no `--live`. Off by default, so nothing is sent by accident. |
+| `transcribe_now` shares a lock with the worker | The ASR pipeline is not thread-safe. A reply waits for the clip in progress and not for the queue. |
+| Age, sex and marital status have no plain label in `explain`; the count left out is given | `member_text`'s rule: naming one as counting against someone reads as discrimination. Staff still see them. |
+| Reply is a multipart form, not JSON | One route takes text or a file. |
+
+### Kikuyu
+
+`kikuyu_numbers.py` round-trips every number from 0 to 999,999. The brief's vocabulary is in one
+place at the top. Its docstring separates what the brief gave from what was added to complete the
+range: zero, the agreement of `magana`, the use of `na`, the comma, and the spelling variants. None
+of it has been checked by a speaker. Nor has `lexicon.py` beyond the brief's four forms. An amount
+above 999,999 is left as a figure in Kikuyu text.
+
+### Open questions
+
+- **The member sees the class and probabilities.** `explain` goes to the member as the brief asks.
+  Until now they were kept from members, and `member_text` was written to keep them out. Decide
+  whether phase 4 shows them to members, or only in a supervised demonstration.
+- **C5 shows a guarantor's figure.** "Your guarantors can cover {capacity} shillings" is as
+  written. With one pledge, it is that member's ceiling or free deposits. `explain` keeps every
+  such figure out; this template does not.
+- **Latency on Supabase.** On SQLite a reply is 9 to 21 queries, and the reply that pays out is
+  about 53. At ~200 ms a round trip, that is 2 to 4 s and about 10 s respectively, before speech.
+  Not measured there; the figures are queries x the round trip in `test_query_counts.py`.
+- **Speech with slots is slow on a CPU.** See below. Sentences with amounts cannot be pre-warmed.
+- **The 3 x rule in the branch flow.** `comparator.py` still reads deposits x 3 alone. Changing it
+  would change the agreement figures in the dissertation, so it is left for you to decide.
+- **Licence.** Both voices are CC-BY-NC 4.0. A real SACCO deployment would need other voices.
+- **"Good morning"** is fixed text, at any hour.
+- Still open from earlier phases: the capacity oracle, one-time codes for claiming a member,
+  erasure (conversation turns are now also immutable, and a recording is personal data).
+
+### Timings on this machine (8 threads, no Gemini)
+
+| What | Time |
+|---|---|
+| Paza, OpenVINO int8 on the GPU, one 5.4 s corpus clip | 13.8 s first, then 4.9 s and 3.2 s; 27 s to load |
+| `mms-tts-kik` on the G2 sentence (English text, 8.8 s of audio) | 2.4 to 4.3 s; 7.3 s to load |
+| `mms-tts-eng` on the G2 sentence (9.5 s of audio) | 3.4 to 5.7 s; 2.0 s to load |
+| Rehearsal of Wanjiru, English, typed, cold speech cache | 17.4 s of server work across 5 replies; 33.9 s with start-up |
+| The same, warm cache | 2.8 s of server work; 6.9 s with start-up |
+| Its slowest step, cold: "Yes, go ahead" | 2.9 s evaluate and commit, 4.0 s speech |
+
+The kik voice read English text because the Kikuyu templates are empty. The time is
+indicative and says nothing of how it sounds. The first evaluation in a process adds about 2 s to
+load the classifier. Over real HTTP, one voice reply through Whisper took 14.2 s on its first use.
+Of that, 9.2 s was ASR, including loading the model, and 3.3 s was speech.
+
+### API changes for this work
+
+| Change | Reason |
+|---|---|
+| `POST /api/conversations`, `POST .../{id}/reply`, `GET .../{id}`, `GET .../{id}/turns/{seq}/audio` | The conversation. |
+| `POST /api/self-service/applications/{id}/review` | s.35. |
+| `PATCH /api/me/pledges/{id}`; `max_amount_kes` on `PledgeOut`, for the guarantor and staff only; required on `POST /api/members/{id}/pledges` | The guarantor's ceiling. |
+| `notices` on `SaccoView`; `update_requests`, staff only | Shown on My SACCO, at 360, 390 and 430 px: nothing scrolls sideways. |
+| `consent_version` required on commit; `consent_version`, `consent_text` on an evaluation | s.35 on the HTTP route. |
+| `review` in `AutomaticDecision.trigger` | The officers' page lists them. |
+| `not_now` applications can be booked directly; a cancelled booking returns them to `declined` | "Not now" offers the booking flow. |
+| Row-level security, with no policies, on the three new tables | As on every other table. |
+

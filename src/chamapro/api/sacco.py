@@ -15,14 +15,15 @@ from sqlalchemy.orm import Session, joinedload
 from . import audit, comparator, ledger, loans, profiles
 from . import schemas as s
 from .auth import require_member, require_officer
-from .db import (PROFILE_GROUPS, Guarantor, GuarantorPledge, LoanAccount, LoanApplication, Member,
-                 MemberProfile, User, get_db)
+from .db import (PROFILE_GROUPS, Guarantor, GuarantorPledge, LoanAccount, LoanApplication, Member, MemberNotice,
+                 MemberProfile, MemberProfileHistory, User, get_db)
 from .pilot import required_member
 
 ERRORS = {code: {"model": s.Error} for code in (401, 403, 404, 409, 422)}
 router = APIRouter(prefix="/api", responses=ERRORS)
 
 STANDING_GUARANTOR = "standing guarantor"
+NOTICES_SHOWN = 10
 
 
 # --- The page ---------------------------------------------------------------------------
@@ -65,6 +66,21 @@ def loans_out(db: Session, m: Member) -> list[s.LoanOut]:
             for x in rows]
 
 
+def notices_out(db: Session, m: Member) -> list[s.NoticeOut]:
+    rows = db.scalars(select(MemberNotice).where(MemberNotice.member_id == m.id)
+                      .order_by(MemberNotice.created_at.desc(), MemberNotice.id.desc()).limit(NOTICES_SHOWN))
+    return [s.NoticeOut.model_validate(n) for n in rows]
+
+
+def update_requests_out(db: Session, m: Member) -> list[s.ProfileUpdateRequest]:
+    rows = db.scalars(select(MemberProfileHistory)
+                      .where(MemberProfileHistory.member_id == m.id, MemberProfileHistory.change == profiles.UPDATE_REQUEST)
+                      .order_by(MemberProfileHistory.created_at.desc(), MemberProfileHistory.id.desc())
+                      .limit(NOTICES_SHOWN))
+    return [s.ProfileUpdateRequest(requested=r.snapshot.get("requested", {}), created_at=r.created_at,
+                                   conversation_id=r.snapshot.get("conversation_id")) for r in rows]
+
+
 def sacco_view(db: Session, m: Member, staff: bool) -> s.SaccoView:
     """A fixed number of queries, none per row: the pledges come with their members,
     and capacity is asked for everyone at once."""
@@ -87,11 +103,14 @@ def sacco_view(db: Session, m: Member, staff: bool) -> s.SaccoView:
         my_guarantors=[s.PledgeOut(
             id=p.id, member_no=p.guarantor.member_no, full_name=p.guarantor.full_name,
             created_at=p.created_at, has_capacity=caps[p.guarantor_member_id].available_kes > 0,
-            capacity_kes=caps[p.guarantor_member_id].capacity_kes if staff else None) for p in mine],
+            capacity_kes=caps[p.guarantor_member_id].capacity_kes if staff else None,
+            max_amount_kes=p.max_amount_kes if staff else None) for p in mine],
         i_guarantee=[s.PledgeOut(
             id=p.id, member_no=p.borrower.member_no, full_name=p.borrower.full_name,
-            created_at=p.created_at, guaranteed_kes=guaranteed.get(p.borrower_member_id, 0)) for p in theirs],
-        loans=loans_out(db, m))
+            created_at=p.created_at, guaranteed_kes=guaranteed.get(p.borrower_member_id, 0),
+            max_amount_kes=p.max_amount_kes) for p in theirs],
+        loans=loans_out(db, m), notices=notices_out(db, m),
+        update_requests=update_requests_out(db, m) if staff else None)
 
 
 def member_or_404(db: Session, member_id: int) -> Member:
@@ -151,6 +170,21 @@ def verify_member_profile(member_id: int, body: s.ProfileVerify | None = None, d
 
 # --- Standing guarantors for an application --------------------------------------------------
 
+@router.patch("/me/pledges/{pledge_id}", response_model=s.SaccoView)
+def set_my_ceiling(pledge_id: int, body: s.PledgeCeiling, db: Session = Depends(get_db),
+                   user: User = Depends(require_member)):
+    """The guarantor sets how far they will go. A guarantee already given stands; this
+    says only what can be asked of them next. Anyone else's pledge is the same 404 as none."""
+    m = required_member(db, user)
+    pledge = db.get(GuarantorPledge, pledge_id)
+    if pledge is None or pledge.guarantor_member_id != m.id or pledge.status != "active":
+        raise HTTPException(404, f"pledge {pledge_id} not found")
+    pledge.max_amount_kes = body.max_amount_kes
+    audit.record(db, user, "pledge.ceiling", "guarantor_pledge", pledge.id, max_amount_kes=body.max_amount_kes)
+    db.commit()
+    return sacco_view(db, m, staff=False)
+
+
 def share_of(app: LoanApplication) -> int:
     """What each guarantor is asked to cover: the loan split evenly, rounded up."""
     d = app.interview.decision
@@ -167,9 +201,14 @@ def offers_for(db: Session, app: LoanApplication) -> tuple[int, list[GuarantorPl
                          .options(joinedload(GuarantorPledge.guarantor))
                          .order_by(GuarantorPledge.id)).all()
     caps = ledger.capacities(db, {p.guarantor_member_id for p in pledges})
+    held = ledger.held_under_pledges(db, [p.id for p in pledges])
     taken = {g.member_id for g in app.guarantors if g.status != "rejected"}
+
+    def within_ceiling(p: GuarantorPledge) -> bool:
+        """An officer reviews this row, so a pledge with no ceiling yet is still offered."""
+        return p.max_amount_kes is None or p.max_amount_kes - held.get(p.id, 0) >= share
     return share, [p for p in pledges if p.guarantor_member_id not in taken and p.guarantor.phone
-                   and caps[p.guarantor_member_id].available_kes >= share]
+                   and caps[p.guarantor_member_id].available_kes >= share and within_ceiling(p)]
 
 
 @router.get("/me/applications/{application_id}/guarantor-offers", response_model=s.GuarantorOffers)

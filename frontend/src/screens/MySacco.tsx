@@ -45,7 +45,7 @@ export function MySacco() {
   return (
     <>
       <PageHeader title={S.title} lead={S.lead} />
-      <SaccoPanels view={view} options={options} actions={
+      <SaccoPanels view={view} options={options} onView={(next) => setData([next, options])} actions={
         <>
           <button type="button" className="btn btn-secondary btn-sm" onClick={() => setEditing(true)}>
             <Icon name="edit" size={16} /> {S.requestChange}
@@ -222,16 +222,25 @@ export function ProfileForm({ initial, options, submit, failed, onSubmit }: {
 
 // --- What the member and the officer both read --------------------------------------------------
 
-export function SaccoPanels({ view, options, staff = false, actions }: {
-  view: SaccoView; options: ApplicantFormOptions; staff?: boolean; actions?: ReactNode
+export function SaccoPanels({ view, options, staff = false, actions, onView }: {
+  view: SaccoView; options: ApplicantFormOptions; staff?: boolean; actions?: ReactNode; onView?: (view: SaccoView) => void
 }) {
   return (
     <div className={styles.panels}>
+      {!staff && view.notices?.length > 0 && (
+        <Card title={S.notices}>
+          <ul className={styles.notices}>
+            {view.notices.map((n) => (
+              <li key={n.id}>{n.text}<span className={styles.entryDate}>{formatDate(n.created_at)}</span></li>
+            ))}
+          </ul>
+        </Card>
+      )}
       <ProfileCard profile={view.profile} options={options} staff={staff} actions={actions} />
       <Card title={S.balances} delay={0.03}>
         <ul className={styles.accounts}>{view.accounts.map((a) => <Account key={a.kind} account={a} />)}</ul>
       </Card>
-      <Guarantors view={view} staff={staff} />
+      <Guarantors view={view} staff={staff} onView={onView} />
       <LoanHistory loans={view.loans} />
     </div>
   )
@@ -322,7 +331,7 @@ function Account({ account: a }: { account: AccountOut }) {
   )
 }
 
-function Guarantors({ view, staff }: { view: SaccoView; staff: boolean }) {
+function Guarantors({ view, staff, onView }: { view: SaccoView; staff: boolean; onView?: (view: SaccoView) => void }) {
   const g = view.guarantee
   return (
     <Card title={S.guarantors} delay={0.06}>
@@ -338,13 +347,15 @@ function Guarantors({ view, staff }: { view: SaccoView; staff: boolean }) {
       )}
       <h3 className={styles.subTitle}>{S.iGuarantee}</h3>
       {view.i_guarantee.length === 0 ? <p className="subtle small">{S.noneGuaranteed}</p> : (
-        <ul className={styles.people}>{view.i_guarantee.map((p) => <Person key={p.id} p={p} staff={staff} side="theirs" />)}</ul>
+        <ul className={styles.people}>{view.i_guarantee.map((p) => <Person key={p.id} p={p} staff={staff} side="theirs" onView={onView} />)}</ul>
       )}
     </Card>
   )
 }
 
-function Person({ p, staff, side }: { p: PledgeOut; staff: boolean; side: 'mine' | 'theirs' }) {
+function Person({ p, staff, side, onView }: {
+  p: PledgeOut; staff: boolean; side: 'mine' | 'theirs'; onView?: (view: SaccoView) => void
+}) {
   return (
     <li className={styles.person}>
       <span>{p.full_name}<span className={styles.entryRef}>{p.member_no}</span></span>
@@ -353,7 +364,57 @@ function Person({ p, staff, side }: { p: PledgeOut; staff: boolean; side: 'mine'
             ? <Badge tone={p.has_capacity ? 'low' : 'wait'}>{S.capacityOf(p.capacity_kes)}</Badge>
             : <Badge tone={p.has_capacity ? 'low' : 'wait'}>{p.has_capacity ? S.hasCapacity : S.noCapacity}</Badge>)
         : <span className={styles.entryDate}>{p.guaranteed_kes ? S.guaranteedAmount(p.guaranteed_kes) : S.nothingYet}</span>}
+      {side === 'theirs' && <Ceiling p={p} onView={staff ? undefined : onView} />}
     </li>
+  )
+}
+
+/** What a guarantor agrees to stand behind this borrower for. Only they can change it. */
+function Ceiling({ p, onView }: { p: PledgeOut; onView?: (view: SaccoView) => void }) {
+  const toast = useToast()
+  const [draft, setDraft] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const set = p.max_amount_kes ?? null
+
+  async function save(e: FormEvent) {
+    e.preventDefault()
+    const amount = Number(draft)
+    if (!Number.isInteger(amount) || amount < 1) {
+      setError(S.ceilingInvalid)
+      return
+    }
+    try {
+      onView?.(await api.setPledgeCeiling(p.id, amount))
+      setDraft(null)
+      setError(null)
+      toast(S.ceilingSaved)
+    } catch (err) {
+      setError((err as ApiError).message)
+    }
+  }
+
+  if (draft !== null) {
+    return (
+      <form className={styles.ceilingForm} onSubmit={save} noValidate>
+        <Field id={`ceiling-${p.id}`} label={S.ceilingLabel(p.full_name)} error={error ?? undefined}>
+          {(a) => <input {...a} className="input" inputMode="numeric" value={draft} onChange={(e) => setDraft(e.target.value)} />}
+        </Field>
+        <div className={styles.ceilingActions}>
+          <button type="submit" className="btn btn-secondary btn-sm">{S.saveCeiling}</button>
+          <button type="button" className="btn btn-quiet btn-sm" onClick={() => { setDraft(null); setError(null) }}>{S.cancelCeiling}</button>
+        </div>
+      </form>
+    )
+  }
+  return (
+    <span className={styles.ceiling}>
+      <span className="small subtle">{set === null ? S.noCeiling : S.ceiling(set)}</span>
+      {onView && (
+        <button type="button" className="btn btn-quiet btn-sm" onClick={() => setDraft(set === null ? '' : String(set))}>
+          {set === null ? S.setCeiling : S.changeCeiling}
+        </button>
+      )}
+    </span>
   )
 }
 

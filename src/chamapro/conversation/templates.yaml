@@ -1,0 +1,74 @@
+# Every word the bot says. Fill the kik entries from a native speaker; an empty one shows
+# the English text flagged kik_pending, and is spoken with the English voice.
+# Slots are in {braces}. Numbers go into an en entry as figures (spoken as words), and into
+# a kik entry as words (chamapro.conversation.kikuyu_numbers). Changing CONSENT changes the
+# version a member's consent is stored with.
+G1:
+  en: "Good morning, {first_name}. Welcome to {sacco_name}. I can help you apply for a loan today."
+  kik: ""
+CONSENT:
+  en: "Before we start: the system will make a decision on your loan automatically, and you can ask an officer to review it at any time. Do you agree?"
+  kik: ""
+G2:
+  en: "First, let us check your details. You have {household_size} people at home, {children} children, and you earn about {monthly_income} shillings a month. Is that still correct?"
+  kik: ""
+R1:
+  en: "How much would you like to borrow, and what is it for?"
+  kik: ""
+C1:
+  en: "Over how many months would you like to repay it?"
+  kik: ""
+C2:
+  en: "Your income on record is {monthly_income} shillings a month. Is that still right?"
+  kik: ""
+C2_NEW:
+  en: "How much do you earn each month?"
+  kik: ""
+C3:
+  en: "How much will the {purpose} bring in each month?"
+  kik: ""
+C4:
+  en: "Are you repaying a chama loan at the moment?"
+  kik: ""
+C5:
+  en: "Your guarantors can cover {capacity} shillings. Who else could guarantee this loan?"
+  kik: ""
+C6:
+  en: "We can offer up to {max_amount} shillings. Would that amount work for you?"
+  kik: ""
+CHECK_AMOUNT:
+  en: "Did you say {amount} shillings?"
+  kik: ""
+REASK:
+  en: "Sorry, I did not catch that. Could you say it again?"
+  kik: ""
+CONFIRM:
+  en: "You qualify for {amount} shillings over {term} months, at {instalment} shillings a month, guaranteed by {guarantors}. Shall I go ahead?"
+  kik: ""
+O1:
+  en: "Good news, {first_name}. Your loan of {amount} shillings is approved. The money is now in your account."
+  kik: ""
+O2:
+  en: "We have approved {amount} shillings, repaid over {term} months at {instalment} shillings a month. The money is now in your account."
+  kik: ""
+O3:
+  en: "Thank you. A loan officer will look at your application. You can book a time to meet them now."
+  kik: ""
+O4:
+  en: "We cannot approve this loan today. Building your savings for {months} more months will help your next application. You can also ask an officer to review this."
+  kik: ""
+O4_GUARANTORS:
+  en: "We cannot approve this loan today. You need at least {min_guarantors} members who have pledged to guarantee you. You can also ask an officer to review this."
+  kik: ""
+OFFICER_HELP:
+  en: "A loan officer can help you with this. You can book a time to meet them now."
+  kik: ""
+END:
+  en: "Thank you for banking with {sacco_name}. Goodbye."
+  kik: ""
+ACTION_REVIEW:
+  en: "Ask an officer to review this"
+  kik: ""
+ACTION_BOOK:
+  en: "Book a time with an officer"
+  kik: ""

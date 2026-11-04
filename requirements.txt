@@ -20,6 +20,7 @@ datasets>=2.20
 sentencepiece            # NLLB tokenizer backend
 sacrebleu>=2.4
 python-dotenv>=1.0
+pyyaml>=6.0              # the conversation's templates
 google-genai>=1.0
 pandas>=2.2
 pyreadstat>=1.2

@@ -65,11 +65,13 @@ def main() -> None:
         show("before", evaluate(db, members["wanjiru"], DAIRY))
         show("after answering C1: 12 months", evaluate(db, members["wanjiru"], DAIRY, {"term_months": 12}))
         print("\nNjeri Mwangi asks for KSh 60,000 for school fees over 12 months. "
-              "Her profile says KSh 10,000 a month, entered 240 days ago and never checked.")
+              "Her profile says KSh 18,000 a month, entered 240 days ago and never checked.")
         show("before", evaluate(db, members["njeri"], SCHOOL))
-        show("after answering C2: KSh 30,000 a month", evaluate(db, members["njeri"], SCHOOL, {"monthly_income_kes": 30000}))
+        show("after answering C2: KSh 22,000 a month", evaluate(db, members["njeri"], SCHOOL, {"monthly_income_kes": 22000}))
         show("after accepting the offer", evaluate(db, members["njeri"], SCHOOL,
-                                                   {"monthly_income_kes": 30000, "accepted_amount_kes": 45000}, final=True))
+                                                   {"monthly_income_kes": 22000, "accepted_amount_kes": 45000}, final=True))
+        show("had she said KSh 30,000, over the 30% tolerance", evaluate(db, members["njeri"], SCHOOL,
+                                                                         {"monthly_income_kes": 30000}))
 
 
 if __name__ == "__main__":
