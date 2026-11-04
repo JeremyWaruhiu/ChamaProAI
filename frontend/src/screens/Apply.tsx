@@ -6,7 +6,7 @@ import { ErrorNotice, Notice } from '../components/Notice'
 import { SlotPicker } from '../components/SlotPicker'
 import { Badge, Card, Field, PageHeader, SkeletonPage } from '../components/ui'
 import { useLoad } from '../hooks/useLoad'
-import { EMPTY_APPLY, applyErrors, applyWarnings, ruleLimit, savingsFor, toApplicationBody, type ApplyDraft } from '../lib/apply'
+import { applyErrors, applyWarnings, draftFor, ruleLimit, savingsFor, toApplicationBody, type ApplyDraft } from '../lib/apply'
 import { formatDay, formatKes } from '../lib/format'
 import { navigate, paths } from '../lib/router'
 import { t } from '../strings'
@@ -30,7 +30,7 @@ export function Apply() {
 }
 
 export function ApplyForm({ member, options }: { member: MyMember; options: ApplyOptions }) {
-  const [d, setD] = useState<ApplyDraft>(EMPTY_APPLY)
+  const [d, setD] = useState<ApplyDraft>(() => draftFor(member))
   const [tried, setTried] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<ApiError | null>(null)
@@ -70,13 +70,13 @@ export function ApplyForm({ member, options }: { member: MyMember; options: Appl
           <ReadOnly id="ap-no" label={A.memberNo} value={member.member_no} />
           <ReadOnly id="ap-phone" label={A.phone} value={member.phone ?? A.noPhone} />
           <ReadOnly id="ap-tenure" label={A.tenure} value={A.tenureValue(member.tenure_months, formatDay(member.joined_on))} />
-          {member.savings_kes !== null && <ReadOnly id="ap-savings" label={A.savings} value={formatKes(member.savings_kes)} />}
+          {member.savings_kes !== null && <ReadOnly id="ap-savings" label={member.from_ledger ? A.deposits : A.savings} value={formatKes(member.savings_kes)} />}
         </div>
         {member.savings_kes !== null && (
           <p className={styles.savingsStatus}>
             <span className="subtle small">{A.savingsVerification}:</span>{' '}
-            <Badge tone={member.savings_status === 'verified' ? 'low' : 'wait'}
-                   icon={member.savings_status === 'verified' ? 'check' : 'clock'}>{t.savingsStatus[member.savings_status]}</Badge>
+            <Badge tone={member.savings_status === 'verified' || member.from_ledger ? 'low' : 'wait'}
+                   icon={member.savings_status === 'verified' || member.from_ledger ? 'check' : 'clock'}>{t.savingsStatus[member.savings_status]}</Badge>
           </p>
         )}
         {member.savings_kes === null && (

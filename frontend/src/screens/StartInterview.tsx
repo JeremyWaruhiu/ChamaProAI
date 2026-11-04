@@ -228,6 +228,21 @@ function LoanStep({ draft, set, errors }: StepProps) {
   const amount = parseShillings(draft.amount)
   const savings = parseShillings(draft.savings)
   const ceiling = savings !== null ? ruleCeiling(savings) : null
+  // A member on the ledger: the API takes their deposits balance whatever is typed, so show it.
+  const memberId = draft.memberMode === 'existing' ? draft.member?.id : undefined
+  const [onLedger, setOnLedger] = useState(false)
+  useEffect(() => {
+    if (!memberId) return
+    let live = true
+    api.memberSacco(memberId).then((v) => {
+      const deposits = v.accounts?.find((a) => a.kind === 'deposits')
+      if (live && deposits?.entries.length) {
+        setOnLedger(true)
+        set('savings', String(deposits.balance_kes))
+      }
+    }, () => {})
+    return () => { live = false }
+  }, [memberId, set])
   return (
     <div className={styles.grid}>
       <Field id="loan-amount" label={W.amount} error={errors.amount}>
@@ -244,8 +259,8 @@ function LoanStep({ draft, set, errors }: StepProps) {
         </Field>
       </div>
       <div className={styles.wide}>
-        <Field id="loan-savings" label={W.savings} hint={W.savingsHint} error={errors.savings}>
-          {(p) => <input {...p} className="input num" inputMode="numeric" value={draft.savings} autoComplete="off"
+        <Field id="loan-savings" label={W.savings} hint={onLedger ? W.savingsLedgerHint : W.savingsHint} error={errors.savings}>
+          {(p) => <input {...p} className="input num" inputMode="numeric" value={draft.savings} autoComplete="off" readOnly={onLedger}
                          onChange={(e) => set('savings', e.target.value)} />}
         </Field>
       </div>

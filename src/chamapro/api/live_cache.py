@@ -3,8 +3,8 @@
 The Model & Evaluation page and the admin overview both load them, and
 against Supabase every query is a round trip of ~200 ms or more. A commit that
 adds, changes or deletes a row they are counted from (an assessment, a
-decision, an interview, a loan application, a guarantor or a member) drops the
-cached copy, so a new assessment or decision shows on the next load. The
+decision, an interview, a loan application, a guarantor, a member or a ledger
+entry) drops the cached copy, so a new assessment or decision shows on the next load. The
 figures carry computed_at, the time they were read from the database.
 
 Each uvicorn worker process keeps its own copy; a script writing to the
@@ -18,11 +18,11 @@ from collections.abc import Callable
 
 from sqlalchemy import event
 
-from .db import (Assessment, Decision, Guarantor, Interview, LoanApplication, Member,
+from .db import (AccountEntry, Assessment, Decision, Guarantor, Interview, LoanApplication, Member,
                  SessionLocal, utcnow)
 
 TTL_SECONDS = 60
-COUNTED = (Assessment, Decision, Interview, LoanApplication, Guarantor, Member)
+COUNTED = (Assessment, Decision, Interview, LoanApplication, Guarantor, Member, AccountEntry)
 
 _lock = threading.Lock()
 _cached: tuple[float, dict] | None = None   # (monotonic expiry, figures)

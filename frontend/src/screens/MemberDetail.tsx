@@ -10,18 +10,36 @@ import { useLoad } from '../hooks/useLoad'
 import { formatDate, formatDateTime, formatDay, formatKes, parseShillings, todayYmd } from '../lib/format'
 import { paths } from '../lib/router'
 import { t } from '../strings'
+import { SaccoPanels } from './MySacco'
 import styles from './Tables.module.css'
 
 const M = t.members
 const V = t.verify
 
 export function MemberDetail({ id }: { id: number }) {
-  const load = useCallback(() => Promise.all([api.member(id), api.applications({ member_id: id })]), [id])
+  const load = useCallback(() => Promise.all([api.member(id), api.applications({ member_id: id }), api.memberSacco(id),
+                                              api.applicantForm()]), [id])
   const { data, error, reload } = useLoad(load)
   const [verifying, setVerifying] = useState(false)
+  const [verifyingProfile, setVerifyingProfile] = useState(false)
+  const toast = useToast()
   if (error) return <ErrorNotice doing={M.detailFailed} error={error} onRetry={reload} />
   if (!data) return <SkeletonPage what={M.title} />
-  const [member, apps] = data
+  const [member, apps, sacco, options] = data
+  const onLedger = (sacco.accounts.find((a) => a.kind === 'deposits')?.entries.length ?? 0) > 0
+
+  async function verifyProfile() {
+    setVerifyingProfile(true)
+    try {
+      await api.verifyProfile(id)
+      toast(t.sacco.profileVerified)
+      await reload()
+    } catch (e) {
+      toast((e as ApiError).message, 'error')
+    } finally {
+      setVerifyingProfile(false)
+    }
+  }
 
   return (
     <>
@@ -42,10 +60,11 @@ export function MemberDetail({ id }: { id: number }) {
           <button type="button" className="btn btn-secondary btn-sm" onClick={() => setVerifying(true)}><Icon name="edit" size={16} /> {V.action}</button>
         }>
           <DetailList items={[
-            [V.savings, member.savings_kes === null || member.savings_kes === undefined ? '—' : formatKes(member.savings_kes)],
-            [t.apply.savingsVerification, <SavingsBadge key="s" m={member} />],
+            [V.savings, onLedger ? formatKes(sacco.guarantee.deposits_kes)
+              : member.savings_kes === null || member.savings_kes === undefined ? '—' : formatKes(member.savings_kes)],
+            [t.apply.savingsVerification, onLedger ? <Badge key="s" tone="low" icon="check">{t.savingsStatus.ledger}</Badge> : <SavingsBadge key="s" m={member} />],
           ]} />
-          {member.savings_verified_by && member.savings_verified_at && (
+          {!onLedger && member.savings_verified_by && member.savings_verified_at && (
             <p className="subtle small">{V.verifiedBy(member.savings_verified_by, formatDateTime(member.savings_verified_at))}</p>
           )}
         </Card>
@@ -70,7 +89,14 @@ export function MemberDetail({ id }: { id: number }) {
           )}
         </Card>
       </div>
-      {verifying && <VerifyModal member={member} onClose={() => setVerifying(false)} onSaved={reload} />}
+      <div className={styles.saccoPanels}>
+        <SaccoPanels view={sacco} options={options} staff actions={
+          <button type="button" className="btn btn-primary btn-sm" disabled={verifyingProfile || !sacco.profile.confirmed_at} onClick={verifyProfile}>
+            {verifyingProfile ? <span className="spinner" aria-hidden /> : <Icon name="check" size={16} />} {t.sacco.verifyProfile}
+          </button>
+        } />
+      </div>
+      {verifying && <VerifyModal member={member} onLedger={onLedger} onClose={() => setVerifying(false)} onSaved={reload} />}
     </>
   )
 }
@@ -81,7 +107,7 @@ function SavingsBadge({ m }: { m: Member }) {
   return <Badge tone={status === 'verified' ? 'low' : status === 'none' ? 'neutral' : 'wait'}>{t.savingsStatus[status]}</Badge>
 }
 
-function VerifyModal({ member, onClose, onSaved }: { member: Member; onClose: () => void; onSaved: () => Promise<void> }) {
+function VerifyModal({ member, onLedger, onClose, onSaved }: { member: Member; onLedger: boolean; onClose: () => void; onSaved: () => Promise<void> }) {
   const toast = useToast()
   const [amount, setAmount] = useState(member.savings_kes === null || member.savings_kes === undefined ? '' : String(member.savings_kes))
   const [joined, setJoined] = useState(member.joined_on)
@@ -93,11 +119,11 @@ function VerifyModal({ member, onClose, onSaved }: { member: Member; onClose: ()
 
   async function save() {
     setTried(true)
-    if (savings === null || !dateOk) return
+    if ((!onLedger && savings === null) || !dateOk) return
     setBusy(true)
     setError(null)
     try {
-      await api.verifyMember(member.id, { savings_kes: savings, joined_on: joined })
+      await api.verifyMember(member.id, onLedger ? { joined_on: joined } : { savings_kes: savings!, joined_on: joined })
       toast(V.saved)
       await onSaved()
       onClose()
@@ -116,9 +142,11 @@ function VerifyModal({ member, onClose, onSaved }: { member: Member; onClose: ()
              </button>
            </>}>
       <p className="muted small">{V.modalLead}</p>
-      <Field id="ver-amount" label={V.amount} error={tried && savings === null ? V.amountError : null}>
-        {(p) => <input {...p} className="input num" inputMode="numeric" autoComplete="off" value={amount} onChange={(e) => setAmount(e.target.value)} />}
-      </Field>
+      {onLedger ? <p className="subtle small">{t.sacco.officerSavingsNote}</p> : (
+        <Field id="ver-amount" label={V.amount} error={tried && savings === null ? V.amountError : null}>
+          {(p) => <input {...p} className="input num" inputMode="numeric" autoComplete="off" value={amount} onChange={(e) => setAmount(e.target.value)} />}
+        </Field>
+      )}
       <Field id="ver-joined" label={V.joined} error={tried && !dateOk ? V.joinedError : null}>
         {(p) => <input {...p} className="input" type="date" max={todayYmd()} value={joined} onChange={(e) => setJoined(e.target.value)} />}
       </Field>

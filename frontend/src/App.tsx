@@ -37,6 +37,8 @@ const Results = screen(() => import('./screens/Results'), 'Results')
 const MyApplications = screen(() => import('./screens/MyApplications'), 'MyApplications')
 const MyApplication = screen(() => import('./screens/MyApplication'), 'MyApplication')
 const Apply = screen(() => import('./screens/Apply'), 'Apply')
+const MySacco = screen(() => import('./screens/MySacco'), 'MySacco')
+const Registration = screen(() => import('./screens/MySacco'), 'Registration')
 const PracticeRunner = screen(() => import('./screens/Practice'), 'PracticeRunner')
 const PracticeReview = screen(() => import('./screens/Practice'), 'PracticeReview')
 const PracticeResult = screen(() => import('./screens/Practice'), 'PracticeResult')
@@ -73,6 +75,8 @@ function screenFor(route: Route, onSignedIn: (me: Me) => void): ReactNode {
     case 'my': return <MyApplications />
     case 'myApplication': return <MyApplication key={`y${route.id}`} id={route.id} />
     case 'apply': return <Apply />
+    case 'mySacco': return <MySacco />
+    case 'registration': return <Registration />
     case 'practice': return <PracticeRunner key={`q${route.id}`} id={route.id} question={route.question} />
     case 'practiceReview': return <PracticeReview key={`w${route.id}`} id={route.id} />
     case 'practiceResult': return <PracticeResult key={`z${route.id}`} id={route.id} />

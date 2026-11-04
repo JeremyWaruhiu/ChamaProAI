@@ -579,6 +579,13 @@ and adds `interview_bookings`, `sacco_events`, `practice_interviews`,
 `pilot_daily_usage` and `sus_responses`. It rewrites existing phones to
 `+254XXXXXXXXX`, and stops, changing nothing, if two members share a number (the
 message lists them): which of them keeps it is a person's decision.
+`0005` adds the member database: `member_profiles` and `member_profile_history`,
+`member_accounts` and `account_entries`, `loan_accounts` and `guarantor_pledges`.
+History and ledger are append-only by trigger. `guarantors` gains `member_id`,
+`pledge_id` and `loan_account_id`, and `application_id` becomes nullable (a rebuild
+on SQLite; that table has no trigger). No existing value changes and no ledger entry
+is invented: until a member has entries, the SACCO rule reads their application's
+own figure.
 
     alembic upgrade head            # the database in DATABASE_URL, else data/chamapro.db
     alembic current
@@ -695,6 +702,10 @@ frontend.
               array_agg(id ORDER BY id) AS members
        FROM members WHERE phone IS NOT NULL AND phone <> ''
        GROUP BY 1 HAVING count(*) > 1;
+
+   `0005` needs nothing checked beforehand, and writes no ledger entries or
+   profiles: members there stay on their application's own savings figure until
+   the SACCO's records are posted.
 
    Every table gets row-level security with no policies, so Supabase's Data
    API (the anon and authenticated keys) can read nothing; the backend
@@ -930,7 +941,13 @@ rejected), reduced amount, referred, declined, awaiting a decision,
 mid-interview and draft. Each assessed interview is scored by the real
 classifier on fixed features (no Gemini, no network), and the records are
 spread over the last eight weeks, so every dashboard, KPI and chart has
-realistic figures. The logins' passwords are printed once and written
+realistic figures. It also holds about 150 more members (M-2001 upwards) with
+profiles, deposit histories, past loans and standing guarantors, generated from
+Central Kenya FinAccess respondents' features with a fixed seed, or by a synthetic
+generator where those files are absent; `scripts/seed_members.py` documents the
+rules. **Those profiles are row-level data derived from licensed FinAccess
+microdata under invented names: check the licence before putting this database
+on a public URL.** The logins' passwords are printed once and written
 nowhere; note them. It never touches `data/chamapro.db`, and refuses any
 existing file that is not an earlier demo database (one whose logins carry a
 `demo-db:` seed tag, or, built before the tag existed, a `demo.admin` login).

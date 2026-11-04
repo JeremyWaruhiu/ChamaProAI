@@ -6,7 +6,7 @@ import { ErrorNotice, Notice } from '../components/Notice'
 import { Field, Skeleton } from '../components/ui'
 import { useLoad } from '../hooks/useLoad'
 import { EMPTY_SIGNUP, signupErrors, toSignupBody, type SignupDraft } from '../lib/signup'
-import { paths } from '../lib/router'
+import { paths, redirect } from '../lib/router'
 import { t } from '../strings'
 import { LoginPage } from './Login'
 import loginStyles from './Login.module.css'
@@ -46,7 +46,10 @@ export function SignupForm({ info, onSignedIn }: { info: SignupInfo; onSignedIn:
     setBusy(true)
     setError(null)
     try {
-      onSignedIn(await api.signup(toSignupBody(d, info.consent_version)))
+      const me = await api.signup(toSignupBody(d, info.consent_version))
+      // Someone new sees the registration form this once; nothing brings it back.
+      if (me.profile_due) redirect(paths.registration())
+      onSignedIn(me)
     } catch (err) {
       setError(err as ApiError)
       setBusy(false)
@@ -66,6 +69,10 @@ export function SignupForm({ info, onSignedIn }: { info: SignupInfo; onSignedIn:
       <Field id="su-phone" label={S.phone} hint={S.phoneHint} error={errors.phone}>
         {(p) => <input {...p} className="input" type="tel" inputMode="tel" autoComplete="tel" maxLength={32} value={d.phone}
                        onChange={(e) => put('phone', e.target.value)} />}
+      </Field>
+      <Field id="su-member" label={S.memberNo} optional hint={S.memberNoHint}>
+        {(p) => <input {...p} className="input" autoComplete="off" autoCapitalize="characters" spellCheck={false} maxLength={32} value={d.member_no}
+                       onChange={(e) => put('member_no', e.target.value)} />}
       </Field>
       <Field id="su-email" label={S.email} optional error={errors.email}>
         {(p) => <input {...p} className="input" type="email" inputMode="email" autoComplete="email" maxLength={254} value={d.email}

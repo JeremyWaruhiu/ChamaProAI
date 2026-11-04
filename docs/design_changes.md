@@ -207,3 +207,81 @@ New screens are in `docs/screenshots/pilot-*.png` (desktop) and `pilot-*-390.png
 | `savings_self_declared` on `loan_applications`, `booking` and `practice_interviews` on the application detail | Officers can see what they are relying on. |
 | `/api/events`; `/api/admin/pilot`, `/admin/pilot/export/*.csv` | Activities and evaluation. |
 | Row-level security, with no policies, on the five new tables | As on every other table: Supabase's Data API must read nothing. |
+
+## The member database (phase 1 of 5)
+
+Migration `0005`. The interview is to become a short self-service conversation, so
+everything the eight v2 questions collected must already be held in the database.
+This phase is that database only: no chat, no speech output, no change to the
+classifier, the assessment pipeline or how a decision is made.
+
+| Change | Status | Reason |
+|---|---|---|
+| `member_profiles`, one current row per member, keyed by the classifier's inputs | Added | What the interview would ask. Sex and education are stored as the applicant form has them; `profile_features` gives them to the classifier as `is_female` and `education_level`, the keys `score()` takes. |
+| Source, updated-at, verified-by and verified-at per field group (personal, household, income, assets, credit), as columns | Added | Queryable ("whose income is unverified?"), and a member's edit to one group does not undo an officer's check of another. |
+| `member_profile_history`, a whole-row snapshot per change, immutable by trigger on both databases | Added | What was believed on any date can be recovered. It holds personal data and cannot be erased through the application: see the open questions below. |
+| Date of birth replaces birth year where the profile has it | Changed | 0004 chose a birth year because a date was not needed; the supervisor's specification now asks for one. A profile without one falls back to the birth year. |
+| `sacco_loan_use` and `lost_as_guarantor.sacco` derived, never stored or accepted | Added | The SACCO already knows them. The API refuses them as unknown fields. |
+| A defaulted loan counts as `sacco_loan_use` 2 | Added | The specification gives 0 never, 1 repaid, 2 active. A defaulted loan is still owed; calling it 1 would record it as repaid and flatter the member. |
+| No loan and no ledger entry at all: those two features are missing, not 0 | Added | A member not yet on the ledger has no records to read. Sending "never borrowed" would state something nobody knows. |
+| `member_accounts` and `account_entries`, append-only by trigger, balances always computed | Added | A stored balance can disagree with its history; a sum cannot. |
+| Entry rules as CHECK constraints, with `account_kind` on each entry held true by a composite foreign key | Added | The database itself refuses a withdrawal from deposits, whichever code tries it. |
+| `loan_accounts`, repayments as ledger entries, `days_in_arrears` computed; money pays the oldest instalment first | Added | As specified. Recoveries from guarantors count towards the loan. |
+| `guarantor_pledges` holds no amount; capacity is worked out when it is needed | Added | Deposits move; a figure pledged last year would be stale. |
+| `guarantors` gains `member_id`, `pledge_id` and `loan_account_id`; `application_id` nullable | Changed | Reuses the one table and review flow. A loan from before the system has no application, but its guarantors still hold capacity; a second table for them would have been the second flow the specification rules out. |
+| Available capacity also subtracts guarantees on applications not yet paid out | Added | Beyond the specified formula. Without it the same balance could be pledged to two applications at once. Capacity itself is as specified. |
+| A typed guarantor number that is a member's links to them, but a pending typed row holds no capacity | Added | Anyone can type a number; that must not use up someone's capacity. It counts once an officer verifies it. |
+| A member sees whether their guarantor can guarantee, not how much; officers see the figure | Added | Capacity is close to a deposit balance: another member's confidential savings. |
+| `POST /me/profile`, `PATCH /me/profile`, `POST /me/profile/confirm`, `POST /members/{id}/profile/verify` | Added | An edit is saved at once as `member_update`, unverified, as specified. "Still correct" is an extra: without it the date only moves when something changes. |
+| The registration form appears because the sign-up reply says so, and nothing brings it back | Added | "Once" needs no stored state. Skipped, it is reached through "Change my details". |
+| A failed claim says the same thing whatever was wrong | Added | Otherwise sign-up tells anyone who is a member. |
+| A member number that does not match refuses instead of creating a new member | Changed | The specification says otherwise create. Someone who typed a number thinks they are claiming a record; silently making a second one would hide their savings from them. |
+| A claim keeps the SACCO's name for the member, and does not count them as a pilot volunteer | Added | The name typed at sign-up is unverified. They did not join through the pilot. |
+| The last ten entries are per account, under a disclosure | Added | Ten overall could hide an account entirely; thirty open rows are too long for a phone. |
+
+### Changes to what 0004 did
+
+| 0004 | Now | Applies to |
+|---|---|---|
+| The SACCO rule read `loan_applications.sacco_savings_kes` | Reads the deposits balance: live until the application is decided, then as it stood at the decision | Members with deposits entries by then. Others keep the column, so every row that exists today reads as before. |
+| A typed savings figure was stored | The balance is stored; `POST /applications` ignores what is typed, and the wizard shows the balance read-only | Members on the ledger |
+| A member could declare savings, an officer could verify a figure | Both refused with 409; `POST /members/{id}/verify` still corrects `joined_on` | Members on the ledger. Without a ledger, declaring and verifying work as before. |
+| `savings_status` was none, self_declared or verified | Also `ledger` | |
+| `DELETE /members/{id}` refused only with applications | Also refuses with a profile, ledger, loan or pledge | |
+| Live statistics took four queries | Five: one more for the savings, however many applications | |
+| The member's age was this year minus the birth year | Exact, from the date of birth, where the profile has one | |
+| Member tabs: three, scrolling if needed | Four, wrapping to two rows below 480 px | |
+
+### Not built in this phase
+
+No endpoint posts a ledger entry, pays out a loan, or adds or withdraws a pledge: the
+functions exist in `ledger.py` and are used by the seed and the tests. So on a live
+database nobody reaches the ledger yet, and an approved application's guarantors go
+on holding capacity until a payout exists to release them. A member's exit, where
+deposits are refunded, has no entry type: `withdrawal` from deposits is refused.
+
+### Open questions
+
+- **Erasure.** `member_profile_history` keeps date of birth and income in a table the
+  application cannot delete from, and a member with a profile can no longer be deleted.
+  The audit log was kept free of personal data for exactly this reason. Under the Kenya
+  Data Protection Act 2019 the project needs a decided answer to an erasure request.
+- **Claiming is not proof of identity.** Member number and phone number are not secrets,
+  and a claim now opens someone's balances, date of birth and income. It is behind the
+  invite code and the sign-up rate limit, and audit-logged. A one-time code sent to the
+  phone is needed before real members use it.
+- **FinAccess in the demo database.** The generated profiles are row-level values from
+  licensed microdata under invented names, with no county or respondent number. The
+  file stays under `data/` and out of git and the image, but `docker-compose.yml`
+  serves it. Check the licence before a public demo.
+
+### API changes for this work
+
+| Change | Reason |
+|---|---|
+| `GET /api/me/sacco`, `GET /api/members/{id}/sacco` | My SACCO and the officer's member page; the same builder, with figures only for staff. A fixed number of queries however many rows. |
+| `GET /api/me/applications/{id}/guarantor-offers`, `POST /api/me/applications/{id}/guarantors/pledged` | Standing guarantors with enough capacity, becoming ordinary `guarantors` rows. Fewer than needed is allowed; the rest can be typed. |
+| `member_no` on `POST /api/auth/signup`; `claimed` and `profile_due` in its reply | Claiming a member; whether to show the registration form. |
+| `from_ledger` on `MyMember`; `savings_from_ledger` on the application detail | Screens can say where the figure came from. |
+| Row-level security, with no policies, on the six new tables | As on every other table. |
+

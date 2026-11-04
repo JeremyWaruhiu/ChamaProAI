@@ -29,6 +29,14 @@ export const EMPTY_APPLY: ApplyDraft = {
 
 export type ApplyField = keyof ApplyDraft
 
+/** The form as it opens: what the profile already says about the applicant is filled in. */
+export function draftFor(member: MyMember): ApplyDraft {
+  return {
+    ...EMPTY_APPLY, age: member.age === null ? '' : String(member.age), sex: member.sex ?? '',
+    education: member.education === null ? '' : String(member.education), marital: member.marital_status ?? '',
+  }
+}
+
 const E = t.apply.errors
 
 /** The savings the limit is worked out from: on the record, or just typed. */

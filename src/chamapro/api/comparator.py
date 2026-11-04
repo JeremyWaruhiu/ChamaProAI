@@ -5,7 +5,9 @@
     at least 6 months' membership (from joined_on to the application date)
 
 Computed live from the application, its guarantors and the stored
-assessment; nothing here is written to the immutable assessment.
+assessment; nothing here is written to the immutable assessment. "SACCO savings"
+is the member's deposits balance in the ledger (ledger.rule_savings); the figure
+entered on the application counts only for a member with no ledger yet.
 
 Agreement compares each condition, and the rule as a whole, with the model's
 recommendation (Low -> approve, Medium -> refer, High -> decline): a passed
@@ -60,9 +62,10 @@ def guarantor_result(statuses: list[str]) -> tuple[str, int, str]:
                               f"{statuses.count('rejected')} rejected")
 
 
-def evaluate(app: LoanApplication, risk_class: str | None) -> s.Comparator:
+def evaluate(app: LoanApplication, risk_class: str | None, savings_kes: int | None = None) -> s.Comparator:
     model = RECOMMENDED_DECISION.get(risk_class or "")
-    ceiling = app.sacco_savings_kes * SAVINGS_MULTIPLIER
+    savings = app.sacco_savings_kes if savings_kes is None else savings_kes
+    ceiling = savings * SAVINGS_MULTIPLIER
     tenure = months_between(app.member.joined_on, app.created_at.astimezone(EAT).date())
     g_result, verified, g_detail = guarantor_result([g.status for g in app.guarantors])
 
@@ -70,7 +73,7 @@ def evaluate(app: LoanApplication, risk_class: str | None) -> s.Comparator:
         ("savings_multiple", f"Amount requested is at most {SAVINGS_MULTIPLIER} x SACCO savings",
          "pass" if app.amount_requested_kes <= ceiling else "fail",
          f"KSh {app.amount_requested_kes:,} requested; maximum KSh {ceiling:,} "
-         f"(savings KSh {app.sacco_savings_kes:,})"),
+         f"(savings KSh {savings:,})"),
         ("guarantors", f"At least {MIN_GUARANTORS} guarantors", g_result, g_detail),
         ("tenure", f"At least {MIN_TENURE_MONTHS} months' membership",
          "pass" if tenure >= MIN_TENURE_MONTHS else "fail",

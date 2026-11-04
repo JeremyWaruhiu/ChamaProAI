@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { EMPTY_SIGNUP, signupErrors, toSignupBody } from './signup'
 
-const OK = { full_name: 'Fictional Volunteer', phone: '0712 345 678', email: '', password: 'long enough password',
+const OK = { full_name: 'Fictional Volunteer', phone: '0712 345 678', member_no: '', email: '', password: 'long enough password',
              confirm: 'long enough password', invite: 'code', consent: true }
 
 describe('signupErrors', () => {
@@ -27,5 +27,12 @@ describe('toSignupBody', () => {
     expect(body.consent).toBe(true)
     expect(body.consent_version).toBe('pilot-2026-11')
     expect(body.email).toBeNull()
+  })
+})
+
+describe('claiming an existing member', () => {
+  it('sends a member number only when one was typed', () => {
+    expect(toSignupBody(OK, 'v1')).not.toHaveProperty('member_no')
+    expect(toSignupBody({ ...OK, member_no: '  M-2001 ' }, 'v1').member_no).toBe('M-2001')
   })
 })

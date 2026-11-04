@@ -1,7 +1,7 @@
 import type {
   ApplicantFormOptions, ApplicationCreate, ApplicationDetail, ApplicationStatus, ApplicationSummary,
   ApplyOptions, Assessment, AuditEntry, AuditFilter, AuthConfig, Booking, BookingCalendar, DaySlots,
-  Decision, DecisionCreate, EventBody, Guarantor, GuarantorIn, Health, InterviewCreate, InterviewState,
+  Decision, DecisionCreate, EventBody, Guarantor, GuarantorIn, GuarantorOffers, ProfileBody, SaccoView, Health, InterviewCreate, InterviewState,
   InterviewSummary, Language, Me, Member, MemberCreate, MemberHome, MyApplication, MyApplicationCreate,
   MyMember, MyMemberUpdate, MyPractice, MyResponse, PilotStats, Profile, Question,
   QuestionSet, ResponseOut, ResponseQueued, Results, Role, SaccoEvent, SignupBody, SignupInfo,
@@ -185,12 +185,23 @@ export const api = {
 
   // sign-up (public)
   signupInfo: () => request<SignupInfo>('/auth/signup'),
-  signup: (body: SignupBody) => request<Me & { member_no: string }>('/auth/signup', json('POST', body)),
+  signup: (body: SignupBody) => request<Me & { member_no: string; claimed: boolean; profile_due: boolean }>('/auth/signup', json('POST', body)),
 
   // a member's own record and loan application
   myHome: () => request<MemberHome>('/me/home'),
   myMember: () => request<MyMember>('/me/member'),
   updateMyMember: (body: MyMemberUpdate) => request<MyMember>('/me/member', json('PATCH', body)),
+
+  // My SACCO: the profile, the ledger, loans and standing guarantors
+  mySacco: () => request<SaccoView>('/me/sacco'),
+  memberSacco: (id: number) => request<SaccoView>(`/members/${id}/sacco`),
+  registerProfile: (body: ProfileBody) => request<SaccoView>('/me/profile', json('POST', body)),
+  editProfile: (body: ProfileBody) => request<SaccoView>('/me/profile', json('PATCH', body)),
+  confirmProfile: () => request<SaccoView>('/me/profile/confirm', { method: 'POST' }),
+  verifyProfile: (id: number) => request<SaccoView>(`/members/${id}/profile/verify`, { method: 'POST' }),
+  guarantorOffers: (id: number) => request<GuarantorOffers>(`/me/applications/${id}/guarantor-offers`),
+  usePledges: (id: number, pledgeIds: number[]) =>
+    request<MyApplication>(`/me/applications/${id}/guarantors/pledged`, json('POST', { pledge_ids: pledgeIds })),
   giveConsent: (version: string) =>
     request<MyMember>('/me/consent', json('POST', { consent: true, consent_version: version })),
   applyOptions: () => request<ApplyOptions>('/me/apply-options'),

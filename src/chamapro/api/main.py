@@ -25,7 +25,7 @@ from sqlalchemy.orm import Session, contains_eager, joinedload, selectinload
 
 from chamapro import config
 
-from . import admin, audit, auth, bookings, comparator, events, live_cache, loans, pilot, storage
+from . import admin, audit, auth, bookings, comparator, events, ledger, live_cache, loans, pilot, sacco, storage
 from . import pipeline as pl
 from . import schemas as s
 from .auth import require_admin, require_member, require_officer
@@ -95,6 +95,7 @@ app.include_router(admin.router)
 app.include_router(bookings.router)
 app.include_router(events.router)
 app.include_router(pilot.router)
+app.include_router(sacco.router)
 
 
 # --- Errors: always {"detail": "<string>"} -----------------------------------
@@ -209,12 +210,14 @@ def signup_info():
           responses={403: {"model": s.Error}, 404: {"model": s.Error}, 409: {"model": s.Error},
                      422: {"model": s.Error}, 429: {"model": s.Error}})
 def signup(body: s.Signup, request: Request, response: HTTPResponse, db: Session = Depends(get_db)):
-    """A volunteer signs up: a member record, a login linked to it, and a session.
-    Off unless PILOT_INVITE_CODE is set."""
+    """A volunteer signs up: a login, a session, and a member record, either new or
+    an existing one they claim with its member number and phone number. Off unless
+    PILOT_INVITE_CODE is set."""
     pilot.check_signup_allowed(request)
-    user, member = pilot.create_volunteer(db, body)
+    user, member, claimed = pilot.create_volunteer(db, body)
     me = signed_in(request, response, db, user, "password")
-    return s.SignupResult(**me.model_dump(), member_no=member.member_no)
+    return s.SignupResult(**me.model_dump(), member_no=member.member_no, claimed=claimed,
+                          profile_due=not claimed)
 
 
 @app.get("/api/auth/config", response_model=s.AuthConfig)
@@ -325,7 +328,7 @@ def logout_all(request: Request, user: User = Depends(auth.current_user),
 
 def live_stats(db: Session) -> dict:
     """Aggregate counts from the database; no row-level data leaves here.
-    Practice interviews are left out of every figure. Three queries, four
+    Practice interviews are left out of every figure. Three queries, five
     once there are applications, however many rows there are: each one is a
     round trip to Supabase."""
     live = Interview.mode == "live"
@@ -353,7 +356,8 @@ def live_stats(db: Session) -> dict:
                                .contains_eager(Interview.assessment),
                                joinedload(LoanApplication.member),
                                selectinload(LoanApplication.guarantors))).all()
-    rule = [loans.comparator_of(a).agreement for a in apps]
+    savings = ledger.rule_savings(db, apps)
+    rule = [loans.comparator_of(a, savings[a.id].kes).agreement for a in apps]
     compared = rule.count("agree") + rule.count("diverge")
     return {
         "source": "live database; practice interviews excluded",
@@ -590,19 +594,19 @@ def interview_state(interview_id: int, db: Session = Depends(get_db)):
                             language=iv.language, mode=iv.mode, created_at=iv.created_at,
                             applicant=s.Applicant.model_validate(iv.applicant),
                             counts=counts, responses=responses,
-                            assessment=assessment_out(iv),
+                            assessment=assessment_out(db, iv),
                             decision=iv.decision and s.DecisionOut.model_validate(iv.decision),
                             application_id=iv.application and iv.application.id)
 
 
-def assessment_out(iv: Interview) -> s.AssessmentOut | None:
+def assessment_out(db: Session, iv: Interview) -> s.AssessmentOut | None:
     """The stored assessment, with the SACCO rule beside it when the interview
     belongs to a loan application."""
     if iv.assessment is None:
         return None
     out = s.AssessmentOut.model_validate(iv.assessment)
-    if iv.application is not None:
-        out.comparator = loans.comparator_of(iv.application)
+    if (app := iv.application) is not None:
+        out.comparator = loans.comparator_of(app, ledger.rule_savings(db, [app])[app.id].kes)
     return out
 
 
@@ -776,7 +780,7 @@ def assess(interview_id: int, db: Session = Depends(get_db),
     except IntegrityError:  # a concurrent assess won
         db.rollback()
         raise HTTPException(409, f"interview {iv.id} is already assessed; its record is immutable")
-    return assessment_out(iv)
+    return assessment_out(db, iv)
 
 
 @app.post("/api/interviews/{interview_id}/decision", status_code=201,

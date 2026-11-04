@@ -88,7 +88,7 @@ function MemberRecordForm({ m, options, onSaved }: {
   const [tried, setTried] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<ApiError | null>(null)
-  const locked = m.savings_status === 'verified'
+  const locked = m.savings_status === 'verified' || m.savings_status === 'ledger'
   const formFilled = form.age !== '' || form.sex !== '' || form.education !== '' || form.marital !== ''
   const formProblems = formFilled
     ? applicantProblems({ age: form.age, sex: form.sex ?? '', education: form.education, marital: form.marital ?? '' })

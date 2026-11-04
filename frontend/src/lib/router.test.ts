@@ -13,6 +13,8 @@ describe('parse', () => {
     ['#/events', { screen: 'events' }],
     ['#/admin/pilot', { screen: 'pilot' }],
     ['#/my/apply', { screen: 'apply' }],
+    ['#/my/sacco', { screen: 'mySacco' }],
+    ['#/my/registration', { screen: 'registration' }],
     ['#/my/practice/7', { screen: 'practice', id: 7, question: null }],
     ['#/my/practice/7/3', { screen: 'practice', id: 7, question: 3 }],
     ['#/my/practice/7/review', { screen: 'practiceReview', id: 7 }],

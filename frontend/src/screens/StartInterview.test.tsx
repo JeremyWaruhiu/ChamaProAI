@@ -30,6 +30,37 @@ const next = () => fireEvent.click(screen.getByRole('button', { name: /Continue/
 const type = (label: RegExp, value: string) => fireEvent.change(screen.getByLabelText(label), { target: { value } })
 
 describe('start-interview wizard', () => {
+  it('shows a ledger member\'s deposits balance read-only, since the API takes that figure anyway', async () => {
+    const member = { id: 31, member_no: 'M-77', full_name: 'Peter Kamau', phone: null, joined_on: '2025-03-01', user_id: null, created_at: '' }
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      const body = url === '/api/members/31' ? member
+        : url === '/api/members/31/sacco' ? { accounts: [{ kind: 'deposits', balance_kes: 45000, entries: [{ id: 1 }] }] } : FORM
+      return new Response(JSON.stringify(body), { status: 200 })
+    }))
+    render(<StartInterview memberId={31} />)
+    await screen.findByText('Peter Kamau')
+    next()
+    await screen.findByRole('heading', { name: 'Loan details' })
+    await waitFor(() => expect((screen.getByLabelText(/SACCO savings balance/) as HTMLInputElement).value).toBe('45000'))
+    expect((screen.getByLabelText(/SACCO savings balance/) as HTMLInputElement).readOnly).toBe(true)
+    expect(screen.getByText(/deposits balance in the ledger/)).toBeTruthy()
+  })
+
+  it('leaves the savings box to the officer for a member not on the ledger', async () => {
+    const member = { id: 31, member_no: 'M-77', full_name: 'Peter Kamau', phone: null, joined_on: '2025-03-01', user_id: null, created_at: '' }
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      const body = url === '/api/members/31' ? member
+        : url === '/api/members/31/sacco' ? { accounts: [{ kind: 'deposits', balance_kes: 0, entries: [] }] } : FORM
+      return new Response(JSON.stringify(body), { status: 200 })
+    }))
+    render(<StartInterview memberId={31} />)
+    await screen.findByText('Peter Kamau')
+    next()
+    await screen.findByRole('heading', { name: 'Loan details' })
+    await new Promise((r) => setTimeout(r, 20))
+    expect((screen.getByLabelText(/SACCO savings balance/) as HTMLInputElement).readOnly).toBe(false)
+  })
+
   it('will not leave the member step until a member is chosen or added', async () => {
     render(<StartInterview memberId={null} />)
     expect(screen.getByRole('heading', { name: 'Who is applying?' })).toBeTruthy()

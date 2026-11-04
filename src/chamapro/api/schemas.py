@@ -414,7 +414,7 @@ class MemberUpdate(MemberCreate):
     joined_on: date | None = None
 
 
-SavingsStatus = Literal["none", "self_declared", "verified"]
+SavingsStatus = Literal["none", "self_declared", "verified", "ledger"]
 
 
 class MemberOut(ORM):
@@ -575,6 +575,8 @@ class ApplicationDetail(ApplicationSummary):
     sacco_savings_kes: int
     savings_self_declared: bool = Field(default=False, description="The figure is what the member "
                                         "declared; an officer has not verified it")
+    savings_from_ledger: bool = Field(default=False, description="sacco_savings_kes is the deposits "
+                                      "balance the SACCO rule reads, not the figure entered")
     booking: BookingOut | None = Field(default=None, description="The booked interview, if any")
     practice_interviews: list[PracticeBrief] = Field(default_factory=list)
     created_by: str
@@ -662,6 +664,8 @@ class Signup(BaseModel):
     model_config = ConfigDict(extra="forbid")
     full_name: str = Field(min_length=1, max_length=200)
     phone: str = Field(max_length=32)
+    member_no: str | None = Field(default=None, max_length=32, description="An existing member's number: "
+                                  "with their phone number, claims that member instead of creating one")
     email: str | None = Field(default=None, max_length=254)
     password: str = Field(min_length=10, max_length=1024, description="Same policy as create_user.py")
     password_confirm: str = Field(max_length=1024)
@@ -687,6 +691,11 @@ class Signup(BaseModel):
     def _email(cls, v: str | None) -> str | None:
         return clean_contact_email(v)
 
+    @field_validator("member_no")
+    @classmethod
+    def _member_no(cls, v: str | None) -> str | None:
+        return (v or "").strip() or None
+
     @model_validator(mode="after")
     def _matches(self):
         if self.password != self.password_confirm:
@@ -697,7 +706,9 @@ class Signup(BaseModel):
 
 
 class SignupResult(Me):
-    member_no: str = Field(description="The generated member number")
+    member_no: str = Field(description="The generated member number, or the claimed member's")
+    claimed: bool = Field(default=False, description="Linked to an existing member; nothing new was created")
+    profile_due: bool = Field(default=False, description="Show the registration profile form now")
 
 
 class SignupInfo(BaseModel):
@@ -726,6 +737,8 @@ class MyMember(BaseModel):
     marital_status: MaritalStatus | None
     applicant_complete: bool
     consent_current: bool = Field(description="Has agreed to the current consent text")
+    from_ledger: bool = Field(default=False, description="savings_kes is the deposits balance in "
+                                                         "the SACCO's ledger, not a figure anyone typed")
 
 
 class MyMemberUpdate(BaseModel):
@@ -1019,3 +1032,160 @@ class AuditOut(BaseModel):
     entity_id: int | None
     details: dict
     created_at: datetime
+
+
+# --- A member's profile, ledger, loans and standing guarantors --------------------------------
+
+ProfileSource = Literal["registration", "member_update", "officer_verified", "seed"]
+ProfileGroup = Literal["personal", "household", "income", "assets", "credit"]
+AccountKind = Literal["deposits", "share_capital", "transactional"]
+LoanStatus = Literal["active", "repaid", "defaulted"]
+Provenance = Literal["records", "declared", "verified", "missing"]
+
+
+class ProfileFields(BaseModel):
+    """What a member says about themselves, under score_interview's keys. Anything
+    the SACCO already knows, sacco_loan_use and lost_as_guarantor.sacco among it,
+    is derived and refused here. Flag keys are checked in profiles.py."""
+    model_config = ConfigDict(extra="forbid")
+    date_of_birth: date | None = None
+    sex: Sex | None = None
+    education: int | None = Field(default=None, ge=0, le=8)
+    marital_status: MaritalStatus | None = None
+    household_size: int | None = Field(default=None, ge=1, le=100)
+    children: int | None = Field(default=None, ge=0, le=100)
+    children_under5: int | None = Field(default=None, ge=0, le=100)
+    children_in_school: int | None = Field(default=None, ge=0, le=100)
+    monthly_income_kes: int | None = Field(default=None, ge=0, le=100_000_000)
+    agri_income_kes: int | None = Field(default=None, ge=0, le=100_000_000)
+    income_sources: dict[str, int] | None = None
+    non_monetary_savings: dict[str, int] | None = None
+    purchases_last_12m: dict[str, int] | None = None
+    chama_loan_use: Literal[0, 1, 2] | None = None
+    lost_as_guarantor_chama: Literal[0, 1] | None = None
+
+    @field_validator("date_of_birth")
+    @classmethod
+    def _born(cls, v: date | None) -> date | None:
+        if v is None:
+            return v
+        years = (date.today() - v).days / 365.25
+        if not 16 <= years <= 110:
+            raise ValueError("a member is between 16 and 110 years old")
+        return v
+
+
+class ProfileVerify(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    groups: list[ProfileGroup] | None = Field(default=None, description="Omit for every group holding data")
+
+
+class ProfileGroupOut(BaseModel):
+    source: ProfileSource | None
+    updated_at: datetime | None
+    verified: bool
+
+
+class ProfileCheck(BaseModel):
+    """Who verified a group of the profile, and when. Staff only."""
+    by: str
+    at: datetime
+
+
+class ProfileOut(BaseModel):
+    date_of_birth: date | None = None
+    age: int | None = None
+    sex: Sex | None = None
+    education: int | None = None
+    marital_status: MaritalStatus | None = None
+    household_size: int | None = None
+    children: int | None = None
+    children_under5: int | None = None
+    children_in_school: int | None = None
+    monthly_income_kes: int | None = None
+    agri_income_kes: int | None = None
+    income_sources: dict[str, int] | None = None
+    non_monetary_savings: dict[str, int] | None = None
+    purchases_last_12m: dict[str, int] | None = None
+    chama_loan_use: int | None = None
+    lost_as_guarantor_chama: int | None = None
+    confirmed_at: datetime | None = None
+    days_since_confirmed: int | None = None
+    groups: dict[str, ProfileGroupOut]
+    # Feature names and who checked what: for staff, as with an assessment.
+    provenance: dict[str, Provenance] | None = None
+    checks: dict[str, ProfileCheck] | None = None
+
+
+class EntryOut(ORM):
+    id: int
+    entry_type: str
+    amount_kes: int
+    posted_at: datetime
+    reference: str
+
+
+class AccountOut(BaseModel):
+    kind: AccountKind
+    balance_kes: int
+    entries: list[EntryOut] = Field(description="The newest ten, newest first")
+
+
+class GuaranteeOut(BaseModel):
+    deposits_kes: int
+    guaranteed_kes: int = Field(description="What this member guarantees on active loans")
+    committed_kes: int = Field(description="What they have offered on applications not yet issued")
+    capacity_kes: int = Field(description="deposits_kes - guaranteed_kes, never below zero")
+
+
+class PledgeOut(BaseModel):
+    id: int
+    member_no: str
+    full_name: str
+    created_at: datetime
+    has_capacity: bool | None = Field(default=None, description="For one's own guarantors")
+    capacity_kes: int | None = Field(default=None, description="Staff only: another member's savings show in it")
+    guaranteed_kes: int | None = Field(default=None, description="For those this member guarantees")
+
+
+class LoanOut(BaseModel):
+    id: int
+    application_id: int | None
+    principal_kes: int
+    disbursed_on: date
+    term_months: int
+    monthly_instalment_kes: int
+    status: LoanStatus
+    paid_kes: int = Field(description="Repayments and recoveries, from the ledger")
+    days_in_arrears: int = Field(description="Computed; 0 when up to date")
+
+
+class SaccoView(BaseModel):
+    """My SACCO; an officer reads the same page about any member."""
+    member_id: int
+    member_no: str
+    full_name: str
+    joined_on: date
+    profile: ProfileOut
+    accounts: list[AccountOut]
+    guarantee: GuaranteeOut
+    my_guarantors: list[PledgeOut]
+    i_guarantee: list[PledgeOut]
+    loans: list[LoanOut]
+
+
+class GuarantorOffer(BaseModel):
+    pledge_id: int
+    full_name: str
+    member_no: str
+
+
+class GuarantorOffers(BaseModel):
+    share_kes: int = Field(description="What each guarantor would cover")
+    needed: int
+    offers: list[GuarantorOffer]
+
+
+class UsePledges(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    pledge_ids: list[int] = Field(min_length=1, max_length=20)

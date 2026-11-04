@@ -80,3 +80,4 @@
   .gFieldset { grid-template-columns: 1fr 1fr; }
   .gLegend { grid-column: 1 / -1; }
 }
+.offers { display: grid; gap: var(--space-2); margin: var(--space-3) 0; padding: var(--space-3) 0; border: 0; border-bottom: 1px solid var(--line); min-width: 0; }

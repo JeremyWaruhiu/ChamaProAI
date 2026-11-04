@@ -1,0 +1,44 @@
+/* My SACCO, and the same panels on the officer's member page: phone first. Long
+   references and names wrap rather than push the page wider than the screen. */
+
+.panels { display: grid; gap: var(--space-4); min-width: 0; }
+.panels > * { min-width: 0; }
+
+.confirmed { display: flex; align-items: center; gap: var(--space-2); margin-bottom: var(--space-3); font-weight: 620; }
+.confirmed svg { flex: none; }
+.groupBadges { display: flex; flex-wrap: wrap; gap: var(--space-2); margin: 0 0 var(--space-3); padding: 0; list-style: none; }
+.groupBadges li { display: grid; gap: 2px; max-width: 100%; }
+.checkedBy { color: var(--ink-3); font-size: var(--text-xs); }
+
+.more { margin-top: var(--space-2); }
+.more > summary { display: flex; align-items: center; min-height: 44px; font-weight: 620; cursor: pointer; color: var(--green-800); }
+
+.accounts, .entries, .people, .loans { display: grid; margin: 0; padding: 0; list-style: none; }
+.accounts { gap: var(--space-4); }
+.account + .account { padding-top: var(--space-4); border-top: 1px solid var(--line); }
+.accountHead { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: var(--space-2); }
+.accountName { font-weight: 680; }
+.balance { font-size: var(--text-lg); font-variant-numeric: tabular-nums; }
+
+.entries { gap: var(--space-2); }
+.entries li { display: flex; justify-content: space-between; gap: var(--space-3); padding: var(--space-2) 0; border-top: 1px solid var(--line); }
+.entryWhat { display: grid; min-width: 0; overflow-wrap: anywhere; }
+.entryRef { display: block; color: var(--ink-3); font-size: var(--text-xs); overflow-wrap: anywhere; }
+.entryRight { display: grid; flex: none; justify-items: end; font-variant-numeric: tabular-nums; }
+.entryDate { color: var(--ink-3); font-size: var(--text-sm); }
+.in { color: var(--green-800); font-weight: 620; }
+.out { color: var(--high); font-weight: 620; }
+
+.subTitle { margin: var(--space-4) 0 var(--space-2); font-size: var(--text-base); font-weight: 680; }
+.people { gap: var(--space-2); }
+.person { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-2); }
+
+.loans { gap: var(--space-3); }
+.loan + .loan { padding-top: var(--space-3); border-top: 1px solid var(--line); }
+
+.registerBody { display: grid; gap: var(--space-4); padding: var(--space-5); min-width: 0; }
+.skip { justify-self: center; display: inline-flex; align-items: center; min-height: 44px; font-weight: 620; }
+.form { display: grid; gap: var(--space-5); min-width: 0; }
+.part { display: grid; gap: var(--space-3); min-width: 0; }
+.partTitle { font-size: var(--text-lg); font-weight: 680; color: var(--green-900); }
+.flags { display: grid; gap: var(--space-2); margin: 0; padding: 0; border: 0; min-width: 0; }

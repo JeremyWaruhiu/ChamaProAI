@@ -21,6 +21,7 @@ import member from './screens/Member.module.css?raw'
 import { GuarantorForm } from './screens/MyApplication'
 import { MicUnavailable } from './screens/Recording'
 import recording from './screens/Recording.module.css?raw'
+import sacco from './screens/MySacco.module.css?raw'
 import results from './screens/Results.module.css?raw'
 import tables from './screens/Tables.module.css?raw'
 
@@ -62,6 +63,8 @@ describe('tap targets on a phone are at least 44px', () => {
     ['member portal tabs', layout, '.memberTab', undefined],
     ['the member portal logo link', layout, '.memberBrand', undefined],
     ['the member back link', member, '.back', undefined],
+    ['the My SACCO disclosure rows', sacco, '.more > summary', undefined],
+    ['skipping the registration form', sacco, '.skip', undefined],
     ['question chips while recording', recording, '.chip', TOUCH],
     ['interview steps', shell, '.step', TOUCH],
     ['list filters', tables, '.segmented button', TOUCH],

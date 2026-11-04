@@ -178,6 +178,7 @@
 .memberTabActive { background: var(--green-800); color: var(--white); }
 .memberTabActive:hover { background: var(--green-900); color: var(--white); }
 @media (max-width: 480px) {
+  .memberNav { flex-wrap: wrap; overflow-x: visible; }
   .memberTab { gap: var(--space-1); padding: 0 var(--space-3); font-size: var(--text-sm); }
   .memberTab svg { display: none; }
 }

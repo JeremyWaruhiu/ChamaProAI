@@ -60,7 +60,7 @@ def legacy(tmp_path):
 def test_fresh_database_reaches_head(tmp_path):
     engine = create_engine(f"sqlite:///{tmp_path / 'new.db'}")
     init_db(engine)
-    assert schema_revision(engine) == head_revision() == "0004"
+    assert schema_revision(engine) == head_revision() == "0005"
     names = set(inspect(engine).get_table_names())
     assert {"members", "loan_applications", "guarantors", "audit_log", "alembic_version"} <= names
     assert not list(tmp_path.glob("*.bak"))                  # nothing to back up
@@ -79,7 +79,7 @@ def test_legacy_rows_survive_exactly(legacy, tmp_path):
         assert [r[:len(cols)] for r in new_rows] == rows, t
     assert after["decisions"][1][len(before["decisions"][1]):] == \
         ["outcome", "approved_amount_kes", "guarantors_required", "officer_notes", "member_message"]
-    assert len(list(tmp_path.glob("chamapro.db.pre-0004-*.bak"))) == 1   # backed up once
+    assert len(list(tmp_path.glob("chamapro.db.pre-0005-*.bak"))) == 1   # backed up once
 
 
 def test_backup_holds_the_pre_migration_database(legacy, tmp_path):
@@ -212,13 +212,13 @@ def test_phone_is_unique_only_when_present(tmp_path):
 def test_0004_downgrades_and_comes_back(tmp_path):
     path = tmp_path / "d.db"
     url = f"sqlite:///{path}"
-    command.upgrade(alembic_config(url), "head")
+    command.upgrade(alembic_config(url), "0004")
     command.downgrade(alembic_config(url), "0003")
     names = set(inspect(create_engine(url)).get_table_names())
     assert not names & {"interview_bookings", "sacco_events", "practice_interviews",
                         "pilot_daily_usage", "sus_responses"}
     assert "self_signed_up" not in {c["name"] for c in inspect(create_engine(url)).get_columns("members")}
-    command.upgrade(alembic_config(url), "head")
+    command.upgrade(alembic_config(url), "0004")
     assert schema_revision(create_engine(url)) == "0004"
 
 
@@ -234,6 +234,117 @@ def test_postgres_sql_covers_the_new_tables_offline():
     assert "CREATE UNIQUE INDEX uq_interview_bookings_slot ON interview_bookings (starts_at) " \
            "WHERE status IN ('requested', 'confirmed', 'started')" in sql
     assert "UPDATE members SET phone = '+254' || substr(phone, 2)" in sql
+
+
+NEW_IN_0005 = ("member_profiles", "member_profile_history", "member_accounts", "loan_accounts",
+               "account_entries", "guarantor_pledges")
+
+
+def at_0004(path):
+    """A 0004 database holding a member, an application and two guarantors: one
+    whose number is a member's, in another case, and one whose number is nobody's."""
+    url = f"sqlite:///{path}"
+    command.upgrade(alembic_config(url), "0004")
+    con = sqlite3.connect(path)
+    con.executescript("""
+        INSERT INTO users (id, username, password_hash, role, is_active, created_at)
+            VALUES (1, 'o', 'x', 'officer', 1, '2020-01-01');
+        INSERT INTO members (id, member_no, full_name, phone, joined_on, created_at, self_signed_up,
+                             savings_kes, birth_year)
+            VALUES (1, 'M-1', 'F', '+254700000111', '2020-01-01', '2020-01-01', 0, 7000, 1980);
+        INSERT INTO loan_applications (id, member_id, amount_requested_kes, purpose, term_months,
+                                       sacco_savings_kes, status, created_by, created_at, updated_at,
+                                       savings_self_declared)
+            VALUES (1, 1, 100, 'p', 6, 10, 'draft', 1, '2020-01-01', '2020-01-01', 1);
+        INSERT INTO guarantors (id, application_id, full_name, member_no, phone, relationship,
+                                amount_guaranteed_kes, status, submitted_at)
+            VALUES (1, 1, 'G', 'm-1', '0700', 'x', 5, 'pending', '2020-01-01'),
+                   (2, 1, 'H', 'nobody', '0700', 'x', 5, 'verified', '2020-01-01');
+    """)
+    con.commit()
+    con.close()
+    return url
+
+
+def test_0005_keeps_every_existing_value(tmp_path):
+    path = tmp_path / "m.db"
+    url = at_0004(path)
+    tables = ["members", "loan_applications", "guarantors"]
+    before = dump(path, tables)
+    command.upgrade(alembic_config(url), "0005")
+    after = dump(path, tables)
+    for t in tables:
+        rows, cols = before[t]
+        new_rows, new_cols = after[t]
+        kept = [new_cols.index(c) for c in cols]
+        assert [tuple(r[i] for i in kept) for r in new_rows] == rows, t
+    con = sqlite3.connect(path)
+    assert con.execute("SELECT id, member_id FROM guarantors ORDER BY id").fetchall() == [(1, 1), (2, None)]
+    for table in NEW_IN_0005:         # nothing invented: no profile, no opening balance
+        assert con.execute(f"SELECT count(*) FROM {table}").fetchone() == (0,)
+    con.close()
+
+
+def test_0005_downgrades_and_comes_back(tmp_path):
+    path = tmp_path / "m.db"
+    url = at_0004(path)
+    before = dump(path, ["guarantors"])
+    command.upgrade(alembic_config(url), "0005")
+    con = sqlite3.connect(path)
+    con.executescript("""
+        INSERT INTO member_accounts (id, member_id, kind, created_at) VALUES (1, 1, 'deposits', '2020-01-01');
+        INSERT INTO account_entries (account_id, account_kind, entry_type, amount_kes, posted_at, reference, created_at)
+            VALUES (1, 'deposits', 'deposit', 500, '2020-01-02', 'r', '2020-01-02');
+        INSERT INTO loan_accounts (id, member_id, principal_kes, disbursed_on, term_months,
+                                   monthly_instalment_kes, status, created_at, updated_at)
+            VALUES (1, 1, 100, '2020-01-02', 6, 20, 'active', '2020-01-02', '2020-01-02');
+        INSERT INTO guarantors (id, loan_account_id, full_name, member_no, phone, relationship,
+                                amount_guaranteed_kes, status, submitted_at)
+            VALUES (3, 1, 'J', 'M-1', '0700', 'x', 5, 'verified', '2020-01-02');
+    """)
+    con.commit()
+    con.close()
+
+    command.downgrade(alembic_config(url), "0004")
+
+    names = set(inspect(create_engine(url)).get_table_names())
+    assert not names & set(NEW_IN_0005)
+    assert dump(path, ["guarantors"]) == before       # a guarantee on a loan alone went with the loan
+    application_id = next(c for c in inspect(create_engine(url)).get_columns("guarantors")
+                          if c["name"] == "application_id")
+    assert application_id["nullable"] is False
+    con = sqlite3.connect(path)
+    assert con.execute("SELECT name FROM sqlite_master WHERE type = 'trigger' AND "
+                       "name LIKE 'account_entries%'").fetchall() == []
+    con.close()
+
+    command.upgrade(alembic_config(url), "head")
+    assert schema_revision(create_engine(url)) == head_revision()
+
+
+def test_0005_on_sqlite_keeps_the_guarantor_checks_through_the_rebuild(tmp_path):
+    path = tmp_path / "m.db"
+    command.upgrade(alembic_config(at_0004(path)), "0005")
+    con = sqlite3.connect(path)
+    with pytest.raises(sqlite3.IntegrityError, match="ck_guarantors_status"):
+        con.execute("UPDATE guarantors SET status = 'bogus' WHERE id = 1")
+    with pytest.raises(sqlite3.IntegrityError, match="ck_guarantors_backs_something"):
+        con.execute("UPDATE guarantors SET application_id = NULL WHERE id = 1")
+    con.close()
+
+
+def test_postgres_sql_guards_the_ledger_and_the_history():
+    out = io.StringIO()
+    with redirect_stdout(out):
+        command.upgrade(alembic_config("postgresql+psycopg://u:p@localhost/x"), "0004:0005", sql=True)
+    sql = out.getvalue()
+    for table, message in [("member_profile_history", "member_profile_history is append-only"),
+                           ("account_entries", "account_entries is append-only")]:
+        for when, level in [("UPDATE", "ROW"), ("DELETE", "ROW"), ("TRUNCATE", "STATEMENT")]:
+            assert (f"CREATE TRIGGER {table}_no_{when.lower()} BEFORE {when} ON {table} "
+                    f"FOR EACH {level} EXECUTE FUNCTION chamapro_reject_change('{message}')") in sql
+    for table in NEW_IN_0005:
+        assert f"ALTER TABLE {table} ENABLE ROW LEVEL SECURITY" in sql
 
 
 def test_postgres_is_never_migrated_implicitly(monkeypatch):

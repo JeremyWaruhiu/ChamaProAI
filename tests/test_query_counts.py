@@ -3,12 +3,13 @@ endpoints issue a fixed number of queries however many rows there are, and
 the live statistics are cached for a minute (live_cache.py)."""
 import logging
 import re
+import secrets
 
 import pytest
 from sqlalchemy import event, select
 
 from conftest import assessed, guarantor, new_application, new_interview, new_member
-from chamapro.api import live_cache
+from chamapro.api import ledger, live_cache
 from chamapro.api.db import Applicant, Interview, SessionLocal, make_engine
 
 QUERIES = re.compile(r"^(\w+) (\S+) (\d+): (\d+) queries, \d+ ms$")
@@ -69,11 +70,11 @@ def test_list_endpoints_do_not_query_per_row(client, admin_client, queries, summ
     assert len(r.json()) > 0
 
 
-def test_live_stats_are_four_queries_and_signing_in_is_one(admin_client, queries, summary):
+def test_live_stats_are_five_queries_and_signing_in_is_one(admin_client, queries, summary):
     more_rows(admin_client, 1)
     live_cache.invalidate()
     _, n = queries(admin_client, "/api/results")
-    assert n == 1 + 4   # session and user; counts and mean; groups; applications; guarantors
+    assert n == 1 + 5   # session and user; counts and mean; groups; applications; guarantors; savings
 
 
 def test_the_overview_list_of_applications_is_one_query(client, queries):
@@ -86,6 +87,55 @@ def test_a_member_lists_their_own_applications_in_two_queries(client, queries):
     member = more_rows(client, 3)
     r, n = queries(member, "/api/me/applications")
     assert len(r.json()) == 3 and n == 1 + 2   # their member record; the applications
+
+
+def full_sacco(member_id, others, entries=12, loans_n=1):
+    """A member with entries on every account, loans, and pledges both ways."""
+    with SessionLocal() as db:
+        for i in range(entries):
+            stamp = secrets.token_hex(4)
+            ledger.post_entry(db, member_id, "deposits", "deposit", 100 + i, f"D-{stamp}")
+            ledger.post_entry(db, member_id, "share_capital", "deposit", 50, f"S-{stamp}")
+            ledger.post_entry(db, member_id, "transactional", "deposit", 75, f"T-{stamp}")
+        for _ in range(loans_n):
+            loan = ledger.issue_loan(db, member_id, 1000, 6, 200)
+            ledger.record_repayment(db, loan, 200, f"R-{secrets.token_hex(4)}")
+        for other in others:
+            ledger.add_pledge(db, member_id, other)
+            ledger.add_pledge(db, other, member_id)
+            ledger.post_entry(db, other, "deposits", "deposit", 500, f"O-{secrets.token_hex(4)}")
+        db.commit()
+
+
+@pytest.mark.parametrize("staff", [False, True])
+def test_the_sacco_page_does_not_query_per_row(client, queries, staff):
+    mid, _, member = new_member()
+    c = client if staff else member
+    path = f"/api/members/{mid}/sacco" if staff else "/api/me/sacco"
+    full_sacco(mid, [new_member(login=False)[0]])
+    _, before = queries(c, path)
+    full_sacco(mid, [new_member(login=False)[0] for _ in range(4)], entries=5, loans_n=3)
+    r, after = queries(c, path)
+    assert after == before, f"{path}: {before} queries, then {after} with more rows"
+    body = r.json()
+    assert len(body["my_guarantors"]) == 5 and len(body["i_guarantee"]) == 5 and len(body["loans"]) == 4
+    assert [len(a["entries"]) for a in body["accounts"]] == [10, 10, 10]   # 17 of each; the newest ten
+    assert after <= 15
+
+
+def test_guarantor_offers_do_not_query_per_pledge(client, queries):
+    mid, _, member = new_member()
+    iid = assessed(client, "Low")
+    app = new_application(client, mid, iid, amount=2000)
+    r = client.post(f"/api/applications/{app['id']}/decision",
+                    json={"outcome": "approve_with_guarantor", "guarantors_required": 2})
+    assert r.status_code == 201, r.text
+    path = f"/api/me/applications/{app['id']}/guarantor-offers"
+    full_sacco(mid, [new_member(login=False)[0]], entries=1)
+    _, before = queries(member, path)
+    full_sacco(mid, [new_member(login=False)[0] for _ in range(4)], entries=1)
+    r, after = queries(member, path)
+    assert after == before and len(r.json()["offers"]) == 0   # KSh 500 each; KSh 1,000 is the share
 
 
 # --- The cache -----------------------------------------------------------------------

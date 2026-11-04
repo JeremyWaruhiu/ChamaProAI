@@ -1,6 +1,7 @@
 """Storage: applicants, interviews, responses, assessments, users, members,
-loan applications, guarantors, interview bookings, SACCO events, the volunteer
-pilot's records and the audit log.
+member profiles, savings accounts and their ledger, issued loans, standing
+guarantors, loan applications, guarantors, interview bookings, SACCO events, the
+volunteer pilot's records and the audit log.
 
 SQLite by default; PostgreSQL (Supabase) by setting DATABASE_URL. The schema
 is owned by the Alembic migrations in chamapro/migrations, not by this file:
@@ -9,8 +10,8 @@ init_db() runs them.
 An assessment row is the audit record (Chapter 4): it stores the exact feature
 vector the classifier saw, never something re-derived later. The officer's
 decision is a separate record. Database triggers (SQLite and PostgreSQL)
-reject any UPDATE or DELETE on either, and on the audit log, so the guarantee
-holds even outside the API.
+reject any UPDATE or DELETE on either, on the audit log, on a member's profile
+history and on the savings ledger, so the guarantee holds even outside the API.
 """
 from __future__ import annotations
 
@@ -22,7 +23,7 @@ from datetime import date, datetime, timezone
 from pathlib import Path
 
 from sqlalchemy import (JSON, Boolean, CheckConstraint, Date, DateTime, Engine,
-                        Float, ForeignKey, Index, Integer, String, Text,
+                        Float, ForeignKey, ForeignKeyConstraint, Index, Integer, String, Text,
                         TypeDecorator, UniqueConstraint, create_engine, event,
                         false, make_url, text)
 from sqlalchemy.orm import (DeclarativeBase, Mapped, mapped_column,
@@ -272,6 +273,7 @@ class Member(Base):
 
     user: Mapped[User | None] = relationship()
     applications: Mapped[list[LoanApplication]] = relationship(back_populates="member")
+    profile: Mapped[MemberProfile | None] = relationship(back_populates="member")
 
     @validates("phone")
     def _canonical_phone(self, _key, value):
@@ -322,9 +324,12 @@ class Guarantor(Base):
     __table_args__ = (
         CheckConstraint(_one_of("status", GUARANTOR_STATUSES), name="ck_guarantors_status"),
         CheckConstraint("amount_guaranteed_kes > 0", name="ck_guarantors_amount"),
+        CheckConstraint("application_id IS NOT NULL OR loan_account_id IS NOT NULL",
+                        name="ck_guarantors_backs_something"),
     )
     id: Mapped[int] = mapped_column(primary_key=True)
-    application_id: Mapped[int] = mapped_column(ForeignKey("loan_applications.id"), index=True)
+    # Null only on a loan issued without an application (loan_account_id says which).
+    application_id: Mapped[int | None] = mapped_column(ForeignKey("loan_applications.id"), index=True)
     full_name: Mapped[str] = mapped_column(String(200))
     member_no: Mapped[str] = mapped_column(String(32))
     phone: Mapped[str] = mapped_column(String(20))
@@ -336,8 +341,218 @@ class Guarantor(Base):
     verified_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"))
     verified_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
 
-    application: Mapped[LoanApplication] = relationship(back_populates="guarantors")
+    application: Mapped[LoanApplication | None] = relationship(back_populates="guarantors")
     verifier: Mapped[User | None] = relationship()
+    # The member this is, when member_no is one of ours: what guarantee capacity
+    # is counted against. member_no and phone stay as they were submitted.
+    member_id: Mapped[int | None] = mapped_column(ForeignKey("members.id"), index=True)
+    pledge_id: Mapped[int | None] = mapped_column(ForeignKey("guarantor_pledges.id"))
+    # Set when the loan is issued; a guarantee counts against capacity from then on.
+    loan_account_id: Mapped[int | None] = mapped_column(ForeignKey("loan_accounts.id"), index=True)
+
+
+# --- A member's profile -----------------------------------------------------------------------
+
+PROFILE_SOURCES = ("registration", "member_update", "officer_verified", "seed")
+# What each group of member_profiles holds; each has its own <group>_source,
+# _updated_at, _verified_by and _verified_at columns.
+PROFILE_GROUPS = {
+    "personal": ("date_of_birth", "sex", "education", "marital_status"),
+    "household": ("household_size", "children", "children_under5", "children_in_school"),
+    "income": ("monthly_income_kes", "agri_income_kes", "income_sources"),
+    "assets": ("non_monetary_savings", "purchases_last_12m"),
+    "credit": ("chama_loan_use", "lost_as_guarantor_chama"),
+}
+
+
+class MemberProfile(Base):
+    """One current row per member: every classifier input the v2 questions
+    collected that the SACCO cannot read from its own records. Keys inside the
+    JSON flags are score_interview's. sacco_loan_use and lost_as_guarantor.sacco
+    are not here: profiles.profile_features derives them from the ledger."""
+    __tablename__ = "member_profiles"
+    __table_args__ = (
+        *(CheckConstraint(f"{g}_source IS NULL OR {_one_of(f'{g}_source', PROFILE_SOURCES)}",
+                          name=f"ck_member_profiles_{g}_source") for g in PROFILE_GROUPS),
+        CheckConstraint("education IS NULL OR education BETWEEN 0 AND 8",
+                        name="ck_member_profiles_education"),
+        CheckConstraint("chama_loan_use IS NULL OR chama_loan_use IN (0, 1, 2)",
+                        name="ck_member_profiles_chama_loan_use"),
+        CheckConstraint("lost_as_guarantor_chama IS NULL OR lost_as_guarantor_chama IN (0, 1)",
+                        name="ck_member_profiles_lost_chama"),
+    )
+    member_id: Mapped[int] = mapped_column(ForeignKey("members.id"), primary_key=True)
+    date_of_birth: Mapped[date | None] = mapped_column(Date)     # age is derived from it
+    sex: Mapped[str | None] = mapped_column(String(10))
+    education: Mapped[int | None] = mapped_column(Integer)       # 0-8, score_interview.EDU_LADDER
+    marital_status: Mapped[str | None] = mapped_column(String(10))
+    household_size: Mapped[int | None] = mapped_column(Integer)
+    children: Mapped[int | None] = mapped_column(Integer)
+    children_under5: Mapped[int | None] = mapped_column(Integer)
+    children_in_school: Mapped[int | None] = mapped_column(Integer)
+    monthly_income_kes: Mapped[int | None] = mapped_column(Integer)
+    agri_income_kes: Mapped[int | None] = mapped_column(Integer)
+    income_sources: Mapped[dict | None] = mapped_column(JSON)    # score_interview.INCOME_SOURCES -> 0/1
+    non_monetary_savings: Mapped[dict | None] = mapped_column(JSON)   # score_interview.SAVINGS -> 0/1
+    purchases_last_12m: Mapped[dict | None] = mapped_column(JSON)     # score_interview.PURCHASES -> 0/1
+    chama_loan_use: Mapped[int | None] = mapped_column(Integer)  # 0 never, 1 used to, 2 currently
+    lost_as_guarantor_chama: Mapped[int | None] = mapped_column(Integer)   # lost_as_guarantor.chama
+
+    personal_source: Mapped[str | None] = mapped_column(String(20))
+    personal_updated_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
+    personal_verified_by: Mapped[str | None] = mapped_column(String(64))   # username
+    personal_verified_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
+    household_source: Mapped[str | None] = mapped_column(String(20))
+    household_updated_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
+    household_verified_by: Mapped[str | None] = mapped_column(String(64))
+    household_verified_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
+    income_source: Mapped[str | None] = mapped_column(String(20))
+    income_updated_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
+    income_verified_by: Mapped[str | None] = mapped_column(String(64))
+    income_verified_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
+    assets_source: Mapped[str | None] = mapped_column(String(20))
+    assets_updated_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
+    assets_verified_by: Mapped[str | None] = mapped_column(String(64))
+    assets_verified_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
+    credit_source: Mapped[str | None] = mapped_column(String(20))
+    credit_updated_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
+    credit_verified_by: Mapped[str | None] = mapped_column(String(64))
+    credit_verified_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
+
+    # When the member last said it is right, or an officer verified it.
+    confirmed_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
+
+    member: Mapped[Member] = relationship(back_populates="profile")
+
+
+class MemberProfileHistory(Base):
+    """Append-only: a snapshot of the whole profile after every change, kept by
+    database triggers. change is a PROFILE_SOURCES value or "confirm"."""
+    __tablename__ = "member_profile_history"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    member_id: Mapped[int] = mapped_column(ForeignKey("members.id"), index=True)
+    change: Mapped[str] = mapped_column(String(20))
+    groups: Mapped[list] = mapped_column(JSON)      # the field groups this change touched
+    snapshot: Mapped[dict] = mapped_column(JSON)    # the row's columns, ISO dates as text
+    # Null for scripts run from the shell, as in the audit log.
+    actor_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"))
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
+
+
+# --- Savings accounts and their ledger --------------------------------------------------------
+
+ACCOUNT_KINDS = ("deposits", "share_capital", "transactional")
+ENTRY_TYPES = ("deposit", "withdrawal", "loan_disbursement", "loan_repayment",
+               "guarantee_recovery", "dividend")
+LOAN_STATUSES = ("active", "repaid", "defaulted")
+PLEDGE_STATUSES = ("active", "withdrawn")
+# The sign of each type's amount, and the accounts it may be posted to: deposits
+# back loans and are never withdrawn, loans are paid out to the transactional
+# account, and a guarantee is recovered from the guarantor's deposits.
+ENTRY_RULES = (
+    ("ck_account_entries_sign",
+     "(entry_type IN ('deposit', 'loan_disbursement', 'dividend') AND amount_kes > 0) "
+     "OR (entry_type IN ('withdrawal', 'loan_repayment', 'guarantee_recovery') AND amount_kes < 0)"),
+    ("ck_account_entries_no_deposit_withdrawal",
+     "NOT (entry_type = 'withdrawal' AND account_kind = 'deposits')"),
+    ("ck_account_entries_disbursed_to_transactional",
+     "entry_type NOT IN ('loan_disbursement', 'loan_repayment') OR account_kind = 'transactional'"),
+    ("ck_account_entries_recovered_from_deposits",
+     "entry_type != 'guarantee_recovery' OR account_kind = 'deposits'"),
+)
+
+
+class MemberAccount(Base):
+    """One of a member's three accounts. Its balance is never stored: it is the
+    sum of its entries (ledger.py)."""
+    __tablename__ = "member_accounts"
+    __table_args__ = (
+        CheckConstraint(_one_of("kind", ACCOUNT_KINDS), name="ck_member_accounts_kind"),
+        UniqueConstraint("member_id", "kind", name="uq_member_accounts_member_kind"),
+        # What account_entries' composite foreign key points at.
+        UniqueConstraint("id", "kind", name="uq_member_accounts_id_kind"),
+    )
+    id: Mapped[int] = mapped_column(primary_key=True)
+    member_id: Mapped[int] = mapped_column(ForeignKey("members.id"))
+    kind: Mapped[str] = mapped_column(String(14))
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
+
+
+class AccountEntry(Base):
+    """Append-only: one signed movement on an account, kept by database triggers.
+    A correction is a new entry. account_kind repeats the account's kind, held
+    true by the composite foreign key, so that CHECK constraints can state
+    ENTRY_RULES and the database itself refuses a withdrawal from deposits."""
+    __tablename__ = "account_entries"
+    __table_args__ = (
+        ForeignKeyConstraint(["account_id", "account_kind"], ["member_accounts.id", "member_accounts.kind"],
+                             name="fk_account_entries_account"),
+        CheckConstraint(_one_of("entry_type", ENTRY_TYPES), name="ck_account_entries_type"),
+        *(CheckConstraint(sql, name=name) for name, sql in ENTRY_RULES),
+        UniqueConstraint("account_id", "reference", name="uq_account_entries_reference"),
+        # Serves every balance and "the last ten entries" without touching the table's other rows.
+        Index("ix_account_entries_account_posted", "account_id", "posted_at", "id"),
+    )
+    id: Mapped[int] = mapped_column(primary_key=True)
+    account_id: Mapped[int] = mapped_column(Integer)
+    account_kind: Mapped[str] = mapped_column(String(14))
+    entry_type: Mapped[str] = mapped_column(String(20))
+    amount_kes: Mapped[int] = mapped_column(Integer)
+    posted_at: Mapped[datetime] = mapped_column(UTCDateTime)
+    reference: Mapped[str] = mapped_column(String(40))
+    # Null for scripts run from the shell, as in the audit log.
+    created_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"))
+    # The loan a disbursement, repayment or recovery belongs to.
+    loan_account_id: Mapped[int | None] = mapped_column(ForeignKey("loan_accounts.id"), index=True)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
+
+
+class LoanAccount(Base):
+    """An issued loan. What has been repaid and any arrears are computed from
+    the ledger (ledger.py), never stored."""
+    __tablename__ = "loan_accounts"
+    __table_args__ = (
+        CheckConstraint(_one_of("status", LOAN_STATUSES), name="ck_loan_accounts_status"),
+        CheckConstraint("principal_kes > 0", name="ck_loan_accounts_principal"),
+        CheckConstraint("term_months > 0", name="ck_loan_accounts_term"),
+        CheckConstraint("monthly_instalment_kes > 0", name="ck_loan_accounts_instalment"),
+    )
+    id: Mapped[int] = mapped_column(primary_key=True)
+    member_id: Mapped[int] = mapped_column(ForeignKey("members.id"), index=True)
+    # The application it came from; loans from before the system have none.
+    application_id: Mapped[int | None] = mapped_column(ForeignKey("loan_applications.id"), unique=True)
+    principal_kes: Mapped[int] = mapped_column(Integer)
+    disbursed_on: Mapped[date] = mapped_column(Date)
+    term_months: Mapped[int] = mapped_column(Integer)
+    monthly_instalment_kes: Mapped[int] = mapped_column(Integer)
+    status: Mapped[str] = mapped_column(String(10), default="active")
+    created_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"))
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
+
+
+class GuarantorPledge(Base):
+    """A member standing ready to guarantee another member's loans. It holds no
+    amount: capacity is worked out when an application needs it, and a pledge
+    becomes a guarantors row, reviewed like any other."""
+    __tablename__ = "guarantor_pledges"
+    __table_args__ = (
+        CheckConstraint(_one_of("status", PLEDGE_STATUSES), name="ck_guarantor_pledges_status"),
+        CheckConstraint("borrower_member_id != guarantor_member_id", name="ck_guarantor_pledges_self"),
+        Index("uq_guarantor_pledges_active", "borrower_member_id", "guarantor_member_id", unique=True,
+              sqlite_where=text("status = 'active'"), postgresql_where=text("status = 'active'")),
+        Index("ix_guarantor_pledges_guarantor", "guarantor_member_id"),
+    )
+    id: Mapped[int] = mapped_column(primary_key=True)
+    borrower_member_id: Mapped[int] = mapped_column(ForeignKey("members.id"))
+    guarantor_member_id: Mapped[int] = mapped_column(ForeignKey("members.id"))
+    status: Mapped[str] = mapped_column(String(10), default="active")
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
+
+    borrower: Mapped[Member] = relationship(foreign_keys=[borrower_member_id])
+    guarantor: Mapped[Member] = relationship(foreign_keys=[guarantor_member_id])
 
 
 BOOKING_STATUSES = ("requested", "confirmed", "started", "cancelled")

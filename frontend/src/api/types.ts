@@ -425,6 +425,7 @@ export interface ApplicationDetail extends ApplicationSummary {
   purpose: string
   sacco_savings_kes: number
   savings_self_declared?: boolean
+  savings_from_ledger?: boolean
   booking?: Booking | null
   practice_interviews?: PracticeBrief[]
   created_by: string
@@ -548,9 +549,10 @@ export interface SignupBody {
   invite_code: string
   consent: boolean
   consent_version: string
+  member_no?: string | null
 }
 
-export type SavingsStatus = 'none' | 'self_declared' | 'verified'
+export type SavingsStatus = 'none' | 'self_declared' | 'verified' | 'ledger'
 
 export interface MyMember {
   member_no: string
@@ -569,6 +571,7 @@ export interface MyMember {
   marital_status: MaritalStatus | null
   applicant_complete: boolean
   consent_current: boolean
+  from_ledger?: boolean
 }
 
 export interface MyMemberUpdate {
@@ -734,4 +737,101 @@ export interface PilotStats {
   per_member_cap: number
   daily_cap: number
   used_today: number
+}
+
+// --- A member's profile, ledger, loans and standing guarantors ---------------------------------
+
+export type AccountKind = 'deposits' | 'share_capital' | 'transactional'
+export type EntryType = 'deposit' | 'withdrawal' | 'loan_disbursement' | 'loan_repayment' | 'guarantee_recovery' | 'dividend'
+export type LoanStatus = 'active' | 'repaid' | 'defaulted'
+
+/** What a member says about themselves. sacco_loan_use and lost_as_guarantor.sacco are derived and refused. */
+export interface ProfileBody {
+  date_of_birth?: string | null
+  sex?: Sex | null
+  education?: number | null
+  marital_status?: MaritalStatus | null
+  household_size?: number | null
+  children?: number | null
+  children_under5?: number | null
+  children_in_school?: number | null
+  monthly_income_kes?: number | null
+  agri_income_kes?: number | null
+  income_sources?: Record<string, number> | null
+  non_monetary_savings?: Record<string, number> | null
+  purchases_last_12m?: Record<string, number> | null
+  chama_loan_use?: 0 | 1 | 2 | null
+  lost_as_guarantor_chama?: 0 | 1 | null
+}
+
+export interface ProfileGroupOut {
+  source: 'registration' | 'member_update' | 'officer_verified' | 'seed' | null
+  updated_at: string | null
+  verified: boolean
+}
+
+export interface ProfileOut extends Omit<ProfileBody, 'chama_loan_use' | 'lost_as_guarantor_chama'> {
+  age?: number | null
+  chama_loan_use?: number | null
+  lost_as_guarantor_chama?: number | null
+  confirmed_at?: string | null
+  days_since_confirmed?: number | null
+  groups: Record<string, ProfileGroupOut>
+  provenance?: Record<string, 'records' | 'declared' | 'verified' | 'missing'> | null
+  checks?: Record<string, { by: string; at: string }> | null
+}
+
+export interface EntryOut {
+  id: number
+  entry_type: EntryType
+  amount_kes: number
+  posted_at: string
+  reference: string
+}
+
+export interface AccountOut {
+  kind: AccountKind
+  balance_kes: number
+  entries: EntryOut[]
+}
+
+export interface PledgeOut {
+  id: number
+  member_no: string
+  full_name: string
+  created_at: string
+  has_capacity?: boolean | null
+  capacity_kes?: number | null
+  guaranteed_kes?: number | null
+}
+
+export interface LoanOut {
+  id: number
+  application_id: number | null
+  principal_kes: number
+  disbursed_on: string
+  term_months: number
+  monthly_instalment_kes: number
+  status: LoanStatus
+  paid_kes: number
+  days_in_arrears: number
+}
+
+export interface SaccoView {
+  member_id: number
+  member_no: string
+  full_name: string
+  joined_on: string
+  profile: ProfileOut
+  accounts: AccountOut[]
+  guarantee: { deposits_kes: number; guaranteed_kes: number; committed_kes: number; capacity_kes: number }
+  my_guarantors: PledgeOut[]
+  i_guarantee: PledgeOut[]
+  loans: LoanOut[]
+}
+
+export interface GuarantorOffers {
+  share_kes: number
+  needed: number
+  offers: { pledge_id: number; full_name: string; member_no: string }[]
 }

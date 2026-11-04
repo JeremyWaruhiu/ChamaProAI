@@ -87,3 +87,36 @@ describe('when the pilot is closed', () => {
     expect(screen.queryByLabelText(/Invite code/)).toBeNull()
   })
 })
+
+describe('after signing up', () => {
+  const answer = (over: object) => vi.fn(async () => new Response(JSON.stringify({
+    username: 'V-1', role: 'member', member_no: 'V-1', claimed: false, profile_due: false, ...over }), { status: 201 }))
+
+  function sign(extra?: () => void) {
+    const onSignedIn = vi.fn()
+    render(<SignupForm info={INFO} onSignedIn={onSignedIn} />)
+    fill()
+    extra?.()
+    fireEvent.click(screen.getByRole('checkbox'))
+    fireEvent.click(screen.getByRole('button', { name: /Create my account/ }))
+    return onSignedIn
+  }
+
+  it('someone new goes to the registration form', async () => {
+    vi.stubGlobal('fetch', answer({ profile_due: true }))
+    window.location.hash = '#/signup'
+    const onSignedIn = sign()
+    await waitFor(() => expect(onSignedIn).toHaveBeenCalled())
+    expect(window.location.hash).toBe('#/my/registration')
+  })
+
+  it('someone claiming their record sends the number and skips the form', async () => {
+    const fetch = answer({ claimed: true })
+    vi.stubGlobal('fetch', fetch)
+    window.location.hash = '#/signup'
+    const onSignedIn = sign(() => type(/Member number/, 'M-2001'))
+    await waitFor(() => expect(onSignedIn).toHaveBeenCalled())
+    expect(JSON.parse((fetch.mock.calls[0] as unknown as [string, RequestInit])[1].body as string).member_no).toBe('M-2001')
+    expect(window.location.hash).toBe('#/signup')
+  })
+})

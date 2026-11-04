@@ -90,7 +90,8 @@ export function MyApplication({ id }: { id: number }) {
       <AnimatePresence mode="wait" initial={false}>
         {app.guarantors_still_needed > 0 ? (
           <m.div key="form" {...fadeUp(reduced)}>
-            <GuarantorSection app={app} cap={cap} onSubmitted={(next) => { setData(next); setSubmitted(true) }} />
+            <GuarantorSection key={app.guarantors_still_needed} app={app} cap={cap}
+                              onSubmitted={(next) => { setData(next); setSubmitted(next.status !== 'guarantor_required') }} />
           </m.div>
         ) : submitted ? (
           <m.div key="done" className={styles.done} role="status" {...fadeUp(reduced)}>
@@ -300,9 +301,52 @@ function GuarantorSection({ app, cap, onSubmitted }: { app: Mine; cap: number; o
           <p className="muted">{F.ctaBody(needed)}</p>
         </div>
       </div>
+      <StandingGuarantors app={app} needed={needed} onUsed={onSubmitted} />
       <GuarantorForm rows={rows} setRows={setRows} needed={needed} cap={cap} busy={busy} onSubmit={submit} />
       {error && <ErrorNotice doing={F.failed} error={error} onRetry={submit} />}
     </section>
+  )
+}
+
+/** The borrower's standing pledges from members who can cover their share, if any. */
+function StandingGuarantors({ app, needed, onUsed }: { app: Mine; needed: number; onUsed: (a: Mine) => void }) {
+  const S = t.sacco
+  const load = useCallback(() => api.guarantorOffers(app.id), [app.id])
+  const { data } = useLoad(load)
+  const [chosen, setChosen] = useState<number[]>([])
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<ApiError | null>(null)
+  if (!data?.offers?.length) return null
+
+  const toggle = (id: number) => setChosen((c) => (c.includes(id) ? c.filter((x) => x !== id) : [...c, id]))
+  async function use() {
+    setBusy(true)
+    setError(null)
+    try {
+      onUsed(await api.usePledges(app.id, chosen))
+    } catch (e) {
+      setError(e as ApiError)
+      setBusy(false)
+    }
+  }
+
+  return (
+    <fieldset className={styles.offers}>
+      <legend className={styles.gLegend}>{S.offersTitle}</legend>
+      <p className="muted small">{S.offersLead(data.share_kes)}</p>
+      {data.offers.map((o) => (
+        <label key={o.pledge_id} className="choice">
+          <input type="checkbox" checked={chosen.includes(o.pledge_id)} disabled={busy || (!chosen.includes(o.pledge_id) && chosen.length >= needed)}
+                 onChange={() => toggle(o.pledge_id)} />
+          <span>{o.full_name} ({o.member_no})</span>
+        </label>
+      ))}
+      {error && <ErrorNotice doing={S.useFailed} error={error} />}
+      <button type="button" className="btn btn-primary" disabled={busy || chosen.length === 0} onClick={use}>
+        {busy && <span className="spinner" aria-hidden />} {S.submitChosen(chosen.length || 1)}
+      </button>
+      <p className="subtle small">{S.orType}</p>
+    </fieldset>
   )
 }
 

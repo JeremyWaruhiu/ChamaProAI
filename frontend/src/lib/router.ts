@@ -28,6 +28,8 @@ import { useEffect, useState } from 'react'
 //   #/my                               my applications
 //   #/my/applications/:id              one of my applications
 //   #/my/apply                         apply for a loan and book the interview
+//   #/my/sacco                         my profile, balances, guarantors and loans
+//   #/my/registration                  the registration profile form, once after sign-up
 //   #/my/practice/:id[/:n]             my practice interview, question n
 //   #/my/practice/:id/review           review my transcripts and submit
 //   #/my/practice/:id/result           the result in words, and the questionnaire
@@ -57,6 +59,8 @@ export type Route =
   | { screen: 'my' }
   | { screen: 'myApplication'; id: number }
   | { screen: 'apply' }
+  | { screen: 'mySacco' }
+  | { screen: 'registration' }
   | { screen: 'practice'; id: number; question: number | null }
   | { screen: 'practiceReview'; id: number }
   | { screen: 'practiceResult'; id: number }
@@ -114,6 +118,8 @@ export function parse(hash: string): Route {
     if (n === 1) return { screen: 'my' }
     if (b === 'applications' && n === 3 && positive(c)) return { screen: 'myApplication', id: positive(c)! }
     if (b === 'apply' && n === 2) return { screen: 'apply' }
+    if (b === 'sacco' && n === 2) return { screen: 'mySacco' }
+    if (b === 'registration' && n === 2) return { screen: 'registration' }
     const practice = positive(c)
     if (b === 'practice' && practice) {
       if (n === 3) return { screen: 'practice', id: practice, question: null }
@@ -150,6 +156,8 @@ export const paths = {
   my: () => '#/my',
   myApplication: (id: number) => `#/my/applications/${id}`,
   apply: () => '#/my/apply',
+  mySacco: () => '#/my/sacco',
+  registration: () => '#/my/registration',
   practice: (id: number, n?: number) => `#/my/practice/${id}${n ? `/${n}` : ''}`,
   practiceReview: (id: number) => `#/my/practice/${id}/review`,
   practiceResult: (id: number) => `#/my/practice/${id}/result`,

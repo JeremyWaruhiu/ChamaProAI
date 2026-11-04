@@ -7,10 +7,10 @@ import { normalisePhone } from './phone'
 const S = t.signup
 
 export interface SignupDraft {
-  full_name: string; phone: string; email: string; password: string; confirm: string; invite: string; consent: boolean
+  full_name: string; phone: string; member_no: string; email: string; password: string; confirm: string; invite: string; consent: boolean
 }
 
-export const EMPTY_SIGNUP: SignupDraft = { full_name: '', phone: '', email: '', password: '', confirm: '', invite: '', consent: false }
+export const EMPTY_SIGNUP: SignupDraft = { full_name: '', phone: '', member_no: '', email: '', password: '', confirm: '', invite: '', consent: false }
 
 /** What stops the form being sent; {} when it can go. The API checks all of it again. */
 export function signupErrors(d: SignupDraft): Partial<Record<keyof SignupDraft, string>> {
@@ -30,6 +30,6 @@ export function toSignupBody(d: SignupDraft, version: string): SignupBody {
   return {
     full_name: d.full_name.trim(), phone: normalisePhone(d.phone) ?? d.phone, email: d.email.trim() || null,
     password: d.password, password_confirm: d.confirm, invite_code: d.invite.trim(), consent: d.consent,
-    consent_version: version,
+    consent_version: version, ...(d.member_no.trim() ? { member_no: d.member_no.trim() } : {}),
   }
 }

@@ -68,3 +68,4 @@
 .filters { display: grid; gap: var(--space-3); grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); margin-bottom: var(--space-5); }
 .detailsCell { max-width: 420px; color: var(--ink-2); font-size: var(--text-sm); overflow-wrap: anywhere; }
 .more { display: flex; justify-content: center; margin-top: var(--space-4); }
+.saccoPanels { margin-top: var(--space-5); min-width: 0; }

@@ -38,6 +38,8 @@ each assessed interview scored by the real classifier on fixed features. It
 needs models/ but no audio, no Gemini and no network. It never writes to
 data/chamapro.db, refuses a file that is not an earlier demo database, and
 rebuilds an earlier one only with --replace (new passwords, printed once).
+It also holds about 150 more members with profiles, ledgers, loans and standing
+guarantors; scripts/seed_members.py documents how they are generated.
 
     python scripts/seed_demo.py --demo-db data/demo.db
     python scripts/seed_demo.py --demo-db data/demo.db --replace
@@ -53,7 +55,7 @@ re-recording in the dashboard deletes the copy, never the corpus file.
 """
 from __future__ import annotations
 
-import argparse, csv, json, math, os, secrets, shutil, sqlite3, sys
+import argparse, csv, json, math, os, random, secrets, shutil, sqlite3, sys
 from dataclasses import dataclass, field
 from datetime import date, timedelta
 from pathlib import Path
@@ -76,9 +78,10 @@ from chamapro.api import schemas as s
 from chamapro.api.auth import hash_password
 from chamapro.api.db import (APPLICATION_STATUSES, Applicant, Assessment, Guarantor, Interview,
                              LoanApplication, Member, Response, SessionLocal, User, init_db,
-                             utcnow, normalise_phone)
+                             nairobi_today, utcnow, normalise_phone)
 
 import score_interview  # scripts/, next to this file
+import seed_members
 
 # seed_tag values: "<prefix>:<key>", prefix SEED in the working database and
 # DEMO_DB in a --demo-db file. The names people see carry no marker.
@@ -743,6 +746,7 @@ class Clock:
 class DemoSeeded:
     passwords: dict[str, str]                       # shown once, never stored
     applications: list[tuple[int, str, str, str]]   # id, member, risk class, status
+    members: dict = field(default_factory=dict)     # what seed_members wrote
 
 
 def seed_demo_db() -> DemoSeeded:
@@ -809,10 +813,29 @@ def seed_demo_db() -> DemoSeeded:
             risk = app.interview.assessment.risk_class \
                 if app.interview and app.interview.assessment else "-"
             apps.append((app.id, app.member.member_no, risk, app.status))
+        written = seed_member_records(db, members, users, now, clock)
     missing = set(APPLICATION_STATUSES) - {status for *_, status in apps}
     if missing:   # the point of the demo is that every screen has something on it
         raise RuntimeError(f"demo misses application statuses: {', '.join(sorted(missing))}")
-    return DemoSeeded(out.passwords, apps)
+    return DemoSeeded(out.passwords, apps, written)
+
+
+def member_plan(today: date, now, log=print) -> seed_members.Plan:
+    """The generated members, and the named people's ledgers, from the fixed seed."""
+    rng = random.Random(seed_members.SEED)
+    respondents, source = seed_members.choose_respondents(seed_members.MEMBERS, rng, log)
+    people = {key: {**p, "joined_on": months_ago(p["joined"])} for key, p in DEMO_PEOPLE.items()}
+    return seed_members.generate(respondents, source, people, DEMO_APPLICATIONS, today, now, rng)
+
+
+def seed_member_records(db, members: dict[str, Member], users: dict[str, User], now, clock: Clock) -> dict:
+    clock.now = now - timedelta(days=90)
+    plan = member_plan(nairobi_today(), now)
+    # Peter's approved application is the demo's loan with an application behind it.
+    peter = db.scalar(select(LoanApplication).where(LoanApplication.member_id == members["peter"].id,
+                                                    LoanApplication.status == "approved"))
+    return seed_members.write_plan(db, plan, members, {k: users[k] for k in ("officer1", "officer2")}, peter,
+                                   users["officer1"], now, DEMO_DB, ensure_member)
 
 
 def is_demo_db(con: sqlite3.Connection) -> bool:
@@ -868,6 +891,9 @@ def build_demo_db(path: Path, replace: bool) -> None:
         print(f"  {name:14} {pw}")
     for app_id, member_no, risk, status in res.applications:
         print(f"  application {app_id:>2} {member_no}  {risk:6}  {status}")
+    m = res.members
+    print(f"  {m['members']} members with profiles, {m['entries']:,} ledger entries, {m['loans']} loans "
+          f"({m['source']} profiles)")
 
 
 def report(kind: str, res: Seeded) -> None:

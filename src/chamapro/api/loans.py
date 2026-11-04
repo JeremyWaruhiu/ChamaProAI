@@ -23,11 +23,12 @@ from sqlalchemy.orm import Session, joinedload
 
 from chamapro import config
 
-from . import audit, comparator, member_text
+from . import audit, comparator, ledger, member_text
 from . import schemas as s
 from .auth import require_member, require_officer
-from .db import (Assessment, AuditLog, Decision, Guarantor, Interview, InterviewBooking,
-                 LoanApplication, Member, PracticeInterview, Response, User, get_db, utcnow)
+from .db import (Assessment, AuditLog, Decision, Guarantor, GuarantorPledge, Interview,
+                 InterviewBooking, LoanAccount, LoanApplication, Member, MemberAccount, MemberProfile,
+                 MemberProfileHistory, PracticeInterview, Response, User, get_db, utcnow)
 from .questions import CURRENT_SET, QUESTION_SETS
 
 ERRORS = {code: {"model": s.Error} for code in (401, 403, 404, 409, 422)}
@@ -162,9 +163,9 @@ def link_interview(db: Session, app: LoanApplication, interview_id: int, user: U
 
 # --- Views -------------------------------------------------------------------------
 
-def comparator_of(app: LoanApplication) -> s.Comparator | None:
+def comparator_of(app: LoanApplication, savings_kes: int) -> s.Comparator | None:
     a = app.interview and app.interview.assessment
-    return comparator.evaluate(app, a.risk_class) if a else None
+    return comparator.evaluate(app, a.risk_class, savings_kes) if a else None
 
 
 def timeline(db: Session, app: LoanApplication) -> list[s.TimelineEntry]:
@@ -321,13 +322,15 @@ def guarantor_out(g: Guarantor) -> s.GuarantorOut:
 def detail(db: Session, app: LoanApplication) -> s.ApplicationDetail:
     iv = app.interview
     assessment = None
+    savings = ledger.rule_savings(db, [app])[app.id]
     if iv and iv.assessment:
         assessment = s.AssessmentOut.model_validate(iv.assessment)
-        assessment.comparator = comparator_of(app)
+        assessment.comparator = comparator_of(app, savings.kes)
     booking = booking_of(db, app.id)
     return s.ApplicationDetail(
-        **summary(app).model_dump(), purpose=app.purpose, sacco_savings_kes=app.sacco_savings_kes,
-        savings_self_declared=app.savings_self_declared,
+        **summary(app).model_dump(), purpose=app.purpose, sacco_savings_kes=savings.kes,
+        savings_self_declared=app.savings_self_declared and not savings.from_ledger,
+        savings_from_ledger=savings.from_ledger,
         booking=booking_out(booking) if booking else None,
         practice_interviews=practice_briefs_for_staff(db, app),
         created_by=app.creator.username, member=s.MemberOut.model_validate(app.member),
@@ -452,7 +455,11 @@ def verify_member(member_id: int, body: s.MemberVerify, db: Session = Depends(ge
     """Verify a member's savings, optionally correcting the figure or the
     membership start date. Open applications move to the verified figure."""
     m = get_or_404(db, Member, member_id, "member")
-    if body.savings_kes is None and m.savings_kes is None:
+    on_ledger = ledger.deposits_balance(db, m.id) is not None
+    if on_ledger and body.savings_kes is not None:
+        raise HTTPException(409, "savings_kes: this member's savings come from the ledger; "
+                                 "a figure cannot be entered over it")
+    if not on_ledger and body.savings_kes is None and m.savings_kes is None:
         raise HTTPException(422, "savings_kes: this member has entered no savings; enter the figure")
     edited = []
     if body.savings_kes is not None and body.savings_kes != m.savings_kes:
@@ -470,12 +477,23 @@ def verify_member(member_id: int, body: s.MemberVerify, db: Session = Depends(ge
     return s.MemberOut.model_validate(m)
 
 
+def has_records(db: Session, m: Member) -> bool:
+    """Anything that holds a member's id and cannot, or should not, go with them."""
+    sources = [(MemberProfileHistory.member_id, m.id), (MemberProfile.member_id, m.id),
+               (MemberAccount.member_id, m.id), (LoanAccount.member_id, m.id),
+               (GuarantorPledge.borrower_member_id, m.id), (GuarantorPledge.guarantor_member_id, m.id),
+               (Guarantor.member_id, m.id)]
+    return any(db.scalar(select(col).where(col == value).limit(1)) is not None for col, value in sources)
+
+
 @router.delete("/members/{member_id}", status_code=204)
 def delete_member(member_id: int, db: Session = Depends(get_db),
                   user: User = Depends(require_officer)):
     m = get_or_404(db, Member, member_id, "member")
     if m.applications:
         raise HTTPException(409, f"member {member_id} has loan applications; they are kept")
+    if has_records(db, m):
+        raise HTTPException(409, f"member {member_id} has a profile, ledger, loans or pledges; they are kept")
     db.delete(m)
     audit.record(db, user, "member.delete", "member", member_id)
     db.commit()
@@ -490,10 +508,12 @@ def create_application(body: s.ApplicationCreate, db: Session = Depends(get_db),
     member = db.get(Member, body.member_id)
     if member is None:
         raise HTTPException(422, f"member_id: member {body.member_id} not found")
+    # A member on the ledger: what the SACCO's records say, not what was typed.
+    on_ledger = ledger.deposits_balance(db, member.id)
     app = LoanApplication(member_id=member.id, amount_requested_kes=body.amount_requested_kes,
                           purpose=body.purpose, term_months=body.term_months,
-                          sacco_savings_kes=body.sacco_savings_kes, status="draft",
-                          created_by=user.id)
+                          sacco_savings_kes=body.sacco_savings_kes if on_ledger is None else max(on_ledger, 0),
+                          status="draft", created_by=user.id)
     db.add(app)
     db.flush()
     audit.record(db, user, "application.create", "loan_application", app.id, status="draft",
@@ -649,10 +669,13 @@ def submit_guarantors(application_id: int, body: s.GuarantorSubmit,
     if any(g.amount_guaranteed_kes > cap for g in body.guarantors):
         raise HTTPException(422, f"guarantors: amount_guaranteed_kes cannot exceed the loan "
                                  f"(KSh {cap:,})")
+    members = dict(db.execute(select(func.upper(Member.member_no), Member.id)
+                              .where(func.upper(Member.member_no).in_(numbers))).all())
     for g in body.guarantors:
         row = Guarantor(application=app, full_name=g.full_name, member_no=g.member_no,
                         phone=g.phone, relationship_=g.relationship,
-                        amount_guaranteed_kes=g.amount_guaranteed_kes, status="pending")
+                        amount_guaranteed_kes=g.amount_guaranteed_kes, status="pending",
+                        member_id=members.get(g.member_no.upper()))
         db.add(row)
         db.flush()
         audit.record(db, user, "guarantor.submit", "guarantor", row.id, application_id=app.id)

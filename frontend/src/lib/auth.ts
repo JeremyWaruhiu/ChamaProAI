@@ -33,7 +33,7 @@ const EVERY_ROLE = new Set<Screen>(['profile'])
 const STAFF = new Set<Screen>(['home', 'start', 'interviews', 'record', 'review', 'assessment',
   'applications', 'application', 'members', 'member', 'bookings', 'events'])
 const ADMIN = new Set<Screen>(['admin', 'users', 'audit', 'results', 'pilot'])
-const MEMBER = new Set<Screen>(['my', 'myApplication', 'apply', 'practice', 'practiceReview', 'practiceResult'])
+const MEMBER = new Set<Screen>(['my', 'myApplication', 'apply', 'mySacco', 'registration', 'practice', 'practiceReview', 'practiceResult'])
 
 /** Where each role starts. */
 export function homeFor(role: Role): string {

@@ -17,6 +17,10 @@ MEMBER_ROUTES = {("GET", "/api/me/applications"), ("GET", "/api/me/applications/
                  # a member's own record, loan application and practice interviews
                  ("GET", "/api/me/home"), ("GET", "/api/me/member"), ("PATCH", "/api/me/member"),
                  ("POST", "/api/me/consent"), ("GET", "/api/me/apply-options"),
+                 ("GET", "/api/me/sacco"), ("POST", "/api/me/profile"), ("PATCH", "/api/me/profile"),
+                 ("POST", "/api/me/profile/confirm"),
+                 ("GET", "/api/me/applications/{application_id}/guarantor-offers"),
+                 ("POST", "/api/me/applications/{application_id}/guarantors/pledged"),
                  ("POST", "/api/me/applications"),
                  ("POST", "/api/me/applications/{application_id}/booking"),
                  ("POST", "/api/me/applications/{application_id}/practice"),

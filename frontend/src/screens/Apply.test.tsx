@@ -110,3 +110,21 @@ describe('sending', () => {
     expect(posted).toEqual([])
   })
 })
+
+describe('from the profile and the ledger', () => {
+  it('shows the deposits balance from the ledger and asks for no figure', () => {
+    render(<ApplyForm member={{ ...KNOWN, savings_kes: 45000, savings_status: 'ledger', from_ledger: true }} options={OPTIONS} />)
+    expect(field('Deposits balance').value).toBe('KSh 45,000')
+    expect(field('Deposits balance').readOnly).toBe(true)
+    expect(screen.getByText('From the SACCO’s records')).toBeTruthy()
+    expect(screen.queryByLabelText(/How much have you saved/)).toBeNull()
+  })
+
+  it('fills in what the profile knows of an unfinished applicant form', () => {
+    render(<ApplyForm member={{ ...KNOWN, applicant_complete: false, age: 41, sex: 'female', education: null, marital_status: null }} options={OPTIONS} />)
+    expect(field('Age').value).toBe('41')
+    expect(field('Age').readOnly).toBe(false)
+    expect((screen.getByLabelText('Sex') as HTMLSelectElement).value).toBe('female')
+    expect((screen.getByLabelText('Education') as HTMLSelectElement).value).toBe('')
+  })
+})

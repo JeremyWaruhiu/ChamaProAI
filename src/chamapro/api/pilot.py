@@ -22,7 +22,7 @@ from sqlalchemy.orm import Session, joinedload
 
 from chamapro import config
 
-from . import audit, auth, bookings, comparator, events, loans, member_text
+from . import audit, auth, bookings, comparator, events, ledger, loans, member_text, profiles
 from . import pipeline as pl
 from . import schemas as s
 from .auth import require_admin, require_member
@@ -43,7 +43,7 @@ CONSENT_TEXT = [
     "The recordings are used to evaluate this system.",
 ]
 SAVINGS_LABEL = {"none": "Not entered yet", "self_declared": "Self-declared, pending verification",
-                 "verified": "Verified by the SACCO"}
+                 "verified": "Verified by the SACCO", "ledger": "From the SACCO's records"}
 
 
 def signup_info() -> s.SignupInfo:
@@ -88,14 +88,60 @@ def free_member_no(db: Session, member_id: int) -> str:
     return no
 
 
-def create_volunteer(db: Session, body: s.Signup) -> tuple[User, Member]:
-    """The member record and its login. They sign in with their phone number or
-    member number. Their email stays on the member record: users.email signs in
-    with Google, and an address nobody has verified must not be able to claim that."""
+def free_username(db: Session, member_no: str) -> str:
+    base = name = member_no
+    n = 1
+    while db.scalar(select(User.id).where(User.username == name)):
+        n += 1
+        name = f"{base}-{n}"
+    return name
+
+
+CLAIM_REFUSED = ("we could not match that member number and phone number to a member without a "
+                 "login; check them, leave the member number blank to join as someone new, or ask the SACCO")
+
+
+def claim_member(db: Session, body: s.Signup) -> tuple[User, Member]:
+    """Link a new login to the member whose number and phone both match. Wrong
+    details and a member who already has a login get the same answer, so this
+    cannot be used to find out who is a member. Their record stays as the SACCO
+    holds it: the name typed here does not replace it, and they are not counted
+    as a pilot volunteer."""
+    m = db.scalar(select(Member).where(func.upper(Member.member_no) == body.member_no.upper(),
+                                       Member.phone == body.phone))
+    if m is None or m.user_id is not None:
+        raise HTTPException(409, CLAIM_REFUSED)
+    user = User(username=free_username(db, m.member_no), password_hash=auth.hash_password(body.password),
+                role="member", display_name=m.full_name[:120])
+    try:
+        db.add(user)
+        db.flush()
+        linked = db.execute(update(Member).where(Member.id == m.id, Member.user_id.is_(None))
+                            .values(user_id=user.id, email=m.email or body.email,
+                                    consent_version=body.consent_version, consent_at=utcnow()))
+        if linked.rowcount != 1:        # someone else claimed it a moment ago
+            raise IntegrityError("member already claimed", None, None)
+        audit.record(db, user, "member.claim", "member", m.id, user_id=user.id,
+                     consent_version=body.consent_version)
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(409, CLAIM_REFUSED)
+    db.refresh(m)
+    return user, m
+
+
+def create_volunteer(db: Session, body: s.Signup) -> tuple[User, Member, bool]:
+    """(login, member, claimed): the existing member they claimed, or a new record.
+    They sign in with their phone number or member number. Their email stays on the
+    member record: users.email signs in with Google, and an address nobody has
+    verified must not be able to claim that."""
     if not hmac.compare_digest(body.invite_code.strip().encode(), config.PILOT_INVITE_CODE.encode()):
         raise HTTPException(403, "that invite code is not valid")
     if body.consent_version != CONSENT_VERSION:
         raise HTTPException(422, "consent_version: the consent text has changed; please read it again")
+    if body.member_no is not None:
+        return (*claim_member(db, body), True)
     if phone_taken(db, body.phone):
         raise HTTPException(409, "that phone number is already registered")
     placeholder = "pending-" + secrets.token_hex(8)
@@ -114,7 +160,7 @@ def create_volunteer(db: Session, body: s.Signup) -> tuple[User, Member]:
     except IntegrityError:      # lost a race for the same number
         db.rollback()
         raise HTTPException(409, "that phone number is already registered")
-    return user, m
+    return user, m, False
 
 
 # --- A member's own record ------------------------------------------------------------
@@ -136,30 +182,23 @@ def applicant_complete(m: Member) -> bool:
     return None not in (m.birth_year, m.sex, m.education, m.marital_status)
 
 
-def age_of(m: Member) -> int | None:
-    return None if m.birth_year is None else nairobi_today().year - m.birth_year
-
-
-def save_applicant_form(m: Member, form: s.ApplicantForm) -> None:
-    m.birth_year, m.sex = nairobi_today().year - form.age, form.sex
-    m.education, m.marital_status = form.education, form.marital_status
-
-
-def my_member_view(m: Member) -> s.MyMember:
-    status = savings_status(m)
+def my_member_view(db: Session, m: Member) -> s.MyMember:
+    balance = ledger.deposits_balance(db, m.id)
+    savings = m.savings_kes if balance is None else max(balance, 0)
+    status = savings_status(m) if balance is None else "ledger"
     return s.MyMember(
         member_no=m.member_no, full_name=m.full_name, phone=m.phone, email=m.email,
-        savings_kes=m.savings_kes, savings_status=status, savings_label=SAVINGS_LABEL[status],
-        savings_limit_kes=None if m.savings_kes is None
-        else m.savings_kes * comparator.SAVINGS_MULTIPLIER,
+        savings_kes=savings, savings_status=status, savings_label=SAVINGS_LABEL[status],
+        savings_limit_kes=None if savings is None else savings * comparator.SAVINGS_MULTIPLIER,
         joined_on=m.joined_on, tenure_months=comparator.months_between(m.joined_on, nairobi_today()),
-        age=age_of(m), sex=m.sex, education=m.education, marital_status=m.marital_status,
-        applicant_complete=applicant_complete(m), consent_current=m.consent_version == CONSENT_VERSION)
+        age=profiles.age_of(m), sex=m.sex, education=m.education, marital_status=m.marital_status,
+        applicant_complete=applicant_complete(m), consent_current=m.consent_version == CONSENT_VERSION,
+        from_ledger=balance is not None)
 
 
 @router.get("/me/member", response_model=s.MyMember)
 def get_my_member(db: Session = Depends(get_db), user: User = Depends(require_member)):
-    return my_member_view(required_member(db, user))
+    return my_member_view(db, required_member(db, user))
 
 
 @router.patch("/me/member", response_model=s.MyMember)
@@ -180,6 +219,8 @@ def update_my_member(body: s.MyMemberUpdate, db: Session = Depends(get_db),
     if "email" in given and body.email != m.email:
         m.email = body.email
         changed.append("email")
+    if body.savings_kes is not None and ledger.deposits_balance(db, m.id) is not None:
+        raise HTTPException(409, "your savings come from the SACCO's records and cannot be typed in")
     if body.savings_kes is not None and body.savings_kes != m.savings_kes:
         if m.savings_verified_at is not None:
             raise HTTPException(409, "your savings have been verified; ask the SACCO to change them")
@@ -187,7 +228,7 @@ def update_my_member(body: s.MyMemberUpdate, db: Session = Depends(get_db),
         loans.refresh_open_applications(db, m)
         changed.append("savings_kes")
     if body.applicant is not None:
-        save_applicant_form(m, body.applicant)
+        profiles.save_applicant_form(db, m, body.applicant, user)
         changed.append("applicant_form")
     if changed:
         audit.record(db, user, "member.self_update", "member", m.id, fields=changed)
@@ -196,7 +237,7 @@ def update_my_member(body: s.MyMemberUpdate, db: Session = Depends(get_db),
     except IntegrityError:
         db.rollback()
         raise HTTPException(409, "that phone number is already registered")
-    return my_member_view(m)
+    return my_member_view(db, m)
 
 
 @router.post("/me/consent", response_model=s.MyMember)
@@ -209,7 +250,7 @@ def give_consent(body: s.ConsentIn, db: Session = Depends(get_db),
     m.consent_version, m.consent_at = body.consent_version, utcnow()
     audit.record(db, user, "member.consent", "member", m.id, consent_version=m.consent_version)
     db.commit()
-    return my_member_view(m)
+    return my_member_view(db, m)
 
 
 @router.get("/me/home", response_model=s.MemberHome)
@@ -226,11 +267,13 @@ def member_home(db: Session = Depends(get_db), user: User = Depends(require_memb
 @router.post("/me/applications", status_code=201, response_model=s.MyApplication)
 def apply_for_loan(body: s.MyApplicationCreate, db: Session = Depends(get_db),
                    user: User = Depends(require_member)):
-    """Everything already known comes from the member's record, never the request.
+    """Everything already known comes from the member's record, never the request:
+    their deposits balance if they are on the ledger, what they declared if not.
     Exceeding the savings limit or the tenure rule is the form's warning, not a
     refusal: the officer decides."""
     m = required_member(db, user)
-    if m.savings_kes is None:
+    balance = ledger.deposits_balance(db, m.id)
+    if balance is None and m.savings_kes is None:
         if body.declared_savings_kes is None:
             raise HTTPException(422, "declared_savings_kes: enter your savings")
         m.savings_kes = body.declared_savings_kes
@@ -242,14 +285,14 @@ def apply_for_loan(body: s.MyApplicationCreate, db: Session = Depends(get_db),
     elif body.applicant is None:
         raise HTTPException(422, "applicant: the applicant form is required")
     else:
-        save_applicant_form(m, body.applicant)
+        profiles.save_applicant_form(db, m, body.applicant, user)
     bookings.refuse_second_booking(db, m.id)
     start = bookings.checked_slot(body.date, body.time)
 
     app = LoanApplication(member_id=m.id, amount_requested_kes=body.amount_requested_kes,
                           purpose=body.purpose_text, term_months=body.term_months,
-                          sacco_savings_kes=m.savings_kes,
-                          savings_self_declared=m.savings_verified_at is None,
+                          sacco_savings_kes=m.savings_kes if balance is None else max(balance, 0),
+                          savings_self_declared=balance is None and m.savings_verified_at is None,
                           status="draft", created_by=user.id)
     db.add(app)
     db.flush()
@@ -347,7 +390,7 @@ def start_practice(db: Session, app: LoanApplication, language: str, user: User)
     if existing is not None:
         return existing
     refuse_if_capped(db, m.id)
-    iv = Interview(applicant=Applicant(name=m.full_name, age=age_of(m), sex=m.sex,
+    iv = Interview(applicant=Applicant(name=m.full_name, age=profiles.age_of(m), sex=m.sex,
                                        education=m.education, marital_status=m.marital_status),
                    question_set=CURRENT_SET, language=language, mode="practice")
     db.add(iv)

@@ -43,7 +43,8 @@ export function ApplicationDetail({ id }: { id: number }) {
               [P.requested, `${formatKes(app.amount_requested_kes)} · ${t.common.months(app.term_months)}`],
               [P.purpose, app.purpose],
               [P.savings, <span key="s" className={styles.badges}>{formatKes(app.sacco_savings_kes)}
-                {app.savings_self_declared && <Badge tone="wait">{t.savingsStatus.self_declared}</Badge>}</span>],
+                {app.savings_self_declared && <Badge tone="wait">{t.savingsStatus.self_declared}</Badge>}
+                {app.savings_from_ledger && <Badge tone="low" icon="check">{t.savingsStatus.ledger}</Badge>}</span>],
               [P.createdBy, `${app.created_by}, ${formatDateTime(app.created_at)}`],
             ]} />
           </Card>

@@ -344,9 +344,13 @@ export function MemberLayout({ user, screen, children }: { user: Me; screen: Scr
         <UserMenu user={user} onDark />
       </header>
       <nav className={styles.memberNav} aria-label={t.nav.main}>
-        <a href={paths.my()} className={cx(styles.memberTab, !['apply', 'profile'].includes(screen) && styles.memberTabActive)}
+        <a href={paths.my()} className={cx(styles.memberTab, !['apply', 'profile', 'mySacco', 'registration'].includes(screen) && styles.memberTabActive)}
            aria-current={screen === 'my' ? 'page' : undefined}>
           <Icon name="file" size={18} /> {t.nav.myApplications}
+        </a>
+        <a href={paths.mySacco()} className={cx(styles.memberTab, ['mySacco', 'registration'].includes(screen) && styles.memberTabActive)}
+           aria-current={screen === 'mySacco' ? 'page' : undefined}>
+          <Icon name="wallet" size={18} /> {t.nav.mySacco}
         </a>
         <a href={paths.apply()} className={cx(styles.memberTab, screen === 'apply' && styles.memberTabActive)}
            aria-current={screen === 'apply' ? 'page' : undefined}>
