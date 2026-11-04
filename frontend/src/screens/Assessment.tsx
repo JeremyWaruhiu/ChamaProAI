@@ -251,7 +251,7 @@ function Completeness({ a }: { a: AssessmentT }) {
 }
 
 /** SHAP bars: each fact's push towards or away from the predicted band, scaled to the largest. */
-function Contributions({ a }: { a: AssessmentT }) {
+export function Contributions({ a }: { a: Pick<AssessmentT, 'contributions' | 'risk_class'> }) {
   if (typeof a.contributions === 'string') {
     return (
       <Card title={A.contributions}>

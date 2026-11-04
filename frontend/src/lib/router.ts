@@ -16,6 +16,8 @@ import { useEffect, useState } from 'react'
 //   #/applications/:id                 one application: timeline, guarantors
 //   #/members                          members
 //   #/members/:id                      one member and their applications
+//   #/decisions                        automatic decisions
+//   #/decisions/:id                    one of them: its trace and SHAP, and reversing it
 //   #/bookings                         upcoming interviews and the week's calendar
 //   #/events                           SACCO events
 // Admins:
@@ -49,6 +51,8 @@ export type Route =
   | { screen: 'application'; id: number }
   | { screen: 'members' }
   | { screen: 'member'; id: number }
+  | { screen: 'decisions' }
+  | { screen: 'decision'; id: number }
   | { screen: 'bookings' }
   | { screen: 'events' }
   | { screen: 'admin' }
@@ -103,6 +107,10 @@ export function parse(hash: string): Route {
     if (n === 1) return { screen: 'applications', status: params.get('status') }
     if (id && n === 2) return { screen: 'application', id }
   }
+  if (a === 'decisions') {
+    if (n === 1) return { screen: 'decisions' }
+    if (id && n === 2) return { screen: 'decision', id }
+  }
   if (a === 'members') {
     if (n === 1) return { screen: 'members' }
     if (id && n === 2) return { screen: 'member', id }
@@ -144,6 +152,8 @@ export const paths = {
   assessment: (id: number) => `#/interviews/${id}/assessment`,
   applications: (status?: string | null) => `#/applications${status ? `?status=${encodeURIComponent(status)}` : ''}`,
   application: (id: number) => `#/applications/${id}`,
+  decisions: () => '#/decisions',
+  decision: (id: number) => `#/decisions/${id}`,
   members: () => '#/members',
   member: (id: number) => `#/members/${id}`,
   bookings: () => '#/bookings',

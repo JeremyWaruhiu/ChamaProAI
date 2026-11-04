@@ -586,6 +586,12 @@ History and ledger are append-only by trigger. `guarantors` gains `member_id`,
 on SQLite; that table has no trigger). No existing value changes and no ledger entry
 is invented: until a member has entries, the SACCO rule reads their application's
 own figure.
+`0006` adds automatic decisions: the policy trace on an assessment, the version on a
+decision, `self_service_runs`, `idempotency_keys`, the `system` user (inactive, no
+usable password) and two entry types, `loan_reversal` and `deposit_refund`. It rebuilds
+`loan_applications`, `loan_accounts` and `account_entries` on SQLite to change their
+CHECKs, with foreign keys off and checked before it commits; the ledger's triggers are
+put back. No existing value changes. It stops if a user called `system` already exists.
 
     alembic upgrade head            # the database in DATABASE_URL, else data/chamapro.db
     alembic current
@@ -597,6 +603,36 @@ transaction, so a failure leaves it as it was. PostgreSQL is never migrated
 implicitly: the API refuses to start until `alembic upgrade head` has been run.
 Note that `uvicorn --reload` restarts on every change under `src/`, so pulling
 a new migration upgrades the database at the next reload.
+
+### Automatic decisions and the ledger
+
+`docs/design_changes.md` has the policy table and its reasons. The language model
+decides nothing: `decisions.evaluate` scores the person with the classifier and the
+request with the SACCO rule and an affordability check, and a fixed, versioned policy
+picks the outcome. Every decision keeps a trace of each check with its values.
+
+Members, on their own record only, rate limited:
+
+    POST /api/self-service/evaluate                   what would happen, and what to ask; writes nothing
+    POST /api/self-service/commit                     act on it; needs Idempotency-Key
+    POST /api/self-service/applications/{id}/accept   take a reduced offer
+    POST /api/self-service/applications/{id}/decline  turn it down
+
+Officers and admins, audited, each write with an `Idempotency-Key` header:
+
+    POST /api/members/{id}/deposits                   {account, amount_kes, reference?}
+    POST /api/members/{id}/withdrawals                from share_capital or transactional, never deposits
+    POST /api/members/{id}/refund-deposits            a departing member; refused while they owe or guarantee
+    POST /api/members/{id}/pledges                    {guarantor_member_no}
+    POST /api/pledges/{id}/withdraw
+    POST /api/applications/{id}/payout                an approved application, to the transactional account
+    POST /api/loans/{id}/repayments                   {amount_kes}, from the transactional account
+    POST /api/loans/{id}/reverse                      {reason}; compensating entries, the loan marked reversed
+    GET  /api/automatic-decisions[?outcome=]          the "Automatic decisions" page
+    GET  /api/automatic-decisions/{id}                its trace, SHAP, provenance and overrides
+
+The thresholds are in `.env.example`. Changing one from its default adds a hash of the
+values to the policy version, so one version always means one set of thresholds.
 
 ### Users
 
@@ -705,7 +741,8 @@ frontend.
 
    `0005` needs nothing checked beforehand, and writes no ledger entries or
    profiles: members there stay on their application's own savings figure until
-   the SACCO's records are posted.
+   the SACCO's records are posted. `0006` needs one check, that no user is called
+   `system`: `SELECT id FROM users WHERE username = 'system';`
 
    Every table gets row-level security with no policies, so Supabase's Data
    API (the anon and authenticated keys) can read nothing; the backend
@@ -756,6 +793,8 @@ so never point it at production).
   `PUBLIC_HOLIDAYS`. A year with no listed holidays cannot be booked at all.
 - The sign-up limit is per process and in memory, like the sign-in limit: it resets
   on restart and is per worker.
+- The self-service rate limits (`SELF_SERVICE_EVALUATIONS_PER_HOUR`,
+  `SELF_SERVICE_COMMITS_PER_HOUR`) are per process and in memory too.
 - v2 questions 3-5 name exactly the FinAccess options behind their flags
   (B3A__1-11, F1__1-5, B1L__1-6). The codebook does not define F1__4
   "Digital non-financial assets"; the question gives cryptocurrency as the
@@ -933,8 +972,8 @@ A free Cloudflare quick tunnel gives the container a public https address
     python scripts/seed_demo.py --demo-db data/demo.db
 
 It builds a separate database with an admin (`s.achieng`), two officers
-(`j.mwangi`, `a.chebet`) and nine fictional members (phones 0700 000 xxx,
-member numbers M-1001 to M-1009; nothing on screen marks them as invented).
+(`j.mwangi`, `a.chebet`) and thirteen fictional members (phones 0700 000 xxx,
+member numbers M-1001 to M-1013; nothing on screen marks them as invented).
 Twelve live loan applications cover every status and decision
 outcome: approved, approved with guarantors (verified, pending and one
 rejected), reduced amount, referred, declined, awaiting a decision,
@@ -942,12 +981,16 @@ mid-interview and draft. Each assessed interview is scored by the real
 classifier on fixed features (no Gemini, no network), and the records are
 spread over the last eight weeks, so every dashboard, KPI and chart has
 realistic figures. It also holds about 150 more members (M-2001 upwards) with
-profiles, deposit histories, past loans and standing guarantors, generated from
+profiles, deposit histories, past loans and standing guarantors, composed from
 Central Kenya FinAccess respondents' features with a fixed seed, or by a synthetic
 generator where those files are absent; `scripts/seed_members.py` documents the
-rules. **Those profiles are row-level data derived from licensed FinAccess
-microdata under invented names: check the licence before putting this database
-on a public URL.** The logins' passwords are printed once and written
+rules. No member copies a respondent's row: each field group comes from a different
+respondent of the same income and household stratum. **The values are still derived
+from licensed FinAccess microdata: check the licence before putting this database on
+a public URL.** Four of the named members belong to automatic decisions: Wanjiru
+Kamau (`w.kamau`) and Njeri Mwangi (`n.mwangi`) are untouched, to walk through a
+conversation, and `python scripts/demo_self_service.py` prints their evaluations on a
+throwaway database; the officers' page opens on decisions already made for others. The logins' passwords are printed once and written
 nowhere; note them. It never touches `data/chamapro.db`, and refuses any
 existing file that is not an earlier demo database (one whose logins carry a
 `demo-db:` seed tag, or, built before the tag existed, a `demo.admin` login).

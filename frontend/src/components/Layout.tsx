@@ -22,6 +22,7 @@ const WORK: NavItem[] = [
   { key: 'interviews', label: t.nav.interviews, href: paths.interviews(), icon: 'mic', screens: ['interviews', 'record', 'review', 'assessment'] },
   { key: 'bookings', label: t.nav.bookings, href: paths.bookings(), icon: 'clock', screens: ['bookings'] },
   { key: 'applications', label: t.nav.applications, href: paths.applications(), icon: 'file', screens: ['applications', 'application'] },
+  { key: 'decisions', label: t.nav.decisions, href: paths.decisions(), icon: 'sparkle', screens: ['decisions', 'decision'] },
   { key: 'members', label: t.nav.members, href: paths.members(), icon: 'users', screens: ['members', 'member'] },
   { key: 'events', label: t.nav.events, href: paths.events(), icon: 'calendar', screens: ['events'] },
 ]

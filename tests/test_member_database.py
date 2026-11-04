@@ -1243,10 +1243,10 @@ def dump(path):
 def test_two_demo_builds_hold_the_same_members_and_the_rule_is_unchanged(tmp_path):
     out = build_demo(tmp_path / "a.db", tmp_path)
     build_demo(tmp_path / "b.db", tmp_path)
-    assert "159 members with profiles" in out
+    assert "163 members with profiles" in out
     a = dump(tmp_path / "a.db")
     assert a == dump(tmp_path / "b.db")
-    assert len(a["members"]) == 159 and len(a["pledges"]) >= 2 * 150
+    assert len(a["members"]) == 163 and len(a["pledges"]) >= 2 * 150
 
     engine = create_engine(f"sqlite:///{tmp_path / 'a.db'}")
     with Session(engine) as db:

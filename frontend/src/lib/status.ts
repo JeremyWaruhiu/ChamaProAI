@@ -17,6 +17,8 @@ export const STATUS_TONE: Record<ApplicationStatus, Tone> = {
   guarantor_submitted: 'attention',
   approved: 'low',
   declined: 'high',
+  offered: 'attention',
+  reversed: 'neutral',
 }
 
 export const BOOKING_TONE: Record<BookingStatus, Tone> = { requested: 'wait', confirmed: 'low', started: 'info', cancelled: 'neutral' }
@@ -27,7 +29,7 @@ export const statusLabel = (s: ApplicationStatus) => t.appStatus[s]
 export const outcomeLabel = (o: Outcome) => t.outcome[o]
 
 export const OUTCOME_TONE: Record<Outcome, Tone> = {
-  approve: 'low', approve_with_guarantor: 'low', approve_reduced: 'low', refer: 'info', decline: 'high',
+  approve: 'low', approve_with_guarantor: 'low', approve_reduced: 'low', refer: 'info', decline: 'high', not_now: 'wait',
 }
 
 // --- Interviews --------------------------------------------------------------------
@@ -74,6 +76,8 @@ const AT: Record<ApplicationStatus, [StageKey, 'current' | 'done']> = {
   guarantor_submitted: ['guarantor', 'current'],
   approved: ['approved', 'done'],
   declined: ['decision', 'done'],
+  offered: ['decision', 'current'],
+  reversed: ['decision', 'done'],
 }
 
 /**

@@ -13,7 +13,7 @@ export const DECISION_LABEL: Record<DecisionValue, string> = t.risk.decision
 /** The coarse decision each outcome is a kind of. */
 export const COARSE: Record<Outcome, DecisionValue> = {
   approve: 'approve', approve_with_guarantor: 'approve', approve_reduced: 'approve',
-  refer: 'refer', decline: 'decline',
+  refer: 'refer', decline: 'decline', not_now: 'decline',
 }
 
 /** The officer decision each risk class recommends (comparator.RECOMMENDED_DECISION). */

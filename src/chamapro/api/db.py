@@ -1,7 +1,7 @@
 """Storage: applicants, interviews, responses, assessments, users, members,
 member profiles, savings accounts and their ledger, issued loans, standing
 guarantors, loan applications, guarantors, interview bookings, SACCO events, the
-volunteer pilot's records and the audit log.
+volunteer pilot's records, automatic decisions, idempotency keys and the audit log.
 
 SQLite by default; PostgreSQL (Supabase) by setting DATABASE_URL. The schema
 is owned by the Alembic migrations in chamapro/migrations, not by this file:
@@ -105,7 +105,8 @@ class Interview(Base):
     # Rows from before these existed are v1 / kik / live (see ADDED_COLUMNS).
     question_set: Mapped[str] = mapped_column(String(8), default="v2")    # v1 | v2
     language: Mapped[str] = mapped_column(String(8), default="kik")       # kik | en
-    mode: Mapped[str] = mapped_column(String(10), default="live")         # live | practice
+    # self_service: no answers; the record of an automatic decision (SelfServiceRun).
+    mode: Mapped[str] = mapped_column(String(12), default="live")         # live | practice | self_service
     created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
 
     applicant: Mapped[Applicant] = relationship()
@@ -166,6 +167,11 @@ class Assessment(Base):
     # Who ran it. Null on assessments made before sign-in existed.
     assessed_by: Mapped[str | None] = mapped_column(String(64))
     created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
+    # Automatic decisions only: where each value came from, what the member said in
+    # the conversation, and every check the policy ran with its values.
+    provenance: Mapped[dict | None] = mapped_column(JSON)
+    overrides: Mapped[dict | None] = mapped_column(JSON)
+    policy_trace: Mapped[dict | None] = mapped_column(JSON)
 
     interview: Mapped[Interview] = relationship(back_populates="assessment")
 
@@ -186,12 +192,13 @@ class Decision(Base):
     # Who recorded it. Null on decisions made before sign-in existed.
     decided_by: Mapped[str | None] = mapped_column(String(64))
     created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
-    # approve | approve_with_guarantor | approve_reduced | refer | decline
+    # approve | approve_with_guarantor | approve_reduced | refer | decline | not_now
     outcome: Mapped[str | None] = mapped_column(String(30))
     approved_amount_kes: Mapped[int | None] = mapped_column(Integer)
     guarantors_required: Mapped[int | None] = mapped_column(Integer)
     officer_notes: Mapped[str | None] = mapped_column(Text)    # never shown to members
     member_message: Mapped[str | None] = mapped_column(Text)   # plain language, shown to the member
+    policy_version: Mapped[str | None] = mapped_column(String(32))  # automatic decisions only
 
     interview: Mapped[Interview] = relationship(back_populates="decision")
 
@@ -202,6 +209,12 @@ class Decision(Base):
     @property
     def effective_notes(self) -> str | None:
         return self.officer_notes or self.note
+
+
+# Who an automatic decision is by. Migration 0006 makes this one row: inactive, no
+# usable password, a role no endpoint admits, and hidden from the admin's user list.
+SYSTEM_USERNAME = "system"
+SYSTEM_ROLE = "system"
 
 
 class User(Base):
@@ -281,7 +294,9 @@ class Member(Base):
 
 
 APPLICATION_STATUSES = ("draft", "interview_pending", "interview_complete", "assessed", "decided",
-                        "guarantor_required", "guarantor_submitted", "approved", "declined")
+                        "guarantor_required", "guarantor_submitted", "approved", "declined",
+                        "offered", "reversed")
+APPLICATION_CHANNELS = ("branch", "self_service")
 GUARANTOR_STATUSES = ("pending", "verified", "rejected")
 
 
@@ -296,6 +311,7 @@ class LoanApplication(Base):
         CheckConstraint("amount_requested_kes > 0", name="ck_loan_applications_amount"),
         CheckConstraint("term_months > 0", name="ck_loan_applications_term"),
         CheckConstraint("sacco_savings_kes >= 0", name="ck_loan_applications_savings"),
+        CheckConstraint(_one_of("channel", APPLICATION_CHANNELS), name="ck_loan_applications_channel"),
     )
     id: Mapped[int] = mapped_column(primary_key=True)
     member_id: Mapped[int] = mapped_column(ForeignKey("members.id"), index=True)
@@ -306,6 +322,7 @@ class LoanApplication(Base):
     # True while that figure is only what the member declared; see Member.savings_kes.
     savings_self_declared: Mapped[bool] = mapped_column(Boolean, default=False,
                                                         server_default=false())
+    channel: Mapped[str] = mapped_column(String(14), default="branch", server_default="branch")
     interview_id: Mapped[int | None] = mapped_column(ForeignKey("interviews.id"), unique=True)
     status: Mapped[str] = mapped_column(String(24), default="draft", index=True)
     created_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
@@ -349,6 +366,8 @@ class Guarantor(Base):
     pledge_id: Mapped[int | None] = mapped_column(ForeignKey("guarantor_pledges.id"))
     # Set when the loan is issued; a guarantee counts against capacity from then on.
     loan_account_id: Mapped[int | None] = mapped_column(ForeignKey("loan_accounts.id"), index=True)
+    # Accepted by the system under pledge_id, without an officer's review.
+    accepted_under_pledge: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())
 
 
 # --- A member's profile -----------------------------------------------------------------------
@@ -445,22 +464,25 @@ class MemberProfileHistory(Base):
 
 ACCOUNT_KINDS = ("deposits", "share_capital", "transactional")
 ENTRY_TYPES = ("deposit", "withdrawal", "loan_disbursement", "loan_repayment",
-               "guarantee_recovery", "dividend")
-LOAN_STATUSES = ("active", "repaid", "defaulted")
+               "guarantee_recovery", "dividend", "loan_reversal", "deposit_refund")
+LOAN_STATUSES = ("active", "repaid", "defaulted", "reversed")
 PLEDGE_STATUSES = ("active", "withdrawn")
 # The sign of each type's amount, and the accounts it may be posted to: deposits
-# back loans and are never withdrawn, loans are paid out to the transactional
-# account, and a guarantee is recovered from the guarantor's deposits.
+# back loans and are never withdrawn, only refunded to a departing member; loans
+# are paid out to the transactional account, and undone there by a loan_reversal,
+# whose sign is the opposite of the entry it compensates; and a guarantee is
+# recovered from the guarantor's deposits.
 ENTRY_RULES = (
     ("ck_account_entries_sign",
      "(entry_type IN ('deposit', 'loan_disbursement', 'dividend') AND amount_kes > 0) "
-     "OR (entry_type IN ('withdrawal', 'loan_repayment', 'guarantee_recovery') AND amount_kes < 0)"),
+     "OR (entry_type IN ('withdrawal', 'loan_repayment', 'guarantee_recovery', 'deposit_refund') AND amount_kes < 0) "
+     "OR (entry_type = 'loan_reversal' AND amount_kes != 0)"),
     ("ck_account_entries_no_deposit_withdrawal",
      "NOT (entry_type = 'withdrawal' AND account_kind = 'deposits')"),
     ("ck_account_entries_disbursed_to_transactional",
-     "entry_type NOT IN ('loan_disbursement', 'loan_repayment') OR account_kind = 'transactional'"),
+     "entry_type NOT IN ('loan_disbursement', 'loan_repayment', 'loan_reversal') OR account_kind = 'transactional'"),
     ("ck_account_entries_recovered_from_deposits",
-     "entry_type != 'guarantee_recovery' OR account_kind = 'deposits'"),
+     "entry_type NOT IN ('guarantee_recovery', 'deposit_refund') OR account_kind = 'deposits'"),
 )
 
 
@@ -642,6 +664,37 @@ class SusResponse(Base):
     created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow, index=True)
 
 
+class SelfServiceRun(Base):
+    """One automatic decision on an application: which interview holds its immutable
+    assessment and decision. Kept apart from LoanApplication.interview_id, which moves
+    on: to the second run when a member accepts a reduced offer, to the live interview
+    when a referral is booked. The record of what the system decided must not."""
+    __tablename__ = "self_service_runs"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    application_id: Mapped[int] = mapped_column(ForeignKey("loan_applications.id"), index=True)
+    interview_id: Mapped[int] = mapped_column(ForeignKey("interviews.id"), unique=True)
+    trigger: Mapped[str] = mapped_column(String(12))     # commit | acceptance
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow, index=True)
+
+    application: Mapped[LoanApplication] = relationship()
+    interview: Mapped[Interview] = relationship()
+
+
+class IdempotencyKey(Base):
+    """One money-moving request per key, per user. The row goes in first, in the
+    request's own transaction, so a second request with the key waits for the first
+    and then gets the reply it stored; a request refused leaves no row."""
+    __tablename__ = "idempotency_keys"
+    __table_args__ = (UniqueConstraint("actor_user_id", "key", name="uq_idempotency_keys_actor_key"),)
+    id: Mapped[int] = mapped_column(primary_key=True)
+    actor_user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    key: Mapped[str] = mapped_column(String(64))
+    request_hash: Mapped[str] = mapped_column(String(64))
+    status_code: Mapped[int | None] = mapped_column(Integer)
+    response: Mapped[dict | list | None] = mapped_column(JSON)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
+
+
 class AuditLog(Base):
     """Append-only: database triggers reject UPDATE and DELETE."""
     __tablename__ = "audit_log"
@@ -754,13 +807,17 @@ def backup_sqlite(path: Path, tag: str) -> Path | None:
 def _migration_engine(url) -> Engine:
     """A SQLite engine whose transactions really are transactions, DDL
     included (pysqlite otherwise commits before each CREATE/ALTER), so a
-    failed migration leaves the database as it was."""
+    failed migration leaves the database as it was.
+
+    Foreign keys are off, as SQLite's own procedure for rebuilding a table says:
+    with them on, dropping a table other tables point at fails, and a CHECK can
+    only be changed by a rebuild. init_db checks them before it commits."""
     eng = create_engine(url)
 
     @event.listens_for(eng, "connect")
     def _connect(dbapi_conn, _):
         dbapi_conn.isolation_level = None
-        dbapi_conn.execute("PRAGMA foreign_keys=ON")
+        dbapi_conn.execute("PRAGMA foreign_keys=OFF")
 
     @event.listens_for(eng, "begin")
     def _begin(conn):
@@ -793,5 +850,9 @@ def init_db(bind: Engine | None = None) -> None:
             cfg = alembic_config(bind.url.render_as_string(hide_password=False))
             cfg.attributes["connection"] = conn
             command.upgrade(cfg, "head")
+            broken = conn.exec_driver_sql("PRAGMA foreign_key_check").fetchall()
+            if broken:
+                raise RuntimeError(f"migrating left {len(broken)} broken foreign key(s), the first in "
+                                   f"table {broken[0][0]}; nothing was changed")
     finally:
         mig.dispose()

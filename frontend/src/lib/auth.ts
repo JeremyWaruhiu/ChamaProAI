@@ -31,7 +31,7 @@ export function userLabel(u: { username: string; display_name?: string | null; r
 const PUBLIC = new Set<Screen>(['landing', 'login', 'signup'])
 const EVERY_ROLE = new Set<Screen>(['profile'])
 const STAFF = new Set<Screen>(['home', 'start', 'interviews', 'record', 'review', 'assessment',
-  'applications', 'application', 'members', 'member', 'bookings', 'events'])
+  'applications', 'application', 'decisions', 'decision', 'members', 'member', 'bookings', 'events'])
 const ADMIN = new Set<Screen>(['admin', 'users', 'audit', 'results', 'pilot'])
 const MEMBER = new Set<Screen>(['my', 'myApplication', 'apply', 'mySacco', 'registration', 'practice', 'practiceReview', 'practiceResult'])
 

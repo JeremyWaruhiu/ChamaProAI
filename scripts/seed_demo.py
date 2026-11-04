@@ -32,14 +32,17 @@ The interviews are ready for review and assessment in the dashboard.
     python scripts/seed_demo.py --no-accounts      # interviews only
 
 --demo-db builds a separate, self-contained database for an online demo
-instead: an admin, two officers, nine fictional members and twelve LIVE loan
+instead: an admin, two officers, thirteen fictional members and twelve LIVE loan
 applications covering every application status and every decision outcome,
 each assessed interview scored by the real classifier on fixed features. It
 needs models/ but no audio, no Gemini and no network. It never writes to
 data/chamapro.db, refuses a file that is not an earlier demo database, and
 rebuilds an earlier one only with --replace (new passwords, printed once).
 It also holds about 150 more members with profiles, ledgers, loans and standing
-guarantors; scripts/seed_members.py documents how they are generated.
+guarantors; scripts/seed_members.py documents how they are generated. Four more
+people belong to the automatic decisions: Wanjiru Kamau and Njeri Mwangi, untouched,
+for walking through a conversation (scripts/demo_self_service.py prints theirs); and
+Lucy Nduta and Anne Wairimu, whose decisions are on the officers' page already.
 
     python scripts/seed_demo.py --demo-db data/demo.db
     python scripts/seed_demo.py --demo-db data/demo.db --replace
@@ -73,10 +76,10 @@ import soundfile as sf
 from sqlalchemy import event, select
 
 from chamapro import config
-from chamapro.api import audit, loans, storage
+from chamapro.api import audit, decisions, ledger, loans, self_service, storage
 from chamapro.api import schemas as s
 from chamapro.api.auth import hash_password
-from chamapro.api.db import (APPLICATION_STATUSES, Applicant, Assessment, Guarantor, Interview,
+from chamapro.api.db import (APPLICATION_STATUSES, SYSTEM_ROLE, Applicant, Assessment, Guarantor, Interview,
                              LoanApplication, Member, Response, SessionLocal, User, init_db,
                              nairobi_today, utcnow, normalise_phone)
 
@@ -569,6 +572,56 @@ DEMO_PEOPLE = {
                            "lost_as_guarantor": {"sacco": 0, "chama": 0},
                            "sacco_loan_use": 1, "chama_loan_use": 0}},
 }
+# Fixed profiles for automatic decisions, in the same words as the others but with
+# their freshness pinned down too. Whatever a test says about them follows from these.
+PROFILED = ("personal", "household", "income", "assets", "credit")
+SELF_SERVICE_PEOPLE = {
+    # Low risk, income checked a month ago, two pledges: asks 40,000 for a dairy cow.
+    "wanjiru": {"full_name": "Wanjiru Kamau", "joined": 60, "login": "w.kamau", "deposits": 30000,
+                "verified": list(PROFILED), "confirmed_days_ago": 30,
+                "form": {"age": 44, "sex": "female", "education": 6, "marital_status": "married"},
+                "features": {"household_size": 4, "children": 2, "children_under5": 0, "children_in_school": 2,
+                             "monthly_income_kes": 45000, "agri_income_kes": 20000,
+                             "income_sources": {"farming": 1, "own_business": 1},
+                             "non_monetary_savings": {"land_or_buildings": 1, "livestock": 1},
+                             "purchases_last_12m": {"livestock": 1, "farm_equipment": 1},
+                             "lost_as_guarantor": {"sacco": 0, "chama": 0},
+                             "sacco_loan_use": 1, "chama_loan_use": 0}},
+    # Her income was entered eight months ago and never checked. Medium on the old
+    # figure, with income among the top three drivers; asks 60,000 for school fees,
+    # and 15,000 of deposits allow 45,000.
+    "njeri": {"full_name": "Njeri Mwangi", "joined": 36, "login": "n.mwangi", "deposits": 15000,
+              "verified": ["personal", "household", "assets", "credit"], "confirmed_days_ago": 20,
+              "updated_days_ago": {"income": 240},
+              "form": {"age": 38, "sex": "female", "education": 3, "marital_status": "married"},
+              "features": {"household_size": 6, "children": 4, "children_under5": 1, "children_in_school": 3,
+                           "monthly_income_kes": 10000, "agri_income_kes": 0, "income_sources": {"employed": 1},
+                           "non_monetary_savings": {"land_or_buildings": 1}, "purchases_last_12m": {},
+                           "lost_as_guarantor": {"sacco": 0, "chama": 0},
+                           "sacco_loan_use": 0, "chama_loan_use": 1}},
+    # Whose decisions are already on the officers' page.
+    "lucy": {"full_name": "Lucy Nduta", "joined": 48, "deposits": 40000,
+             "verified": list(PROFILED), "confirmed_days_ago": 15,
+             "form": {"age": 46, "sex": "female", "education": 6, "marital_status": "married"},
+             "features": {"household_size": 4, "children": 2, "children_under5": 0, "children_in_school": 2,
+                          "monthly_income_kes": 50000, "agri_income_kes": 20000,
+                          "income_sources": {"farming": 1, "own_business": 1},
+                          "non_monetary_savings": {"land_or_buildings": 1, "livestock": 1},
+                          "purchases_last_12m": {"livestock": 1, "farm_equipment": 1},
+                          "lost_as_guarantor": {"sacco": 0, "chama": 0},
+                          "sacco_loan_use": 1, "chama_loan_use": 0}},
+    "anne": {"full_name": "Anne Wairimu", "joined": 40, "deposits": 16000,
+             "verified": list(PROFILED), "confirmed_days_ago": 25,
+             "form": {"age": 46, "sex": "female", "education": 6, "marital_status": "married"},
+             "features": {"household_size": 5, "children": 3, "children_under5": 0, "children_in_school": 3,
+                          "monthly_income_kes": 50000, "agri_income_kes": 20000,
+                          "income_sources": {"farming": 1, "own_business": 1},
+                          "non_monetary_savings": {"land_or_buildings": 1, "livestock": 1},
+                          "purchases_last_12m": {"livestock": 1, "farm_equipment": 1},
+                          "lost_as_guarantor": {"sacco": 0, "chama": 0},
+                          "sacco_loan_use": 1, "chama_loan_use": 0}},
+}
+DEMO_PEOPLE.update(SELF_SERVICE_PEOPLE)
 for _no, _p in enumerate(DEMO_PEOPLE.values(), 1):
     _p.update(member_no=f"M-{1000 + _no}", phone=f"0700000{_no:03d}")
 
@@ -758,7 +811,7 @@ def seed_demo_db() -> DemoSeeded:
     out, apps = AccountsSeeded(), []
     now = utcnow()
     with SessionLocal() as db:
-        if db.scalar(select(User.id).limit(1)) is not None:
+        if db.scalar(select(User.id).where(User.role != SYSTEM_ROLE).limit(1)) is not None:
             raise ValueError("the demo needs an empty database; this one already has users")
         clock = Clock(db)
         clock.now = now - timedelta(days=100)
@@ -814,6 +867,7 @@ def seed_demo_db() -> DemoSeeded:
                 if app.interview and app.interview.assessment else "-"
             apps.append((app.id, app.member.member_no, risk, app.status))
         written = seed_member_records(db, members, users, now, clock)
+        apps.extend(seed_automatic_decisions(db, members, users["admin"], users["officer1"], clock))
     missing = set(APPLICATION_STATUSES) - {status for *_, status in apps}
     if missing:   # the point of the demo is that every screen has something on it
         raise RuntimeError(f"demo misses application statuses: {', '.join(sorted(missing))}")
@@ -836,6 +890,50 @@ def seed_member_records(db, members: dict[str, Member], users: dict[str, User], 
                                                     LoanApplication.status == "approved"))
     return seed_members.write_plan(db, plan, members, {k: users[k] for k in ("officer1", "officer2")}, peter,
                                    users["officer1"], now, DEMO_DB, ensure_member)
+
+
+# (person, request, answers to its questions, what happens next). Each goes through
+# the engine and commit as a member's would: nothing here says what the outcome is.
+SEEDED_DECISIONS = [
+    ("lucy", decisions.LoanRequest(35000, "Dairy feed and a milking machine", 12), {}, "reverse"),
+    ("anne", decisions.LoanRequest(70000, "Roof repairs", 18), {}, None),
+    ("esther", decisions.LoanRequest(15000, "Stock for my shop", 6), {}, None),
+    ("joseph", decisions.LoanRequest(20000, "Stock for a mitumba stall", 12), {"monthly_income_kes": 5000}, None),
+]
+
+
+def answer_questions(db, member: Member, request: decisions.LoanRequest, answers: dict) -> decisions.Evaluation:
+    """Evaluate, answering each question from the answers given, or with no answer."""
+    overrides = {}
+    ev = decisions.evaluate(db, member, request, overrides)
+    while ev.questions:
+        keys = [decisions.ANSWER_KEY[q] for q in ev.questions]
+        overrides.update({k: answers.get(k) for k in keys})
+        ev = decisions.evaluate(db, member, request, overrides)
+    return ev
+
+
+def seed_automatic_decisions(db, members: dict[str, Member], admin: User, officer: User, clock: Clock) -> list[tuple]:
+    """What the officers' page opens on, including the statuses only it can reach. Each
+    is stamped no earlier than the day's own entries, so its savings figure is the balance."""
+    clock.now = max(utcnow(), ledger.day_stamp(nairobi_today()))
+    out = []
+    for key, request, answers, then in SEEDED_DECISIONS:
+        m = members[key]
+        ev = answer_questions(db, m, request, answers)
+        reply = self_service.commit(db, ev, f"seed-{key}-commit", admin)
+        if then == "reverse":
+            loan = db.get(ledger.LoanAccount, reply["loan_id"])
+            ledger.lock_members(db, [loan.member_id])
+            entries = ledger.reverse_loan(db, loan, officer)
+            app = db.get(LoanApplication, reply["application_id"])
+            audit.record(db, officer, "loan.reverse", "loan_account", loan.id, entry_ids=[e.id for e in entries],
+                         application_id=app.id, reason="Paid out against the wrong account")
+            loans.set_status(db, app, "reversed", officer, loan_id=loan.id)
+            db.commit()
+        app = db.get(LoanApplication, reply["application_id"])
+        out.append((app.id, m.member_no, ev.risk_class, app.status))
+    return out
 
 
 def is_demo_db(con: sqlite3.Connection) -> bool:

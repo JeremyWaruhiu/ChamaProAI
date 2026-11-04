@@ -311,9 +311,11 @@ def apply_for_loan(body: s.MyApplicationCreate, db: Session = Depends(get_db),
              response_model=s.MyApplication)
 def book_interview(application_id: int, body: s.BookingRequest, db: Session = Depends(get_db),
                    user: User = Depends(require_member)):
-    """Book again, after a cancellation or a slot that passed."""
+    """Book again, after a cancellation or a slot that passed; or for the first time,
+    on an application an automatic decision referred to an officer."""
     app = loans.own_application(db, user, application_id)
-    if app.interview_id is not None or app.status not in ("draft", "interview_pending"):
+    referred = loans.held_by_automatic_decision(app) and app.status in ("decided", "interview_pending")
+    if not referred and (app.interview_id is not None or app.status not in ("draft", "interview_pending")):
         raise HTTPException(409, "this application's interview has already been held")
     bookings.refuse_second_booking(db, app.member_id)
     start = bookings.checked_slot(body.date, body.time)

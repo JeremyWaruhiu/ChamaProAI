@@ -201,6 +201,8 @@ def use_pledges(application_id: int, body: s.UsePledges, db: Session = Depends(g
         raise HTTPException(422, "pledge_ids: each guarantor can be used once")
     if len(body.pledge_ids) > required - loans.counting(app):
         raise HTTPException(422, f"pledge_ids: {required - loans.counting(app)} guarantor(s) needed")
+    ledger.lock_members(db, db.scalars(select(GuarantorPledge.guarantor_member_id)
+                                       .where(GuarantorPledge.id.in_(body.pledge_ids))))
     share, offers = offers_for(db, app)
     offered = {p.id: p for p in offers}
     if any(i not in offered for i in body.pledge_ids):

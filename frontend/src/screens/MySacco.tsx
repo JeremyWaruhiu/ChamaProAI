@@ -366,7 +366,7 @@ function LoanHistory({ loans }: { loans: LoanOut[] }) {
             <li key={x.id} className={styles.loan}>
               <div className={styles.accountHead}>
                 <strong>{formatKes(x.principal_kes)}</strong>
-                <Badge tone={x.status === 'repaid' ? 'low' : x.status === 'defaulted' ? 'high' : x.days_in_arrears > 0 ? 'wait' : 'info'}>
+                <Badge tone={x.status === 'repaid' ? 'low' : x.status === 'defaulted' ? 'high' : x.status === 'reversed' ? 'neutral' : x.days_in_arrears > 0 ? 'wait' : 'info'}>
                   {S.loanStatus[x.status]}
                 </Badge>
               </div>

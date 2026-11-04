@@ -282,7 +282,8 @@ def test_migration_adds_email_and_keeps_rows(tmp_path):
     con = sqlite3.connect(db_file)
     assert "email" in {c[1] for c in con.execute("PRAGMA table_info(users)")}
     assert "auth_method" in {c[1] for c in con.execute("PRAGMA table_info(sessions)")}
-    assert con.execute("SELECT username, role, email FROM users").fetchall() == [("old_admin", "admin", None)]
+    assert con.execute("SELECT username, role, email FROM users WHERE role != 'system'").fetchall() \
+        == [("old_admin", "admin", None)]
     idx = {row[1]: row[2] for row in con.execute("PRAGMA index_list(users)")}
     assert idx.get("ix_users_email") == 1          # unique
     con.close()

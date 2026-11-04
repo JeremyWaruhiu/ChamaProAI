@@ -43,6 +43,8 @@ const PracticeRunner = screen(() => import('./screens/Practice'), 'PracticeRunne
 const PracticeReview = screen(() => import('./screens/Practice'), 'PracticeReview')
 const PracticeResult = screen(() => import('./screens/Practice'), 'PracticeResult')
 const Bookings = screen(() => import('./screens/Bookings'), 'Bookings')
+const AutomaticDecisions = screen(() => import('./screens/AutomaticDecisions'), 'AutomaticDecisions')
+const AutomaticDecisionPage = screen(() => import('./screens/AutomaticDecisions'), 'AutomaticDecisionPage')
 const Events = screen(() => import('./screens/Events'), 'Events')
 const Pilot = screen(() => import('./screens/Pilot'), 'Pilot')
 
@@ -65,6 +67,8 @@ function screenFor(route: Route, onSignedIn: (me: Me) => void): ReactNode {
     case 'application': return <ApplicationDetail key={`p${route.id}`} id={route.id} />
     case 'members': return <Members />
     case 'member': return <MemberDetail key={`m${route.id}`} id={route.id} />
+    case 'decisions': return <AutomaticDecisions />
+    case 'decision': return <AutomaticDecisionPage key={`d${route.id}`} id={route.id} />
     case 'bookings': return <Bookings />
     case 'events': return <Events />
     case 'admin': return <AdminHome />

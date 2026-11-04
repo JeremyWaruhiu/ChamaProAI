@@ -29,6 +29,8 @@ STATUS_LABEL = {
     "guarantor_submitted": "Guarantors being checked",
     "approved": "Approved",
     "declined": "Not approved",
+    "offered": "A smaller loan is on offer: waiting for your answer",
+    "reversed": "Payout reversed",
 }
 
 
@@ -61,7 +63,63 @@ def default_message(outcome: str, approved: int | None, guarantors: int | None) 
                  "We will contact you.",
         "decline": "We are not able to approve this loan at this time. Please speak to your "
                    "loan officer about the reasons and what could help next time.",
+        "not_now": "We cannot take this loan further just now. Please speak to your loan officer "
+                   "about what could help.",
     }[outcome]
+
+
+# Why an automatic decision came out as it did. Fixed templates, one per reason code
+# in decisions.settle, so nothing a member reads is generated. Keyed by language, for
+# Kikuyu in the next phase. A referral for risk and one for a Medium score with nothing
+# left to ask share one sentence: the wording must not give the class away.
+BOOK = " You can book a time to see a loan officer."
+DECISION_REASONS = {"en": {
+    "approve": "You can have KSh {amount:,} now. It goes to your transactional account, and you will repay "
+               "KSh {instalment:,} a month for {term} months.",
+    "reduced_rule": "We can offer KSh {amount:,} rather than the KSh {requested:,} you asked for. That is the most "
+                    "your deposits allow. If you accept, you will repay KSh {instalment:,} a month for {term} months.",
+    "reduced_affordability": "We can offer KSh {amount:,} rather than the KSh {requested:,} you asked for. That is the "
+                             "most your income allows over this time. If you accept, you will repay "
+                             "KSh {instalment:,} a month for {term} months.",
+    "clarify": "We need a little more from you before we can answer.",
+    "self_declared": "Your savings are not on the SACCO's records yet, so a loan officer needs to look at this "
+                     "application with you." + BOOK,
+    "officer_review": "A loan officer will look at this application with you." + BOOK,
+    "arrears": "You have a loan payment outstanding, so a loan officer needs to look at this application with you." + BOOK,
+    "details_missing": "We do not have everything we need to answer this ourselves, so a loan officer will look at "
+                       "it with you." + BOOK,
+    "offer_too_small": "What we could offer is less than half of what you asked for, so a loan officer will look at "
+                       "this application with you." + BOOK,
+    "above_limit": "Loans above KSh {limit:,} are looked at by a loan officer." + BOOK,
+    "guarantors_short": "Your guarantors do not yet cover this loan, so a loan officer will look at it with you." + BOOK,
+    "named_guarantor": "The guarantor you named has not pledged to back you yet, so a loan officer needs to confirm "
+                       "them with you." + BOOK,
+    "membership": "You can apply once you have been a member for {min_months} months. You have "
+                  "{months_left} more {months_word} to go.",
+    "no_guarantors": "You need at least {min_guarantors} members who have pledged to guarantee you before you can "
+                     "apply. Please ask them to speak to a loan officer.",
+}}
+QUESTION_REASONS = {"en": {
+    "C1": "We need to know over how many months you would like to repay.",
+    "C2": "We need your current monthly income to work out this loan.",
+    "C3": "This loan is close to what your income allows. What you expect it to bring in each month would count.",
+    "C4": "We need to know whether you are borrowing from a chama now, and what you pay each month.",
+    "C5": "Your guarantors do not yet cover this loan. Another member could guarantee you.",
+    "C6": "This is more than both your deposits and your income allow. You could accept a smaller amount.",
+}}
+QUESTION_SETS_FEATURE = {
+    "C1": ["term_months"], "C2": ["monthly_income_kes"], "C3": ["expected_monthly_return_kes"],
+    "C4": ["chama_loan_use", "chama_instalment_kes"], "C5": ["extra_guarantor"], "C6": ["accepted_amount_kes"],
+}
+
+
+def decision_reason(code: str, values: dict, language: str = "en") -> str:
+    left = values.get("months_left") or 0
+    return DECISION_REASONS[language][code].format(**values, months_word="month" if left == 1 else "months")
+
+
+def question_reason(question: str, language: str = "en") -> str:
+    return QUESTION_REASONS[language][question]
 
 
 # feature -> (what it is when present / true, when absent / false); one

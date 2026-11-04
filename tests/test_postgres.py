@@ -9,19 +9,21 @@ The rest of the suite runs on SQLite.
 """
 import os
 import secrets
+import threading
+import time
 from contextlib import contextmanager
 from datetime import date
 
 import pytest
 from alembic import command
-from sqlalchemy import create_engine, inspect, select, text
+from sqlalchemy import create_engine, event, inspect, select, text
 from sqlalchemy.engine import make_url
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.orm import Session
 
 from chamapro import config
-from chamapro.api import ledger, profiles
-from chamapro.api.db import (Applicant, AuditLog, Decision, Guarantor, Interview,
+from chamapro.api import decisions, ledger, profiles, self_service
+from chamapro.api.db import (Applicant, AuditLog, Decision, Guarantor, Interview, LoanAccount,
                              LoanApplication, Member, User, alembic_config, head_revision, init_db)
 
 SERVER = os.getenv("CHAMAPRO_TEST_POSTGRES_URL")
@@ -324,3 +326,169 @@ def test_downgrade_and_upgrade_again(pg_url, engine, rows):
     command.upgrade(alembic_config(pg_url), "head")
     with create_engine(pg_url).connect() as c:     # the row survives; its new columns do not
         assert c.execute(text("SELECT decision, outcome FROM decisions")).one() == ("approve", None)
+
+
+# --- Automatic decisions: what only real row locks can show --------------------------------
+
+@pytest.fixture
+def stand_in_model(monkeypatch):
+    """Low every time, and slow enough that two requests really overlap."""
+    import pandas as pd
+    import score_interview
+
+    def score(_):
+        time.sleep(0.2)
+        return score_interview.Scored(
+            {"risk_class": "Low", "probabilities": {"Low": 0.6, "Medium": 0.3, "High": 0.1}, "top_contributions": [],
+             "extraction_completeness": 0.9, "features_populated": 30, "features_total": 35},
+            pd.DataFrame([{"age": 40.0}]), "classifier.joblib", "0" * 64)
+    monkeypatch.setattr(decisions, "score_features", score)
+
+
+PROFILE = {"monthly_income_kes": 90000, "household_size": 4, "chama_loan_use": 0, "income_sources": {"employed": 1}}
+
+
+def add_person(db, label: str, deposits: int = 0, profile: bool = False) -> Member:
+    m = Member(member_no=f"PGD-{label}-{secrets.token_hex(3)}", full_name=f"Fictional {label}", joined_on=date(2020, 1, 1),
+               phone=f"07{secrets.randbelow(10 ** 8):08d}")
+    db.add(m)
+    db.flush()
+    if deposits:
+        ledger.post_entry(db, m.id, "deposits", "deposit", deposits, f"PG-{secrets.token_hex(4)}")
+    if profile:
+        p = profiles.save_profile(db, m, PROFILE, "registration", None)
+        p.income_verified_at, p.income_verified_by = p.income_updated_at, "pg"
+    return m
+
+
+def together(engine, jobs):
+    """Run each job(session) on its own connection, released at the same moment; each
+    outcome is what it returned or raised."""
+    gate, out = threading.Barrier(len(jobs)), [None] * len(jobs)
+
+    def run(i, job):
+        with Session(engine, expire_on_commit=False) as db:
+            gate.wait()
+            try:
+                out[i] = job(db)
+            except Exception as e:
+                out[i] = e
+    threads = [threading.Thread(target=run, args=(i, j)) for i, j in enumerate(jobs)]
+    [t.start() for t in threads]
+    [t.join(60) for t in threads]
+    assert not any(t.is_alive() for t in threads), "deadlocked"
+    return out
+
+
+def commit_for(member_id: int, actor_id: int, amount: int, key: str, term: int = 12):
+    def job(db):
+        member, actor = db.get(Member, member_id), db.get(User, actor_id)
+        ev = decisions.evaluate(db, member, decisions.LoanRequest(amount, "School fees", term))
+        return self_service.commit(db, ev, key, actor)
+    return job
+
+
+def test_two_loans_cannot_spend_the_same_capacity(engine, stand_in_model):
+    """Each borrower's guarantors can cover either loan, not both. Their pledges are in
+    opposite orders, which without a fixed locking order would be a deadlock as well."""
+    with Session(engine, expire_on_commit=False) as db:
+        actor = User(username=f"pg_{secrets.token_hex(3)}", password_hash="x", role="officer")
+        db.add(actor)
+        g1, g2 = add_person(db, "G1", 12000), add_person(db, "G2", 12000)
+        a, b = add_person(db, "A", 10000, True), add_person(db, "B", 10000, True)
+        ledger.add_pledge(db, a.id, g1.id), ledger.add_pledge(db, a.id, g2.id)
+        ledger.add_pledge(db, b.id, g2.id), ledger.add_pledge(db, b.id, g1.id)
+        db.commit()
+        ids = actor.id, a.id, b.id, g1.id, g2.id
+    actor_id, a_id, b_id, g1_id, g2_id = ids
+    # Each asks 30,000: 20,000 beyond their own 10,000. The two guarantors hold 24,000.
+    out = together(engine, [commit_for(a_id, actor_id, 30000, "race-a"), commit_for(b_id, actor_id, 30000, "race-b")])
+    won = [r for r in out if isinstance(r, dict) and r["outcome"] == "approve"]
+    lost = [r for r in out if isinstance(r, self_service.CannotCommit)]
+    assert len(won) == 1 and len(lost) == 1, out
+    with Session(engine) as db:
+        caps = ledger.capacities(db, [g1_id, g2_id])
+        assert sum(c.guaranteed_kes for c in caps.values()) == 20000
+        assert all(c.guaranteed_kes <= c.deposits_kes for c in caps.values())
+        loans_now = db.scalars(select(LoanAccount).where(LoanAccount.member_id.in_([a_id, b_id]))).all()
+        assert len(loans_now) == 1
+
+
+def test_a_double_submit_at_the_same_moment_pays_out_once(engine, stand_in_model):
+    with Session(engine, expire_on_commit=False) as db:
+        actor = User(username=f"pg_{secrets.token_hex(3)}", password_hash="x", role="officer")
+        db.add(actor)
+        m = add_person(db, "D", 30000, True)
+        g1, g2 = add_person(db, "DG1", 30000), add_person(db, "DG2", 30000)
+        ledger.add_pledge(db, m.id, g1.id), ledger.add_pledge(db, m.id, g2.id)
+        db.commit()
+        actor_id, member_id = actor.id, m.id
+    out = together(engine, [commit_for(member_id, actor_id, 40000, "double") for _ in range(4)])
+    assert all(isinstance(r, dict) for r in out) and all(r == out[0] for r in out), out
+    with Session(engine) as db:
+        assert ledger.balances(db, member_id)["transactional"] == 40000
+        assert len(db.scalars(select(LoanAccount).where(LoanAccount.member_id == member_id)).all()) == 1
+
+
+def test_two_withdrawals_at_once_cannot_overdraw(engine):
+    with Session(engine) as db:
+        m = add_person(db, "W")
+        ledger.post_entry(db, m.id, "transactional", "deposit", 1000, f"PG-{secrets.token_hex(4)}")
+        db.commit()
+        member_id = m.id
+
+    def withdraw(db):
+        ledger.lock_members(db, [member_id])
+        time.sleep(0.1)
+        entry = ledger.post_entry(db, member_id, "transactional", "withdrawal", -800, f"PG-{secrets.token_hex(4)}")
+        db.commit()
+        return entry.id
+    out = together(engine, [withdraw, withdraw])
+    assert sum(isinstance(r, ledger.LedgerError) for r in out) == 1, out
+    with Session(engine) as db:
+        assert ledger.balances(db, member_id)["transactional"] == 200
+
+
+def test_lock_members_really_locks_and_in_order(pg_url, engine):
+    """A second transaction cannot take a row the first holds."""
+    with Session(engine) as db:
+        a, b = add_person(db, "L1"), add_person(db, "L2")
+        ledger.account_of(db, a.id, "deposits")
+        db.commit()
+        ids = [a.id, b.id]
+    statements = []
+    other = create_engine(pg_url, connect_args={"options": "-c lock_timeout=200"})
+
+    @event.listens_for(engine, "before_cursor_execute")
+    def seen(conn, cursor, statement, *_):
+        if "FOR UPDATE" in statement:
+            statements.append(statement)
+    try:
+        with Session(engine) as holder:
+            ledger.lock_members(holder, reversed(ids))
+            with other.connect() as c, pytest.raises(OperationalError):
+                c.execute(text("SELECT id FROM members WHERE id = :i FOR UPDATE"), {"i": ids[0]})
+    finally:
+        event.remove(engine, "before_cursor_execute", seen)
+        other.dispose()
+    assert len(statements) == 2
+    assert "ORDER BY members.id" in statements[0] and "ORDER BY member_accounts.id" in statements[1]
+
+
+def test_0006_migrates_and_the_ledger_stays_guarded(engine):
+    with engine.connect() as c:
+        assert c.execute(text("SELECT role, is_active FROM users WHERE username = 'system'")).one() == ("system", False)
+        for table in ("self_service_runs", "idempotency_keys"):
+            assert c.execute(text("SELECT relrowsecurity FROM pg_class WHERE relname = :t"), {"t": table}).scalar() is True
+    with pytest.raises(IntegrityError, match="append-only"):
+        with engine.begin() as c:
+            c.execute(text("UPDATE account_entries SET amount_kes = 1"))
+    with Session(engine) as db:
+        m = add_person(db, "M")
+        entry = ledger.post_entry(db, m.id, "transactional", "deposit", 500, f"PG-{secrets.token_hex(4)}")
+        ledger.post_entry(db, m.id, "transactional", "loan_reversal", -100, f"PG-{secrets.token_hex(4)}")
+        db.commit()
+        assert entry.id
+    with Session(engine) as db, pytest.raises(IntegrityError, match="ck_account_entries"):
+        m2 = add_person(db, "M2")
+        ledger.post_entry(db, m2.id, "deposits", "loan_reversal", 100, f"PG-{secrets.token_hex(4)}")

@@ -19,6 +19,7 @@ from sqlalchemy import select
 import seed_demo  # scripts/ is on sys.path via chamapro.api.pipeline
 from chamapro import config
 from chamapro.api import auth
+from chamapro.api import self_service
 from chamapro.api.db import (APPLICATION_STATUSES, Applicant, AuditLog, Interview, LoanApplication,
                              Member, SessionLocal, User)
 from chamapro.api.main import app
@@ -482,25 +483,26 @@ def test_demo_db_covers_every_status_and_outcome(tmp_path):
     assert r.returncode == 0, r.stderr
     logins = dict(re.findall(LOGIN_LINE, r.stdout, flags=re.M))
     assert set(logins) == {"s.achieng", "j.mwangi", "a.chebet", "g.wanjiku",
-                           "p.kamau", "m.wanjiru", "e.nyambura"}
+                           "p.kamau", "m.wanjiru", "e.nyambura", "w.kamau", "n.mwangi"}
 
     con = sqlite3.connect(path)
     col = lambda sql: [v for (v,) in con.execute(sql)]  # noqa: E731
     assert set(col("SELECT status FROM loan_applications")) == set(APPLICATION_STATUSES)
     assert set(col("SELECT outcome FROM decisions")) == {
-        "approve", "approve_with_guarantor", "approve_reduced", "refer", "decline"}
+        "approve", "approve_with_guarantor", "approve_reduced", "refer", "decline", "not_now"}
     assert set(col("SELECT status FROM guarantors")) == {"verified", "pending", "rejected"}
     assert set(col("SELECT risk_class FROM assessments")) == {"Low", "Medium", "High"}
-    assert set(col("SELECT mode FROM interviews")) == {"live"}
-    assert set(col("SELECT role FROM users")) == {"admin", "officer", "member"}
+    assert set(col("SELECT mode FROM interviews")) == {"live", "self_service"}
+    assert set(col("SELECT role FROM users")) == {"admin", "officer", "member", "system"}
     assert not [n for n in col("SELECT full_name FROM members") + col("SELECT name FROM applicants")
                 + col("SELECT officer_notes FROM decisions WHERE officer_notes IS NOT NULL")
                 if NAME_MARKERS.search(n)]
-    assert all(t.startswith("demo-db:") for t in col("SELECT seed_tag FROM users")
+    assert all(t.startswith("demo-db:") for t in col("SELECT seed_tag FROM users WHERE role != 'system'")
                + col("SELECT seed_tag FROM members"))
-    assert dict(con.execute("SELECT username, display_name FROM users WHERE role != 'member'")) == {
+    assert dict(con.execute("SELECT username, display_name FROM users WHERE role IN ('admin', 'officer')")) == {
         "s.achieng": "Susan Achieng", "j.mwangi": "Joseph Mwangi", "a.chebet": "Alice Chebet"}
-    assert set(col("SELECT extraction_model FROM assessments")) == {seed_demo.SEED_EXTRACTION}
+    assert set(col("SELECT extraction_model FROM assessments")) == \
+        {seed_demo.SEED_EXTRACTION, self_service.PROFILE_NOT_EXTRACTED}
     days = col("SELECT DISTINCT date(created_at) FROM loan_applications")
     assert len(days) >= 8                                   # spread over weeks, not one moment
     con.close()
@@ -517,4 +519,4 @@ def test_demo_db_covers_every_status_and_outcome(tmp_path):
     fresh = dict(re.findall(LOGIN_LINE, rebuilt.stdout, flags=re.M))
     assert set(fresh) == set(logins) and not set(fresh.values()) & set(logins.values())
     assert sqlite3.connect(path).execute("SELECT count(*) FROM loan_applications").fetchone() \
-        == (len(seed_demo.DEMO_APPLICATIONS),)
+        == (len(seed_demo.DEMO_APPLICATIONS) + len(seed_demo.SEEDED_DECISIONS),)

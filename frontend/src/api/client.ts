@@ -1,5 +1,5 @@
 import type {
-  ApplicantFormOptions, ApplicationCreate, ApplicationDetail, ApplicationStatus, ApplicationSummary,
+  ApplicantFormOptions, ApplicationCreate, AutomaticDecision, AutomaticDecisionDetail, LoanOut, ApplicationDetail, ApplicationStatus, ApplicationSummary,
   ApplyOptions, Assessment, AuditEntry, AuditFilter, AuthConfig, Booking, BookingCalendar, DaySlots,
   Decision, DecisionCreate, EventBody, Guarantor, GuarantorIn, GuarantorOffers, ProfileBody, SaccoView, Health, InterviewCreate, InterviewState,
   InterviewSummary, Language, Me, Member, MemberCreate, MemberHome, MyApplication, MyApplicationCreate,
@@ -91,6 +91,18 @@ const json = (method: string, body: unknown): RequestInit => ({
   body: JSON.stringify(body),
 })
 
+/** One per action, kept across retries, so that sending it twice does it once. */
+export function newIdempotencyKey(): string {
+  const bytes = crypto.getRandomValues(new Uint8Array(16))   // randomUUID needs a secure context
+  return Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('')
+}
+
+const once = (key: string, body: unknown): RequestInit => ({
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json', 'Idempotency-Key': key },
+  body: JSON.stringify(body),
+})
+
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 
 /** ?a=1&b=x from the defined, non-empty values only. */
@@ -174,6 +186,10 @@ export const api = {
   application: (id: number) => request<ApplicationDetail>(`/applications/${id}`),
   createApplication: (body: ApplicationCreate) =>
     request<ApplicationDetail>('/applications', json('POST', body)),
+  automaticDecisions: (params: { outcome?: string; limit?: number } = {}) =>
+    request<AutomaticDecision[]>(`/automatic-decisions${query(params)}`),
+  automaticDecision: (id: number) => request<AutomaticDecisionDetail>(`/automatic-decisions/${id}`),
+  reverseLoan: (id: number, reason: string, key: string) => request<LoanOut>(`/loans/${id}/reverse`, once(key, { reason })),
   verifyGuarantor: (id: number) => request<Guarantor>(`/guarantors/${id}/verify`, { method: 'POST' }),
   rejectGuarantor: (id: number, reason: string) =>
     request<Guarantor>(`/guarantors/${id}/reject`, json('POST', { reason: reason.trim() || null })),

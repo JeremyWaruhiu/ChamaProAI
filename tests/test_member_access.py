@@ -32,6 +32,10 @@ MEMBER_ROUTES = {("GET", "/api/me/applications"), ("GET", "/api/me/applications/
                  ("GET", "/api/me/practice/responses/{response_id}/audio"),
                  ("PATCH", "/api/me/practice/responses/{response_id}"),
                  ("DELETE", "/api/me/practice/responses/{response_id}"),
+                 # the self-service decision, always on the member's own record
+                 ("POST", "/api/self-service/evaluate"), ("POST", "/api/self-service/commit"),
+                 ("POST", "/api/self-service/applications/{application_id}/accept"),
+                 ("POST", "/api/self-service/applications/{application_id}/decline"),
                  # the booking calendar and upcoming events: every signed-in role
                  ("GET", "/api/booking/calendar"), ("GET", "/api/booking/slots"),
                  ("GET", "/api/events")}

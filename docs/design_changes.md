@@ -285,3 +285,168 @@ deposits are refunded, has no entry type: `withdrawal` from deposits is refused.
 | `from_ledger` on `MyMember`; `savings_from_ledger` on the application detail | Screens can say where the figure came from. |
 | Row-level security, with no policies, on the six new tables | As on every other table. |
 
+## The decision engine and ledger operations (phase 2 of 5)
+
+Migration `0006`. There is no chat or speech yet: the next phase calls what is here.
+The trained model is unchanged and is not retrained. The language model decides
+nothing: the classifier scores the person, the SACCO rule and an affordability check
+score the request, and a fixed, versioned policy picks the outcome. Policy version
+`2026.11.1`.
+
+### The policy
+
+`decisions.settle` is a pure function of the facts: the first row that applies decides.
+A row can only send someone towards a person, never away from one.
+
+| # | When | Outcome | Reason |
+|---|---|---|---|
+| 1 | No deposits entries on the ledger | Refer | The figure is what the member said, or at most what an officer typed. Comes first, so self-declared savings always refer, even for someone who would otherwise hear "not now". A rule refusal built on an unchecked record should come from a person. |
+| 2 | Membership under 6 months | Not now, with the months left | A hard rule that time will satisfy. The SACCO's rule, not the model's view. |
+| 3 | No guarantors at all: no pledge and nobody named | Not now | A hard rule, and the reason says what to do: ask two members to pledge. |
+| 4 | A clarification is still to be answered | Clarify | Nothing is settled while a question could change the answer. Cannot be committed. |
+| 5 | High risk | Refer | The model alone never declines anyone. |
+| 6 | A defaulted loan, or an active one behind | Refer | **Added.** The specification's conditions are necessary, not sufficient. The model only sees "currently borrowing", and a payout with no human eye to someone already behind would be hard to defend. |
+| 7 | No term, or no income, or the member would not confirm income or chama details | Refer | The policy cannot settle what it cannot compute. |
+| 8 | Medium, with no clarification answered | Refer | As specified: Medium needs an answered question to go on. The wording is the same as for row 5, so a member cannot tell the class from it. |
+| 9 | Above either maximum, and the lower is under half the original request | Refer | As specified: an offer must be at least half. |
+| 10 | Above either maximum, and the offer is above the automatic limit | Refer | The limit applies to what would be paid. |
+| 11 | Above either maximum, and the guarantors do not cover the offer, or need someone only named | Refer | As row 12, at the offered amount. |
+| 12 | Otherwise, above either maximum | Reduced offer: the lower maximum | The member must accept. Holds no capacity until then. |
+| 13 | Within both maximums, above the automatic limit (KSh 50,000) | Refer | As specified. |
+| 14 | Guarantors do not cover it | Refer | After C5 has been asked: nothing automatic is left to try. |
+| 15 | It needs a guarantor who was named and has not pledged | Refer | **Added.** C5 can name anyone, and they have agreed to nothing. Phase 1 already held that typing a member's number must not use up their capacity; an automatic payout on one would do worse. |
+| 16 | Otherwise | Approve and pay out | All checks pass, deposits on record, within the limit, Low (or Medium after an answer), guarantors pledged. |
+
+The checks, each kept in the trace with its values: deposits on record, membership,
+amount within 3 x deposits, at least two guarantors, guarantor capacity, affordability,
+automatic limit, risk, no arrears.
+
+### The arithmetic
+
+    instalment   = P x r / (1 - (1 + r)^-n), rounded up to a shilling, r = LOAN_INTEREST_MONTHLY
+    limit        = AFFORDABILITY_RATIO x (income + expected return - loan instalments - chama instalment)
+    rule maximum = 3 x deposits balance
+    capacity     = two or more guarantors whose free capacity covers (amount - own free deposits)
+
+The largest affordable amount is the largest whole shilling whose rounded-up instalment
+is within the limit. That is why 1/3 of KSh 20,000 over 6 months gives KSh 38,632, not
+the KSh 38,636 the formula gives before rounding.
+
+### Clarifications
+
+At most two per evaluation, in priority order, each with its reason and what it sets. A
+key present in the overrides means the question was asked, and null means no answer, so
+no question can be asked twice whatever the caller does. Re-evaluated after each answer.
+
+| Id | Condition | Sets | Reading of the specification |
+|---|---|---|---|
+| C1 | Term missing | `term_months` | |
+| C2 | Income older than `PROFILE_STALE_DAYS`; or missing; or unverified and among the top three SHAP drivers | `monthly_income_kes` | "Older" fires alone, because a stale figure feeds affordability whatever the model makes of it. "While among the top three" qualifies "unverified" only. Missing counts as older than anything. |
+| C3 | Instalment within 15% of the limit, either side, and an income-generating purpose | `expected_monthly_return_kes` | Added to income for affordability only. The purpose is matched against a fixed word list; it decides nothing but whether to ask. |
+| C4 | `chama_loan_use` missing or stale | `chama_loan_use`, `chama_instalment_kes` | |
+| C5 | Guarantor capacity short | `extra_guarantor` | Looked up by number and name; says only found or not found. |
+| C6 | Above both maximums | `accepted_amount_kes` | |
+
+A question whose answer cannot change the outcome is not asked: self-declared savings
+ask only C1 (the record needs a term), a hard rule failure asks nothing, High asks only
+what can move the score (C1, C2, C4), and an amount an officer must decide either way
+asks only C1 and C6. C3 and C6 wait while C1, C2 or C4 are open, since those change the
+figure they turn on. The cap is per evaluation, so a conversation has at most six.
+
+"Stale" counts from the group's last change, last check, or the member's own "still
+correct". Not `confirmed_at`, which moves when any group is edited or checked: an officer
+checking someone's household says nothing about their income.
+
+### Other decisions
+
+| Change | Status | Reason |
+|---|---|---|
+| Affordability is a third of (income minus obligations) | Decided | The specification's wording. The stricter banking convention, a third of income minus obligations, gives KSh 7,000 instead of KSh 9,000 on KSh 30,000 with KSh 3,000 owed. A one-line change if the SACCO prefers it. |
+| Own deposits in the capacity check are net of what the member guarantees for others | Decided | Beyond the specified "own deposits". One balance cannot back two loans. The same when they guarantee nothing. |
+| A verified savings figure with no ledger also refers | Decided | "On record" means the ledger. A typed figure, even an officer's, has no history. |
+| An interview row with `mode = self_service` holds each decision's assessment and decision | Added | Assessments and decisions belong to an interview, are immutable by trigger, and every screen reads them through it. Left out of the live statistics and the interviews list, as practice runs are. |
+| `self_service_runs` links each decision to its application | Added | `loan_applications.interview_id` moves on: to a second run when an offer is accepted, to the live interview when a referral is booked. The record of what the system decided must not. |
+| Accepting an offer re-runs the engine at that amount and records a second decision | Added | Capacity can have been spent since the offer. An approval pays out; anything else goes where it says. No question is asked at that point. |
+| `commit` re-runs the engine under the locks and compares with what the member was told; a difference is a 409 with nothing written | Added | Nothing trusts an evaluation passed in. The API sends `expected_outcome` and `expected_amount_kes` for this. |
+| One open self-service application per member | Added | A second, with a new key, would not see a loan not yet paid out. |
+| A referral with no term records 12 months | Added | The column is required. The trace says no term was given. |
+| Guarantor shares: the need split evenly, smallest capacity first, at least KSh 1 | Added | A `guarantors` row must hold something, even when the member's own deposits cover the loan. |
+| `not_now` is a new outcome, never open to officers | Added | An officer has "decline". Its coarse decision is decline, for the statistics. |
+| Automatic payouts reversible for `REVERSAL_HOURS`; an officer's payout has no window | As specified | The window is specified for automatic ones. The same rule applies to both: refused once the money has been drawn, or a guarantor has paid towards it. A reversal refunds repayments first, then takes the principal. |
+| Paying out releases guarantors still pending | Fixed | Phase 1 left them holding capacity on an approved application forever. |
+| Paying out checks every verified guarantor's capacity | Added | Verifying does not, so two applications can be verified against one balance. The payout is where it is stopped. |
+| The refund also refuses a defaulted loan's guarantor, until recovered in full, and an open application; it ends pledges in both directions | Added | "Guarantee nothing" must include what they still answer for. A member who has left backs nobody. |
+| `POST /api/self-service/.../accept` and `.../decline` | Added | Not in the specification's list, but reduced offers wait for the member's acceptance. |
+| The policy version gets a hash of the thresholds if any differs from its default | Added | Thresholds are configuration, so a bare version could mean two policies. |
+| A member sees no class, probability, SHAP value or guarantor's capacity | As before | Built field by field, like every member view. |
+| The system user is inactive, has no usable password and a role no endpoint admits; the admin's list and actions do not see it | Added | A row every automatic decision points at must not be something anyone can sign in as or switch on. |
+| `_migration_engine` runs with foreign keys off, and checks them before committing | Changed | SQLite cannot change a CHECK without rebuilding the table, and with foreign keys on it cannot drop a table others point at. This is SQLite's own documented procedure. |
+
+### Locking
+
+`ledger.lock_members` takes `SELECT ... ORDER BY id FOR UPDATE` on the members, then
+their accounts, always lowest id first and all in one call. A balance is a sum of rows
+that are only added, so the member row is what anyone spending it queues on. On SQLite
+there are no row locks; inserting the idempotency key takes the single write lock first.
+`sacco.use_pledges`, from phase 1, now locks too. Idempotency keys are per user, held in
+`idempotency_keys`, and go in first in the request's own transaction: a second request
+with the key waits on the unique index and gets the stored reply.
+
+### Seed
+
+No member copies a FinAccess respondent's row. Respondents are put in strata of income
+band (under 5,000; 5,000-14,999; 15,000-29,999; 30,000 and over; unknown) x household-size
+band (1-2; 3-4; 5-6; 7 and over; unknown). Each member takes personal, household, income,
+assets, purchases and borrowing fields from six different respondents of one stratum,
+drawn by the fixed seed in the survey's proportions of strata. A stratum of fewer than six
+is not used, and a composite matching a real row is drawn again. `scripts/seed_members.py`
+documents it. A profile's group timestamps now follow its last confirmation rather than
+the build time, so generated members can be stale. The values are still derived from
+licensed microdata: this reduces the licence question and does not remove it.
+
+### Changes to what earlier phases did
+
+| Before | Now | Applies to |
+|---|---|---|
+| A reversed loan did not exist | `sacco_loan_use` ignores it, arrears are 0, capacity is released | Reversed loans |
+| `POST /me/applications/{id}/booking` refused an application with an interview | Allowed on a referral held by an automatic decision; cancelling returns it to the referral | Self-service referrals |
+| `GET /api/interviews` listed every interview | Leaves out automatic decisions' records | `mode = self_service` |
+| `channel` did not exist | `branch` on every existing application | All rows |
+
+Screens are in `docs/screenshots/decisions-*.png`. Each was measured at 360, 390 and 430 px:
+nothing scrolls sideways.
+
+### Open questions
+
+- **A member can type their income.** A C2 answer replaces the profile for the score and
+  for affordability, unchecked, and up to KSh 50,000 can then leave automatically. In the
+  demo, KSh 10,000 becoming KSh 30,000 moves Njeri from Medium to Low. The specification
+  asks for this behaviour; a real SACCO would want a limit, such as referring any answer
+  far above the profile, or above what deposits suggest. The trace records
+  that the figure came from the conversation; nothing stops it.
+- **Medium after C1.** Giving a repayment term counts as "a clarification answered", which
+  clears a Medium score, though a term says nothing about the person. Only C2 and C4 can
+  move the score.
+- **Existing loans and the 3 x rule.** The rule compares the request with deposits, as
+  specified, not outstanding loans plus the request. Only affordability sees a second loan.
+- **Guarantors are not told.** A standing pledge becomes a live guarantee with no message
+  to the guarantor and no ceiling beyond their capacity. A real guarantor would need notice.
+- **Automated decisions and the Kenya Data Protection Act 2019.** Section 35 concerns
+  decisions based solely on automated processing. Approvals and "not now" here have no
+  human in them; the consent text does not mention them. "Not now" tells the member what
+  to do, but does not offer a person. To be settled before real members use it.
+- **A capacity oracle.** Whether a loan clears can tell a member something about a
+  guarantor's capacity by trying different amounts. No figure is returned, and evaluations
+  are limited per hour, per member, per process.
+- **Erasure.** Each trace records guarantors' member numbers and free capacity in an
+  immutable row, which adds to the phase 1 question.
+
+### API changes for this work
+
+| Change | Reason |
+|---|---|
+| `POST /api/self-service/evaluate`, `/commit`, `/applications/{id}/accept`, `/decline` | For the next phase. Member role, own record, rate limited. The body has no member id. |
+| `POST /api/members/{id}/deposits`, `/withdrawals`, `/refund-deposits`, `/pledges`; `POST /api/pledges/{id}/withdraw`; `POST /api/applications/{id}/payout`; `POST /api/loans/{id}/repayments`, `/reverse` | The ledger operations. Officers and admins, audited, `Idempotency-Key` required. |
+| `GET /api/automatic-decisions`, `/{id}` | The officers' page. Two queries for the list, however many rows. |
+| `policy_version` on `DecisionOut`; `self_service` in `mode`; `offered` and `reversed` in application status; `reversed` in loan status; `not_now` in outcome | What the screens must now show. Officers cannot choose `not_now` or start a `self_service` interview. |
+| Row-level security, with no policies, on the two new tables | As on every other table. |

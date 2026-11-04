@@ -10,6 +10,24 @@ left out of the frame's usecols, so the outcome cannot influence anything below.
 No county or respondent number is stored. If those files are absent, as in CI,
 synthetic_respondents() draws the same fields and the run says so.
 
+No member is one respondent. Respondents are put in strata, income band x
+household-size band, and each member takes each field group from a different
+respondent of one stratum, chosen by the fixed seed (compose_members):
+
+    Group       Fields
+    ----------  --------------------------------------------------------------
+    personal    age, sex, education, marital status
+    household   household size, children, under five, in school
+    income      monthly income, farm income, income sources
+    assets      non-monetary savings
+    purchases   purchases in the last 12 months
+    borrowing   SACCO and chama loan use, lost as guarantor
+
+So the figures that belong together stay together, the mix of households and
+incomes stays the survey's, and no row of the licensed microdata is reproduced. A
+stratum of fewer than six respondents is not drawn from, and a member who happens
+to match a real respondent's whole row is drawn again.
+
     Field               Rule
     ------------------  -----------------------------------------------------------
     names               invented: first names by the respondent's sex, surnames from
@@ -45,7 +63,7 @@ synthetic_respondents() draws the same fields and the run says so.
                         least KSh 1,000 of capacity left over
     verification        each field group: verified by an officer with probability 0.6,
                         otherwise source "seed" and unverified
-    last confirmed      0 to 400 days ago
+    last confirmed      0 to 400 days ago; each group was last set then
 
 A fixed random seed (SEED) and the date given decide everything, so the same day
 gives the same members. Every derived feature agrees with the respondent's answer
@@ -60,6 +78,7 @@ which is why the demo shows an application linked to a loan.
 from __future__ import annotations
 
 import importlib
+import json
 import math
 import random
 import sys
@@ -187,14 +206,69 @@ def synthetic_respondents(n: int, rng: random.Random) -> list[dict]:
     return out
 
 
+# --- No member is one respondent ---------------------------------------------------------
+
+FIELD_GROUPS = {"household": ("household_size", "children", "children_under5", "children_in_school"),
+                "income": ("monthly_income_kes", "agri_income_kes", "income_sources"),
+                "assets": ("non_monetary_savings",),
+                "purchases": ("purchases_last_12m",),
+                "borrowing": ("sacco_loan_use", "chama_loan_use", "lost_as_guarantor")}
+DONORS = len(FIELD_GROUPS) + 1      # one for each group, and one for the personal form
+
+
+def income_band(income: int | None) -> str:
+    if income is None:
+        return "unknown"
+    return "under 5,000" if income < 5000 else "5,000-14,999" if income < 15000 \
+        else "15,000-29,999" if income < 30000 else "30,000 and over"
+
+
+def household_band(size: int | None) -> str:
+    if size is None:
+        return "unknown"
+    return "1-2" if size <= 2 else "3-4" if size <= 4 else "5-6" if size <= 6 else "7 and over"
+
+
+def stratum(r: dict) -> tuple[str, str]:
+    return income_band(r["features"]["monthly_income_kes"]), household_band(r["features"]["household_size"])
+
+
+def row_key(r: dict) -> str:
+    return json.dumps([r["form"], r["features"]], sort_keys=True)
+
+
+def compose_members(everyone: list[dict], n: int, rng: random.Random) -> list[dict]:
+    """n members in the survey's proportions of strata, each with every field group
+    from a different respondent of its stratum. Deterministic for a given rng."""
+    strata: dict[tuple[str, str], list[dict]] = {}
+    for r in everyone:
+        strata.setdefault(stratum(r), []).append(r)
+    usable = {k: v for k, v in sorted(strata.items()) if len(v) >= DONORS}
+    if not usable:
+        raise ValueError(f"no stratum has the {DONORS} respondents a member needs")
+    real = {row_key(r) for r in everyone}
+    bands, sizes = zip(*((k, len(v)) for k, v in usable.items()))
+    out = []
+    for band in rng.choices(bands, weights=sizes, k=n):
+        while True:
+            person, *donors = rng.sample(usable[band], DONORS)
+            features = {f: donor["features"][f] for donor, fields in zip(donors, FIELD_GROUPS.values()) for f in fields}
+            member = {"form": person["form"], "features": features}
+            if row_key(member) not in real:
+                out.append(member)
+                break
+    return out
+
+
 def choose_respondents(n: int, rng: random.Random, log=print) -> tuple[list[dict], str]:
-    """(n respondents, where they came from). The label is never among what is read."""
+    """(n members' fields, where they came from). The label is never among what is read."""
     everyone = load_central_respondents()
     if not everyone:
         log("FinAccess files absent: members generated by the synthetic generator instead")
         return synthetic_respondents(n, rng), "synthetic"
-    log(f"members drawn from {len(everyone):,} Central Kenya FinAccess respondents (features only)")
-    return rng.sample(everyone, min(n, len(everyone))), "finaccess"
+    log(f"members composed from {len(everyone):,} Central Kenya FinAccess respondents (features only; "
+        "no member is one respondent)")
+    return compose_members(everyone, n, rng), "finaccess"
 
 
 # --- The plan: plain data, so the same seed can be compared without a database ---------------
@@ -233,6 +307,8 @@ class Person:
     verified: list[str] = field(default_factory=list)   # field groups an officer has checked
     verifier: str = "officer1"
     confirmed_days_ago: int = 0
+    # A group last changed before the last confirmation; others were set by then.
+    updated_days_ago: dict[str, int] = field(default_factory=dict)
 
     def deposits(self, upto: date | None = None) -> int:
         return sum(e[2] for e in self.entries if e[0] == "deposits" and (upto is None or e[3] <= upto))
@@ -510,13 +586,28 @@ def deposits_reaching(p: Person, goals: list[Checkpoint], losses: dict[date, int
             p.entries.append(("deposits", "deposit", fifty(rate), d, f"DEP-{d:%Y%m}-t", None))
 
 
-# Pledges among the named people: borrower -> guarantors.
+# Pledges among the named people: borrower -> guarantors. The four of the automatic
+# decisions pledge only to each other, so that the demo's other figures stay as they are.
 NAMED_PLEDGES = {"grace": ["david", "john"], "peter": ["john", "david"], "mary": ["grace", "john"],
                  "john": ["grace", "david"], "faith": ["john", "mary"], "samuel": ["peter", "mary"],
-                 "esther": ["john", "grace", "mary"], "joseph": ["grace", "peter"], "david": ["john", "grace"]}
+                 "esther": ["john", "grace", "mary"], "joseph": ["grace", "peter"], "david": ["john", "grace"],
+                 "wanjiru": ["lucy", "anne"], "njeri": ["lucy", "anne"], "lucy": ["wanjiru", "anne"],
+                 "anne": ["lucy", "wanjiru"]}
 NAMED_LOANS = {"john": dict(principal=20000, term=24, months=14, guarantors=[("grace", 10000), ("david", 10000)]),
                "grace": dict(principal=30000, term=12, months=30),
-               "david": dict(principal=40000, term=18, months=26)}
+               "david": dict(principal=40000, term=18, months=26),
+               "wanjiru": dict(principal=30000, term=12, months=30),
+               "lucy": dict(principal=30000, term=12, months=28),
+               "anne": dict(principal=20000, term=12, months=26)}
+
+
+def level_deposits(p: Person, total: int, today: date, day: int = 5) -> None:
+    """Deposits reaching this total by yesterday, evenly since joining."""
+    months = month_starts(p.joined_on, today - timedelta(days=1), day) or [today - timedelta(days=1)]
+    each = total // len(months)
+    for i, d in enumerate(months):
+        amount = total - each * (len(months) - 1) if i == len(months) - 1 else each
+        p.entries.append(("deposits", "deposit", amount, d, f"DEP-{d:%Y%m}", None))
 ESTHER_LOSS_DAYS_AGO, ESTHER_LOSS = 60, 1500
 
 
@@ -534,7 +625,10 @@ def named_people(people: dict[str, dict], applications: list[dict], today: date,
             p.entries.append(("deposits", "guarantee_recovery", -ESTHER_LOSS, when, f"REC-{default_loan.key}",
                               default_loan.key))
             default_loan.guarantors.append((key, ESTHER_LOSS))
-        deposits_reaching(p, checkpoints(key, applications, now), losses, today)
+        if "deposits" in spec:
+            level_deposits(p, spec["deposits"], today)
+        else:
+            deposits_reaching(p, checkpoints(key, applications, now), losses, today)
         add_share_capital(p, rng, today, 3000)
         if (loan := NAMED_LOANS.get(key)) is not None:
             elapsed = loan["months"]
@@ -544,6 +638,10 @@ def named_people(people: dict[str, dict], applications: list[dict], today: date,
                      list(loan.get("guarantors", [])))
             p.loans.append(x)
         verification(p, rng)
+        if "verified" in spec:      # people whose outcome a test pins down
+            p.verified = spec["verified"]
+            p.confirmed_days_ago = spec["confirmed_days_ago"]
+            p.updated_days_ago = spec.get("updated_days_ago", {})
         out.append(p)
     return out
 
@@ -586,7 +684,7 @@ def write_profile(db: Session, m: Member, p: Person, verifiers: dict[str, User],
     for g in PROFILE_GROUPS:
         verified = g in p.verified
         setattr(row, f"{g}_source", "officer_verified" if verified else "seed")
-        setattr(row, f"{g}_updated_at", now)
+        setattr(row, f"{g}_updated_at", now - timedelta(days=p.updated_days_ago.get(g, p.confirmed_days_ago)))
         setattr(row, f"{g}_verified_by", officer.username if verified else None)
         setattr(row, f"{g}_verified_at", row.confirmed_at if verified else None)
     db.add(row)

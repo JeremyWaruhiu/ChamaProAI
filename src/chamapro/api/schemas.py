@@ -15,7 +15,9 @@ ResponseStatus = Literal["queued", "transcribing", "transcribed", "failed"]
 InterviewStatus = Literal["open", "assessed"]
 QuestionSet = Literal["v1", "v2"]
 Language = Literal["kik", "en"]
-Mode = Literal["live", "practice"]
+# How a person can start an interview; self_service ones are only made by a decision.
+StartMode = Literal["live", "practice"]
+Mode = Literal["live", "practice", "self_service"]
 Source = Literal["audio", "typed"]
 Sex = Literal["female", "male"]
 MaritalStatus = Literal["married", "single", "widowed", "divorced"]
@@ -44,7 +46,7 @@ class InterviewCreate(BaseModel):
     applicant: ApplicantForm | None = Field(default=None, description="Required for question set v2")
     question_set: QuestionSet = Field(default="v2", description="v1 is the 40-sentence set of the recorded corpus")
     language: Language = "kik"
-    mode: Mode = Field(default="live", description="practice interviews are excluded from live statistics")
+    mode: StartMode = Field(default="live", description="practice interviews are excluded from live statistics")
 
 
 class InterviewCreated(BaseModel):
@@ -175,13 +177,15 @@ class Question(BaseModel):
 
 
 DecisionValue = Literal["approve", "decline", "refer"]
-Outcome = Literal["approve", "approve_with_guarantor", "approve_reduced", "refer", "decline"]
+OfficerOutcome = Literal["approve", "approve_with_guarantor", "approve_reduced", "refer", "decline"]
+# not_now is only ever an automatic decision: a rule that could not be met yet.
+Outcome = Literal["approve", "approve_with_guarantor", "approve_reduced", "refer", "decline", "not_now"]
 
 
 class DecisionCreate(BaseModel):
     """`outcome` is the decision; `decision` (approve | decline | refer) is
     its older name and still accepted. `note` is the older name of officer_notes."""
-    outcome: Outcome | None = None
+    outcome: OfficerOutcome | None = None
     decision: DecisionValue | None = None
     approved_amount_kes: int | None = Field(default=None, gt=0, description="approve_reduced: "
                                             "required, below the amount requested")
@@ -224,6 +228,7 @@ class DecisionOut(ORM):
     member_message: str | None = None
     decided_by: str | None = Field(default=None, description="Username; null before sign-in existed")
     created_at: datetime
+    policy_version: str | None = Field(default=None, description="Automatic decisions only")
 
 
 Role = Literal["admin", "officer", "member"]
@@ -346,7 +351,7 @@ class Health(BaseModel):
 
 ApplicationStatus = Literal["draft", "interview_pending", "interview_complete", "assessed",
                             "decided", "guarantor_required", "guarantor_submitted",
-                            "approved", "declined"]
+                            "approved", "declined", "offered", "reversed"]
 GuarantorStatus = Literal["pending", "verified", "rejected"]
 MEMBER_NO = r"^[A-Za-z0-9][A-Za-z0-9/-]{0,31}$"
 EMAIL = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
@@ -1039,7 +1044,7 @@ class AuditOut(BaseModel):
 ProfileSource = Literal["registration", "member_update", "officer_verified", "seed"]
 ProfileGroup = Literal["personal", "household", "income", "assets", "credit"]
 AccountKind = Literal["deposits", "share_capital", "transactional"]
-LoanStatus = Literal["active", "repaid", "defaulted"]
+LoanStatus = Literal["active", "repaid", "defaulted", "reversed"]
 Provenance = Literal["records", "declared", "verified", "missing"]
 
 
@@ -1189,3 +1194,178 @@ class GuarantorOffers(BaseModel):
 class UsePledges(BaseModel):
     model_config = ConfigDict(extra="forbid")
     pledge_ids: list[int] = Field(min_length=1, max_length=20)
+
+
+# --- Ledger operations (staff) ----------------------------------------------------------
+
+KES = Field(gt=0, le=100_000_000)
+
+
+class DepositPost(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    account: AccountKind = "deposits"
+    amount_kes: int = KES
+    reference: str | None = Field(default=None, min_length=1, max_length=40,
+                                  description="A receipt number; generated if not given. Used once per account")
+
+
+class WithdrawalPost(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    account: Literal["share_capital", "transactional"] = Field(description="Deposits back loans and are never withdrawn")
+    amount_kes: int = KES
+    reference: str | None = Field(default=None, min_length=1, max_length=40)
+
+
+class EntryPosted(BaseModel):
+    entry: EntryOut
+    account: AccountKind
+    balance_kes: int
+
+
+class PledgeCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    guarantor_member_no: str = Field(min_length=1, max_length=32)
+
+
+class PledgeState(BaseModel):
+    id: int
+    borrower_member_id: int
+    guarantor_member_id: int
+    status: Literal["active", "withdrawn"]
+
+
+class RepaymentPost(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    amount_kes: int = KES
+    reference: str | None = Field(default=None, min_length=1, max_length=40)
+
+
+class ReversalPost(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    reason: str = Field(min_length=3, max_length=500, description="Kept in the audit log, which cannot be erased: "
+                                                                  "no names or personal details")
+
+    @field_validator("reason")
+    @classmethod
+    def _reason(cls, v: str) -> str:
+        return not_blank(v)
+
+
+class Refunded(BaseModel):
+    entry: EntryOut
+    pledges_ended: int
+
+
+# --- Self-service: what the next phase's conversation calls -------------------------------
+
+class ExtraGuarantor(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    full_name: str = Field(min_length=1, max_length=200)
+    member_no: str = Field(min_length=1, max_length=32)
+
+
+class ConversationAnswers(BaseModel):
+    """What the member said, by what it sets. Null means they were asked and gave no answer."""
+    model_config = ConfigDict(extra="forbid")
+    term_months: int | None = Field(default=None, ge=1, le=120)
+    monthly_income_kes: int | None = Field(default=None, ge=0, le=100_000_000)
+    expected_monthly_return_kes: int | None = Field(default=None, ge=0, le=100_000_000)
+    chama_loan_use: Literal[0, 1, 2] | None = None
+    chama_instalment_kes: int | None = Field(default=None, ge=0, le=100_000_000)
+    extra_guarantor: ExtraGuarantor | None = None
+    accepted_amount_kes: int | None = Field(default=None, gt=0, le=100_000_000)
+
+
+class SelfServiceRequest(BaseModel):
+    """No member id: it is always the signed-in member's own record."""
+    model_config = ConfigDict(extra="forbid")
+    amount_kes: int = KES
+    purpose: str = Field(min_length=1, max_length=500)
+    term_months: int | None = Field(default=None, ge=1, le=120)
+    overrides: ConversationAnswers = Field(default_factory=ConversationAnswers)
+
+    @field_validator("purpose")
+    @classmethod
+    def _purpose(cls, v: str) -> str:
+        return not_blank(v)
+
+
+SelfServiceOutcome = Literal["approve", "approve_reduced", "refer", "not_now", "clarify"]
+
+
+class SelfServiceCommit(SelfServiceRequest):
+    expected_outcome: SelfServiceOutcome = Field(description="What the member was told: if a fresh evaluation "
+                                                             "differs, nothing is written")
+    expected_amount_kes: int | None = None
+
+
+class ClarificationOut(BaseModel):
+    id: Literal["C1", "C2", "C3", "C4", "C5", "C6"]
+    reason: str
+    sets: list[str] = Field(description="The override keys its answer goes in")
+
+
+class SelfServiceEvaluation(BaseModel):
+    """What a member may see. Nothing of the class, the probabilities or the SHAP
+    values, and nothing of a guarantor's capacity."""
+    outcome: SelfServiceOutcome
+    reason: str
+    questions: list[ClarificationOut]
+    amount_requested_kes: int
+    amount_on_offer_kes: int | None
+    term_months: int | None
+    monthly_instalment_kes: int | None
+    maximum_by_savings_kes: int
+    maximum_affordable_kes: int | None
+    extra_guarantor_found: bool | None = Field(description="Null unless a guarantor was named")
+    reasons: list[str] = Field(description="What counted, in words, once there is an outcome")
+    policy_version: str
+
+
+class SelfServiceCommitted(BaseModel):
+    application_id: int
+    outcome: SelfServiceOutcome
+    status: ApplicationStatus
+    status_label: str
+    message: str
+    amount_kes: int | None
+    term_months: int
+    monthly_instalment_kes: int | None
+    loan_id: int | None
+    can_book_interview: bool
+    can_accept: bool
+    policy_version: str
+
+
+# --- Officer: automatic decisions -----------------------------------------------------------
+
+class AutomaticDecision(BaseModel):
+    id: int
+    application_id: int
+    member_id: int
+    member_no: str
+    member_name: str
+    trigger: Literal["commit", "acceptance"]
+    outcome: Outcome
+    amount_requested_kes: int
+    amount_kes: int | None = Field(description="The amount approved or offered")
+    risk_class: str
+    policy_version: str
+    application_status: ApplicationStatus
+    loan_id: int | None
+    loan_status: LoanStatus | None
+    reversible_until: datetime | None = Field(description="Set while this decision's payout can still be undone")
+    created_at: datetime
+
+
+class AutomaticDecisionDetail(AutomaticDecision):
+    probabilities: dict[str, float]
+    contributions: list[dict] | str
+    feature_vector: dict
+    features: dict
+    provenance: dict
+    overrides: dict
+    trace: dict
+    member_message: str | None
+    model_file: str
+    model_sha256: str

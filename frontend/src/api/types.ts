@@ -3,11 +3,11 @@
 export type ResponseStatus = 'queued' | 'transcribing' | 'transcribed' | 'failed'
 export type InterviewStatus = 'open' | 'assessed'
 export type DecisionValue = 'approve' | 'decline' | 'refer'
-export type Outcome = 'approve' | 'approve_with_guarantor' | 'approve_reduced' | 'refer' | 'decline'
+export type Outcome = 'approve' | 'approve_with_guarantor' | 'approve_reduced' | 'refer' | 'decline' | 'not_now'
 export type Role = 'officer' | 'admin' | 'member'
 export type QuestionSet = 'v1' | 'v2'
 export type Language = 'kik' | 'en'
-export type Mode = 'live' | 'practice'
+export type Mode = 'live' | 'practice' | 'self_service'
 export type Source = 'audio' | 'typed'
 export type Sex = 'female' | 'male'
 export type MaritalStatus = 'married' | 'single' | 'widowed' | 'divorced'
@@ -327,7 +327,7 @@ export interface Profile {
 // --- Members, applications, guarantors -----------------------------------------
 
 export type ApplicationStatus = 'draft' | 'interview_pending' | 'interview_complete' | 'assessed'
-  | 'decided' | 'guarantor_required' | 'guarantor_submitted' | 'approved' | 'declined'
+  | 'decided' | 'guarantor_required' | 'guarantor_submitted' | 'approved' | 'declined' | 'offered' | 'reversed'
 export type GuarantorStatus = 'pending' | 'verified' | 'rejected'
 export type ConditionResult = 'pass' | 'fail' | 'pending'
 export type Agreement = 'agree' | 'diverge' | 'pending' | 'undetermined'
@@ -743,7 +743,7 @@ export interface PilotStats {
 
 export type AccountKind = 'deposits' | 'share_capital' | 'transactional'
 export type EntryType = 'deposit' | 'withdrawal' | 'loan_disbursement' | 'loan_repayment' | 'guarantee_recovery' | 'dividend'
-export type LoanStatus = 'active' | 'repaid' | 'defaulted'
+export type LoanStatus = 'active' | 'repaid' | 'defaulted' | 'reversed'
 
 /** What a member says about themselves. sacco_loan_use and lost_as_guarantor.sacco are derived and refused. */
 export interface ProfileBody {
@@ -834,4 +834,55 @@ export interface GuarantorOffers {
   share_kes: number
   needed: number
   offers: { pledge_id: number; full_name: string; member_no: string }[]
+}
+
+// --- Automatic decisions --------------------------------------------------------------------
+
+export interface AutomaticDecision {
+  id: number
+  application_id: number
+  member_id: number
+  member_no: string
+  member_name: string
+  trigger: 'commit' | 'acceptance'
+  outcome: Outcome
+  amount_requested_kes: number
+  amount_kes: number | null
+  risk_class: string
+  policy_version: string
+  application_status: ApplicationStatus
+  loan_id: number | null
+  loan_status: LoanStatus | null
+  reversible_until: string | null
+  created_at: string
+}
+
+export interface PolicyCheck {
+  check: string
+  passed: boolean | null
+  values: Record<string, unknown>
+}
+
+export interface PolicyTrace {
+  policy_version?: string
+  evaluated_on?: string
+  reason_code?: string
+  thresholds?: Record<string, number>
+  checks?: PolicyCheck[]
+  maximums?: { rule_kes: number; affordable_kes: number | null }
+  effective?: { amount_kes: number; term_months: number | null }
+  clarifications?: { conditions: Record<string, boolean>; asked: string[]; answered: string[]; returned: string[] }
+}
+
+export interface AutomaticDecisionDetail extends AutomaticDecision {
+  probabilities: Record<string, number>
+  contributions: Contribution[] | string
+  feature_vector: Record<string, number | null>
+  features: Record<string, unknown>
+  provenance: Record<string, string>
+  overrides: Record<string, unknown>
+  trace: PolicyTrace
+  member_message: string | null
+  model_file: string
+  model_sha256: string
 }

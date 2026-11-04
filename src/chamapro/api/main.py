@@ -25,7 +25,8 @@ from sqlalchemy.orm import Session, contains_eager, joinedload, selectinload
 
 from chamapro import config
 
-from . import admin, audit, auth, bookings, comparator, events, ledger, live_cache, loans, pilot, sacco, storage
+from . import (admin, audit, auth, bookings, comparator, events, ledger, ledger_api, live_cache, loans, pilot, sacco,
+               self_service, storage)
 from . import pipeline as pl
 from . import schemas as s
 from .auth import require_admin, require_member, require_officer
@@ -96,6 +97,8 @@ app.include_router(bookings.router)
 app.include_router(events.router)
 app.include_router(pilot.router)
 app.include_router(sacco.router)
+app.include_router(ledger_api.router)
+app.include_router(self_service.router)
 
 
 # --- Errors: always {"detail": "<string>"} -----------------------------------
@@ -443,7 +446,8 @@ def create_interview(body: s.InterviewCreate | None = None, db: Session = Depend
 @app.get("/api/interviews", response_model=list[s.InterviewSummary], responses=ERRORS,
          dependencies=OFFICER)
 def list_interviews(db: Session = Depends(get_db)):
-    """Every interview, newest first, with response counts and any risk class."""
+    """Every interview, newest first, with response counts and any risk class. An
+    automatic decision's record has no answers to work on: that has its own page."""
     per_status = {st: func.coalesce(func.sum(case((Response.status == st, 1), else_=0)), 0)
                   for st in ("queued", "transcribed", "failed")}
     counts = (select(Response.interview_id, *(c.label(st) for st, c in per_status.items()))
@@ -457,6 +461,7 @@ def list_interviews(db: Session = Depends(get_db)):
         .outerjoin(Assessment, Assessment.interview_id == Interview.id)
         .outerjoin(Decision, Decision.interview_id == Interview.id)
         .outerjoin(counts, counts.c.interview_id == Interview.id)
+        .where(Interview.mode != "self_service")
         .order_by(Interview.created_at.desc(), Interview.id.desc()))
     busy = live_status_of(db)
     out = []

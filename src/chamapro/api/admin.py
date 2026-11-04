@@ -18,7 +18,7 @@ from sqlalchemy.orm import Session
 from . import audit
 from . import schemas as s
 from .auth import hash_password, require_admin
-from .db import AuditLog, AuthSession, Member, User, get_db, normalise_email
+from .db import SYSTEM_ROLE, AuditLog, AuthSession, Member, User, get_db, normalise_email
 
 ERRORS = {code: {"model": s.Error} for code in (401, 403, 404, 409, 422)}
 router = APIRouter(prefix="/api/admin", responses=ERRORS)
@@ -42,7 +42,7 @@ def clean_name(name: str | None) -> str | None:
 
 def get_user(db: Session, user_id: int) -> User:
     u = db.get(User, user_id)
-    if u is None:
+    if u is None or u.role == SYSTEM_ROLE:      # nobody administers the system user
         raise HTTPException(404, f"user {user_id} not found")
     return u
 
@@ -96,7 +96,7 @@ def link_member(db: Session, u: User, member_id: int | None, actor: User) -> Non
 def list_users(db: Session = Depends(get_db), _: User = Depends(require_admin)):
     # Each user with their member record, if any, in one query (user_id is unique).
     rows = db.execute(select(User, Member).outerjoin(Member, Member.user_id == User.id)
-                      .order_by(User.username))
+                      .where(User.role != SYSTEM_ROLE).order_by(User.username))
     return [as_user_out(u, m) for u, m in rows]
 
 

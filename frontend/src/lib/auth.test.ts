@@ -138,6 +138,15 @@ describe('the volunteer pilot\'s screens', () => {
     }
   })
 
+  it('automatic decisions are for staff', () => {
+    for (const screen of ['decisions', 'decision'] as const) {
+      expect(canOpen(screen, 'officer')).toBe(true)
+      expect(canOpen(screen, 'admin')).toBe(true)
+      expect(canOpen(screen, 'member')).toBe(false)
+      expect(canOpen(screen, null)).toBe(false)
+    }
+  })
+
   it('bookings and events are for staff, the pilot page for admins', () => {
     expect(redirectFor('#/bookings', officer)).toBeNull()
     expect(redirectFor('#/events', admin)).toBeNull()

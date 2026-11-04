@@ -341,6 +341,11 @@ def detail(db: Session, app: LoanApplication) -> s.ApplicationDetail:
         guarantors=[guarantor_out(g) for g in app.guarantors], timeline=timeline(db, app))
 
 
+def held_by_automatic_decision(app: LoanApplication) -> bool:
+    """Its interview is still the record of an automatic decision, no live one yet."""
+    return app.interview is not None and app.interview.mode == "self_service"
+
+
 def mode_of(app: LoanApplication) -> str:
     """practice when its interview is; an application without one yet is live."""
     return app.interview.mode if app.interview else "live"
