@@ -1,22 +1,27 @@
 import { AnimatePresence, m } from 'motion/react'
-import { useCallback, useRef, useState, type FormEvent } from 'react'
+import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react'
 import { ApiError, api } from '../api/client'
-import type { MyApplication as Mine, MyGuarantor } from '../api/types'
+import type { Language, MyApplication as Mine, MyGuarantor, MyMember, SignupInfo } from '../api/types'
 import { OutcomeBadge } from '../components/Badges'
 import { Icon } from '../components/Icon'
 import { ErrorNotice } from '../components/Notice'
+import { SlotPicker } from '../components/SlotPicker'
 import { Badge, Card, DetailList, Field, PracticeBadge, SkeletonPage, Timeline } from '../components/ui'
 import { useLoad } from '../hooks/useLoad'
 import { formatDate, formatKes } from '../lib/format'
+import { formatNairobi } from '../lib/nairobi'
 import { checkGuarantors, emptyGuarantor, toGuarantorIn, type GuarantorCheck, type GuarantorDraft } from '../lib/guarantors'
 import { fadeUp, useReducedMotion } from '../lib/motion'
-import { paths } from '../lib/router'
+import { navigate, paths } from '../lib/router'
 import { STATUS_TONE, memberStages, type Tone } from '../lib/status'
 import { t } from '../strings'
+import { ConsentBox } from './Signup'
 import styles from './Member.module.css'
 
 const Y = t.my
 const F = t.guarantorForm
+const K = t.myBooking
+const P = t.practice
 const G_TONE: Record<MyGuarantor['status'], Tone> = { pending: 'wait', verified: 'low', rejected: 'high' }
 
 export function MyApplication({ id }: { id: number }) {
@@ -75,8 +80,11 @@ export function MyApplication({ id }: { id: number }) {
         </Card>
       )}
 
+      <BookingCard app={app} onChanged={setData} />
+
       <Card title={Y.next} delay={0.15}>
-        <p>{Y.nextSteps[app.status]}</p>
+        <p>{app.status === 'interview_pending' && app.booking && !['started', 'cancelled'].includes(app.booking.status)
+          ? K.nextBooked : Y.nextSteps[app.status]}</p>
       </Card>
 
       <AnimatePresence mode="wait" initial={false}>
@@ -112,7 +120,153 @@ export function MyApplication({ id }: { id: number }) {
           </ul>
         </Card>
       )}
+
+      <PracticeCard app={app} />
+
+      {(app.history?.length ?? 0) > 0 && (
+        <Card title={t.history.title}>
+          <ol className={styles.history}>
+            {app.history!.map((h, i) => (
+              <li key={i}><span>{h.label}</span> <span className="subtle small">{formatDate(h.at)}</span></li>
+            ))}
+          </ol>
+        </Card>
+      )}
     </div>
+  )
+}
+
+/** The booked interview, or booking one if none stands. */
+function BookingCard({ app, onChanged }: { app: Mine; onChanged: (a: Mine) => void }) {
+  const [slot, setSlot] = useState({ date: '', time: '' })
+  const [language, setLanguage] = useState<Language>('kik')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<ApiError | null>(null)
+  const b = app.booking
+  const canBook = !b && (app.status === 'draft' || app.status === 'interview_pending')
+  if (!b && !canBook) return null
+
+  async function book() {
+    setBusy(true)
+    setError(null)
+    try {
+      onChanged(await api.bookInterview(app.id, { ...slot, language }))
+    } catch (e) {
+      setError(e as ApiError)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <Card title={K.title}>
+      {b ? (
+        <>
+          <p className={styles.nextWhen}><Icon name="clock" size={18} /> {formatNairobi(b.starts_at)}</p>
+          <div className={styles.badges}>
+            <Badge tone={b.status === 'confirmed' ? 'low' : 'wait'}>{t.booking.status[b.status]}</Badge>
+            <Badge>{b.language === 'en' ? t.common.english : t.common.kikuyu}</Badge>
+          </div>
+        </>
+      ) : (
+        <>
+          <p className="muted">{K.none}</p>
+          <div className={styles.bookForm}>
+            <LanguageChoice name="bk-language" value={language} onChange={setLanguage} legend={t.apply.language} />
+            <SlotPicker date={slot.date} time={slot.time} idPrefix="bk" onChange={setSlot} />
+            {error && <ErrorNotice doing={K.failed} error={error} />}
+            <button type="button" className="btn btn-primary btn-block" onClick={book} disabled={busy || !slot.date || !slot.time}>
+              {busy && <span className="spinner" aria-hidden />} {busy ? K.booking : K.book}
+            </button>
+          </div>
+        </>
+      )}
+    </Card>
+  )
+}
+
+function LanguageChoice({ name, value, onChange, legend }: { name: string; value: Language; onChange: (l: Language) => void; legend: string }) {
+  return (
+    <fieldset className={styles.fieldset}>
+      <legend className="field-label">{legend}</legend>
+      {(['kik', 'en'] as const).map((l) => (
+        <label key={l} className="choice">
+          <input type="radio" name={name} checked={value === l} onChange={() => onChange(l)} />
+          <span>{l === 'kik' ? t.common.kikuyu : t.common.english}</span>
+        </label>
+      ))}
+    </fieldset>
+  )
+}
+
+/** Practice interviews on this application: start one, carry on, or see a result. */
+function PracticeCard({ app }: { app: Mine }) {
+  const [language, setLanguage] = useState<Language>('kik')
+  const [member, setMember] = useState<MyMember | null>(null)
+  const [info, setInfo] = useState<SignupInfo | null>(null)
+  const [agreed, setAgreed] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<ApiError | null>(null)
+  const attempts = app.practice ?? []
+  const open = attempts.find((a) => a.status === 'open')
+
+  useEffect(() => {
+    let live = true
+    api.myMember().then((m) => { if (live) setMember(m) }).catch(() => { /* the start button still reports any problem */ })
+    api.signupInfo().then((i) => { if (live) setInfo(i) }).catch(() => { /* as above */ })
+    return () => { live = false }
+  }, [])
+
+  const needConsent = member?.consent_current === false
+  const needForm = member?.applicant_complete === false
+
+  async function start() {
+    setBusy(true)
+    setError(null)
+    try {
+      if (needConsent && info) await api.giveConsent(info.consent_version)
+      const p = await api.startPractice(app.id, language)
+      navigate(paths.practice(p.id))
+    } catch (e) {
+      setError(e as ApiError)
+      setBusy(false)
+    }
+  }
+
+  return (
+    <Card title={<>{P.cardTitle} <PracticeBadge /></>}>
+      <p className="muted small">{P.cardLead}</p>
+      {attempts.length > 0 && (
+        <ul className={styles.attempts}>
+          {attempts.map((a) => (
+            <li key={a.id} className={styles.attempt}>
+              <span>
+                {a.language === 'en' ? t.common.english : t.common.kikuyu} · {formatDate(a.created_at)}
+                <span className="subtle small"> · {a.status === 'assessed' ? P.done : P.attempt(a.answered, a.questions_total)}</span>
+              </span>
+              <a className="btn btn-secondary btn-sm" href={a.status === 'assessed' ? paths.practiceResult(a.id) : paths.practice(a.id)}>
+                {a.status === 'assessed' ? P.viewResult : P.continue}
+              </a>
+            </li>
+          ))}
+        </ul>
+      )}
+      {!open && needForm && (
+        <p className={styles.nextLink}><a href={paths.profile()}>{P.needForm} {P.goToProfile}</a></p>
+      )}
+      {!open && !needForm && (
+        <div className={styles.bookForm}>
+          <LanguageChoice name="pr-language" value={language} onChange={setLanguage} legend={P.language} />
+          {needConsent && info && (
+            <ConsentBox text={info.consent_text} checked={agreed} onChange={setAgreed} title={P.consentTitle} agree={P.consentAgree} />
+          )}
+          {error && <ErrorNotice doing={P.startFailed} error={error} />}
+          <button type="button" className="btn btn-secondary btn-block" onClick={start} disabled={busy || (needConsent && !agreed)}>
+            {busy ? <span className="spinner" aria-hidden /> : <Icon name="sparkle" />} {busy ? P.starting : P.start}
+          </button>
+        </div>
+      )}
+    </Card>
   )
 }
 

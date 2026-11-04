@@ -13,9 +13,26 @@ MEMBER_ROUTES = {("GET", "/api/me/applications"), ("GET", "/api/me/applications/
                  ("GET", "/api/auth/me"), ("POST", "/api/auth/logout"),
                  # your own account: every role
                  ("GET", "/api/auth/profile"), ("POST", "/api/auth/password"),
-                 ("POST", "/api/auth/logout-all")}
+                 ("POST", "/api/auth/logout-all"),
+                 # a member's own record, loan application and practice interviews
+                 ("GET", "/api/me/home"), ("GET", "/api/me/member"), ("PATCH", "/api/me/member"),
+                 ("POST", "/api/me/consent"), ("GET", "/api/me/apply-options"),
+                 ("POST", "/api/me/applications"),
+                 ("POST", "/api/me/applications/{application_id}/booking"),
+                 ("POST", "/api/me/applications/{application_id}/practice"),
+                 ("GET", "/api/me/practice/{interview_id}"),
+                 ("POST", "/api/me/practice/{interview_id}/responses"),
+                 ("POST", "/api/me/practice/{interview_id}/responses/typed"),
+                 ("POST", "/api/me/practice/{interview_id}/submit"),
+                 ("POST", "/api/me/practice/{interview_id}/sus"),
+                 ("GET", "/api/me/practice/responses/{response_id}/audio"),
+                 ("PATCH", "/api/me/practice/responses/{response_id}"),
+                 ("DELETE", "/api/me/practice/responses/{response_id}"),
+                 # the booking calendar and upcoming events: every signed-in role
+                 ("GET", "/api/booking/calendar"), ("GET", "/api/booking/slots"),
+                 ("GET", "/api/events")}
 PUBLIC = {("GET", "/api/health"), ("POST", "/api/auth/login"), ("GET", "/api/auth/config"),
-          ("POST", "/api/auth/google")}
+          ("POST", "/api/auth/google"), ("GET", "/api/auth/signup"), ("POST", "/api/auth/signup")}
 
 # Fields of the officer's application view (schemas.ApplicationDetail and what it
 # nests) that carry the model's numbers, what staff wrote, or who did what. Each

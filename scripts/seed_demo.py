@@ -76,7 +76,7 @@ from chamapro.api import schemas as s
 from chamapro.api.auth import hash_password
 from chamapro.api.db import (APPLICATION_STATUSES, Applicant, Assessment, Guarantor, Interview,
                              LoanApplication, Member, Response, SessionLocal, User, init_db,
-                             utcnow)
+                             utcnow, normalise_phone)
 
 import score_interview  # scripts/, next to this file
 
@@ -310,7 +310,7 @@ class AccountsSeeded:
 
 
 def taken(db, model, column, value) -> None:
-    """Refuse a login or member number that an account the seeder did not make holds."""
+    """Refuse a login, member number or phone that a record the seeder did not make holds."""
     if db.scalar(select(model.id).where(column == value)) is not None:
         raise ValueError(f"{value!r} already belongs to a {model.__tablename__[:-1]} that "
                          f"seed_demo.py did not create; nothing written")
@@ -383,6 +383,7 @@ def ensure_member(db, spec: dict, officer: User, user: User | None, tag: str) ->
                 spec["member_no"], spec["full_name"], tag
     if member is None:
         taken(db, Member, Member.member_no, spec["member_no"])
+        taken(db, Member, Member.phone, normalise_phone(spec["phone"]))
         member = Member(member_no=spec["member_no"], full_name=spec["full_name"],
                         phone=spec["phone"], joined_on=spec["joined_on"], seed_tag=tag)
         db.add(member)

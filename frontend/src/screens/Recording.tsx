@@ -4,6 +4,7 @@ import { ApiError, api } from '../api/client'
 import type { InterviewState, Question, ResponseOut } from '../api/types'
 import { StatusBadge, TypedBadge } from '../components/Badges'
 import { Icon } from '../components/Icon'
+import { LevelMeter, MicUnavailable } from '../components/RecorderParts'
 import { ErrorNotice, Notice } from '../components/Notice'
 import { ReplayButton } from '../components/ReplayButton'
 import { Shell } from '../components/Shell'
@@ -20,6 +21,8 @@ import { paths } from '../lib/router'
 import { firstUnanswered } from '../lib/selectors'
 import { t } from '../strings'
 import styles from './Recording.module.css'
+
+export { LevelMeter, MicUnavailable }
 
 const R = t.runner
 const MAX_BYTES = 25 * 1024 * 1024
@@ -272,25 +275,6 @@ function AnswerPanel({ interview, q, onChange }: { interview: InterviewState; q:
       {rec.error && <Notice tone="warning">{rec.error}</Notice>}
       {error && <ErrorNotice doing={error.doing} error={error.error} onRetry={error.retry} />}
     </section>
-  )
-}
-
-/** Twenty segments that light up with the microphone's level. */
-/** In place of the Record button when this page cannot use the microphone. */
-export function MicUnavailable({ reason }: { reason: 'insecure' | 'unsupported' }) {
-  if (reason === 'unsupported') return <p className="muted">{R.noMic}</p>
-  return <Notice tone="warning" title={R.insecureTitle}>{R.insecureBody(window.location.origin)}</Notice>
-}
-
-export function LevelMeter({ level, segments = 20 }: { level: number; segments?: number }) {
-  const lit = Math.round(Math.max(0, Math.min(1, level)) * segments)
-  return (
-    <div className={styles.meter} role="meter" aria-label={R.level} aria-valuemin={0} aria-valuemax={100}
-         aria-valuenow={Math.round(level * 100)}>
-      {Array.from({ length: segments }, (_, i) => (
-        <span key={i} className={i < lit ? (i >= segments * 0.85 ? styles.segHot : styles.segOn) : undefined} />
-      ))}
-    </div>
   )
 }
 

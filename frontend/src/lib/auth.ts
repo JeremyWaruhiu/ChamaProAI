@@ -28,12 +28,12 @@ export function userLabel(u: { username: string; display_name?: string | null; r
 
 // Who may open which screen. The server enforces the same rules; this only
 // keeps people from landing on a page that would refuse them.
-const PUBLIC = new Set<Screen>(['landing', 'login'])
+const PUBLIC = new Set<Screen>(['landing', 'login', 'signup'])
 const EVERY_ROLE = new Set<Screen>(['profile'])
 const STAFF = new Set<Screen>(['home', 'start', 'interviews', 'record', 'review', 'assessment',
-  'applications', 'application', 'members', 'member'])
-const ADMIN = new Set<Screen>(['admin', 'users', 'audit', 'results'])
-const MEMBER = new Set<Screen>(['my', 'myApplication'])
+  'applications', 'application', 'members', 'member', 'bookings', 'events'])
+const ADMIN = new Set<Screen>(['admin', 'users', 'audit', 'results', 'pilot'])
+const MEMBER = new Set<Screen>(['my', 'myApplication', 'apply', 'practice', 'practiceReview', 'practiceResult'])
 
 /** Where each role starts. */
 export function homeFor(role: Role): string {
@@ -58,7 +58,7 @@ export const isStaff = (role: Role | null | undefined) => role === 'officer' || 
 export function safeNext(next: string | null | undefined, user: Me): string {
   if (!next || !next.startsWith('#/')) return homeFor(user.role)
   const screen = parse(next).screen
-  if (screen === 'login' || screen === 'landing' || !canOpen(screen, user.role)) return homeFor(user.role)
+  if (screen === 'login' || screen === 'signup' || screen === 'landing' || !canOpen(screen, user.role)) return homeFor(user.role)
   return next
 }
 
@@ -75,5 +75,6 @@ export function redirectFor(hash: string, user: Me | null): string | null {
   if (route.screen === 'notFound') return user ? homeFor(user.role) : paths.landing()
   if (!user) return PUBLIC.has(route.screen) ? null : paths.login(hash)
   if (route.screen === 'login') return safeNext(route.next, user)
+  if (route.screen === 'signup') return homeFor(user.role)
   return canOpen(route.screen, user.role) ? null : homeFor(user.role)
 }

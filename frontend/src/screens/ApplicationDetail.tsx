@@ -9,7 +9,8 @@ import { Badge, Card, DetailList, EmptyState, Modal, PageHeader, PracticeBadge, 
 import { useLoad } from '../hooks/useLoad'
 import { formatDateTime, formatDay, formatKes } from '../lib/format'
 import { paths } from '../lib/router'
-import { statusLabel, type Tone } from '../lib/status'
+import { formatNairobi } from '../lib/nairobi'
+import { BOOKING_TONE, statusLabel, type Tone } from '../lib/status'
 import { t } from '../strings'
 import { ComparatorPanel } from './Assessment'
 import styles from './ApplicationDetail.module.css'
@@ -41,7 +42,8 @@ export function ApplicationDetail({ id }: { id: number }) {
               [P.memberSince, formatDay(app.member.joined_on)],
               [P.requested, `${formatKes(app.amount_requested_kes)} · ${t.common.months(app.term_months)}`],
               [P.purpose, app.purpose],
-              [P.savings, formatKes(app.sacco_savings_kes)],
+              [P.savings, <span key="s" className={styles.badges}>{formatKes(app.sacco_savings_kes)}
+                {app.savings_self_declared && <Badge tone="wait">{t.savingsStatus.self_declared}</Badge>}</span>],
               [P.createdBy, `${app.created_by}, ${formatDateTime(app.created_at)}`],
             ]} />
           </Card>
@@ -76,6 +78,15 @@ export function ApplicationDetail({ id }: { id: number }) {
         </div>
 
         <aside className={styles.aside}>
+          {app.booking && (
+            <Card title={t.bookings.bookedCard} delay={0.05} actions={<a href={paths.bookings()} className="btn btn-quiet btn-sm">{t.bookings.viewAll}</a>}>
+              <p><strong>{formatNairobi(app.booking.starts_at)}</strong></p>
+              <p className={styles.badges}>
+                <Badge tone={BOOKING_TONE[app.booking.status]}>{t.booking.status[app.booking.status]}</Badge>
+                <Badge>{app.booking.language === 'en' ? t.common.english : t.common.kikuyu}</Badge>
+              </p>
+            </Card>
+          )}
           <Card title={P.timeline} delay={0.1}>
             {app.timeline.length ? (
               <Timeline label={P.timeline} compact items={app.timeline.map((e, i) => ({
@@ -101,6 +112,25 @@ export function ApplicationDetail({ id }: { id: number }) {
               </div>
             ) : <p className="muted">{P.noInterview}</p>}
           </Card>
+          {(app.practice_interviews?.length ?? 0) > 0 && (
+            <Card title={<>{t.practiceStaff.title} <PracticeBadge /></>} delay={0.2}>
+              <ul className={styles.practiceList}>
+                {app.practice_interviews!.map((p) => (
+                  <li key={p.interview_id}>
+                    <span>
+                      {t.interviews.ref(p.interview_id)} · {p.language === 'en' ? t.common.english : t.common.kikuyu}
+                      <span className="subtle small"> · {t.practiceStaff.answered(p.answered)}</span>
+                    </span>
+                    <span className={styles.badges}>
+                      {p.risk_class && <RiskBadge risk={p.risk_class} />}
+                      <a className="btn btn-secondary btn-sm"
+                         href={p.status === 'assessed' ? paths.assessment(p.interview_id) : paths.review(p.interview_id)}>{t.practiceStaff.open}</a>
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </Card>
+          )}
         </aside>
       </div>
     </>

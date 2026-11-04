@@ -25,10 +25,10 @@ from sqlalchemy.orm import Session, contains_eager, joinedload, selectinload
 
 from chamapro import config
 
-from . import admin, audit, auth, comparator, live_cache, loans, storage
+from . import admin, audit, auth, bookings, comparator, events, live_cache, loans, pilot, storage
 from . import pipeline as pl
 from . import schemas as s
-from .auth import require_admin, require_officer
+from .auth import require_admin, require_member, require_officer
 from .comparator import RECOMMENDED_DECISION
 from .db import (Applicant, Assessment, AuthSession, Decision, Interview, LoanApplication,
                  Member, Response, User, get_db, init_db, query_count, utcnow)
@@ -40,8 +40,8 @@ log = logging.getLogger("chamapro.api")
 request_log = logging.getLogger("chamapro.requests")
 
 ERRORS = {code: {"model": s.Error} for code in (401, 403, 404, 409, 413, 415, 422, 502, 503)}
-# Every endpoint except /api/health and /api/auth/login needs a signed-in user;
-# staff endpoints refuse members.
+# Every endpoint except /api/health and the sign-in and sign-up ones needs a
+# signed-in user; staff endpoints refuse members.
 OFFICER = [Depends(require_officer)]
 
 
@@ -92,6 +92,9 @@ app.add_middleware(CORSMiddleware,
                    allow_methods=["*"], allow_headers=["*"])
 app.include_router(loans.router)
 app.include_router(admin.router)
+app.include_router(bookings.router)
+app.include_router(events.router)
+app.include_router(pilot.router)
 
 
 # --- Errors: always {"detail": "<string>"} -----------------------------------
@@ -186,14 +189,32 @@ def signed_in(request: Request, response: HTTPResponse, db: Session, user: User,
           responses={401: {"model": s.Error}, 429: {"model": s.Error}})
 def login(body: s.LoginRequest, request: Request, response: HTTPResponse,
           db: Session = Depends(get_db)):
-    name = body.username.strip()
+    name = auth.login_key(body.username)
     check_rate_limit(name)
-    user = auth.authenticate(db, name, body.password)
+    user = auth.authenticate(db, body.username, body.password)
     if user is None:
         auth.limiter.fail(name)
         raise HTTPException(401, auth.BAD_LOGIN)
     auth.limiter.clear(name)
     return signed_in(request, response, db, user, "password")
+
+
+@app.get("/api/auth/signup", response_model=s.SignupInfo)
+def signup_info():
+    """Whether volunteers can sign up, and the consent text they agree to."""
+    return pilot.signup_info()
+
+
+@app.post("/api/auth/signup", status_code=201, response_model=s.SignupResult,
+          responses={403: {"model": s.Error}, 404: {"model": s.Error}, 409: {"model": s.Error},
+                     422: {"model": s.Error}, 429: {"model": s.Error}})
+def signup(body: s.Signup, request: Request, response: HTTPResponse, db: Session = Depends(get_db)):
+    """A volunteer signs up: a member record, a login linked to it, and a session.
+    Off unless PILOT_INVITE_CODE is set."""
+    pilot.check_signup_allowed(request)
+    user, member = pilot.create_volunteer(db, body)
+    me = signed_in(request, response, db, user, "password")
+    return s.SignupResult(**me.model_dump(), member_no=member.member_no)
 
 
 @app.get("/api/auth/config", response_model=s.AuthConfig)
@@ -767,6 +788,105 @@ def record_decision(interview_id: int, body: s.DecisionCreate, db: Session = Dep
     same as POST /api/applications/{id}/decision)."""
     d = loans.decide(db, get_interview(db, interview_id), body, user)
     return s.DecisionOut.model_validate(d)
+
+
+# --- A member's own practice interview ---------------------------------------
+# Thin wrappers over the endpoints above, with the member as the actor: the same
+# transcription, extraction and scoring, unchanged. Each one checks the interview
+# is the member's own and hands back only what schemas.MyPractice allows.
+
+@app.get("/api/me/apply-options", response_model=s.ApplyOptions, responses=ERRORS)
+def apply_options(_: User = Depends(require_member)):
+    form = applicant_form()
+    return s.ApplyOptions(**form.model_dump(), purposes=list(s.PURPOSES),
+                          savings_multiplier=comparator.SAVINGS_MULTIPLIER,
+                          min_tenure_months=comparator.MIN_TENURE_MONTHS, max_term_months=120)
+
+
+@app.post("/api/me/applications/{application_id}/practice", status_code=201,
+          response_model=s.MyPractice, responses={**ERRORS, 429: {"model": s.Error}})
+def start_practice(application_id: int, body: s.StartPractice, db: Session = Depends(get_db),
+                   user: User = Depends(require_member)):
+    app_ = loans.own_application(db, user, application_id)
+    return pilot.my_practice_view(db, pilot.start_practice(db, app_, body.language, user))
+
+
+@app.get("/api/me/practice/{interview_id}", response_model=s.MyPractice, responses=ERRORS)
+def my_practice(interview_id: int, db: Session = Depends(get_db),
+                user: User = Depends(require_member)):
+    return pilot.my_practice_view(db, pilot.own_practice(db, user, interview_id))
+
+
+@app.post("/api/me/practice/{interview_id}/responses", status_code=202,
+          response_model=s.ResponseQueued, responses=ERRORS)
+def my_practice_upload(interview_id: int, background: BackgroundTasks, file: UploadFile = File(...),
+                       sentence_no: int = Form(..., ge=1), db: Session = Depends(get_db),
+                       user: User = Depends(require_member)):
+    pilot.own_practice(db, user, interview_id)
+    return upload_response(interview_id, background, file, sentence_no, db, user)
+
+
+@app.post("/api/me/practice/{interview_id}/responses/typed", status_code=201,
+          response_model=s.MyResponse, responses=ERRORS)
+def my_practice_type(interview_id: int, body: s.TypedResponse, db: Session = Depends(get_db),
+                     user: User = Depends(require_member)):
+    pilot.own_practice(db, user, interview_id)
+    out = type_response(interview_id, body, db, user)
+    return pilot.my_response(db.get(Response, out.id), None)
+
+
+@app.get("/api/me/practice/responses/{response_id}/audio", response_class=FileResponse,
+         responses={200: {"content": {"audio/wav": {}}}, 307: {"description": "A signed URL"}, **ERRORS})
+def my_practice_audio(response_id: int, db: Session = Depends(get_db),
+                      user: User = Depends(require_member)):
+    pilot.own_practice_response(db, user, response_id)
+    return response_audio(response_id, db)
+
+
+@app.patch("/api/me/practice/responses/{response_id}", response_model=s.MyResponse, responses=ERRORS)
+def my_practice_edit(response_id: int, body: s.MyTranscriptEdit, db: Session = Depends(get_db),
+                     user: User = Depends(require_member)):
+    pilot.own_practice_response(db, user, response_id)
+    edit_transcript(response_id, s.TranscriptEdit(transcript=body.transcript), db, user)
+    return pilot.my_response(db.get(Response, response_id), None)
+
+
+@app.delete("/api/me/practice/responses/{response_id}", response_model=s.ResponseDeleted,
+            responses=ERRORS)
+def my_practice_delete(response_id: int, db: Session = Depends(get_db),
+                       user: User = Depends(require_member)):
+    pilot.own_practice_response(db, user, response_id)
+    return delete_response(response_id, db, user)
+
+
+@app.post("/api/me/practice/{interview_id}/submit", response_model=s.MyPractice,
+          responses={**ERRORS, 429: {"model": s.Error}})
+def my_practice_submit(interview_id: int, db: Session = Depends(get_db),
+                       user: User = Depends(require_member)):
+    """Run the assessment on the member's reviewed answers, within the daily caps.
+    Staff see the full assessment; the reply carries only the result in words.
+    A submission that fails costs nothing, and its error says nothing of the
+    services behind it."""
+    p = pilot.own_practice(db, user, interview_id)
+    pilot.refuse_incomplete(p.interview)
+    day = pilot.reserve_submission(db, p.member_id)
+    try:
+        assess(interview_id, db, user)
+    except HTTPException as e:
+        pilot.release_submission(db, p.member_id, day)
+        if e.status_code >= 500:
+            log.warning("practice interview %s not assessed: %s", interview_id, e.detail)
+            raise HTTPException(503, "We could not check your answers just now. They are saved; "
+                                     "please try again in a little while.")
+        raise
+    except Exception:
+        pilot.release_submission(db, p.member_id, day)
+        raise
+    p.submitted_at = utcnow()
+    audit.record(db, user, "practice.submit", "loan_application", p.application_id,
+                 interview_id=interview_id)
+    db.commit()
+    return pilot.my_practice_view(db, p)
 
 
 # --- Dashboard ---------------------------------------------------------------

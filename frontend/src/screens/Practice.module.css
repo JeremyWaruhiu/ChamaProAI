@@ -1,0 +1,36 @@
+.frame { display: grid; gap: var(--space-4); min-width: 0; }
+.head { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3); }
+.questionNo { color: var(--ink-3); font-size: var(--text-sm); font-weight: 650; }
+.kikuyuNote {
+  display: flex; align-items: flex-start; gap: var(--space-2); margin-top: var(--space-3); padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm); background: var(--green-50); color: var(--green-800); font-size: var(--text-sm); font-weight: 620;
+}
+.kikuyuNote svg { flex: none; margin-top: 3px; }
+.nav { display: flex; flex-wrap: wrap; justify-content: space-between; gap: var(--space-3); }
+.nav :global(.btn) { flex: 1 1 140px; padding: 0 var(--space-4); }
+.nav > span { display: none; }
+
+.reviewList { display: grid; gap: var(--space-3); margin: 0; padding: 0; list-style: none; min-width: 0; }
+.reviewCard { display: grid; gap: var(--space-2); padding: var(--space-4); min-width: 0; }
+.reviewQuestion { font-weight: 650; overflow-wrap: anywhere; }
+.readonlyText { white-space: pre-wrap; overflow-wrap: anywhere; }
+.missing { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); color: var(--clay-800); font-weight: 620; }
+.reviewActions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); }
+.saved { display: inline-flex; align-items: center; gap: 4px; color: var(--low); font-size: var(--text-sm); font-weight: 650; }
+.submit { display: grid; gap: var(--space-3); padding: var(--space-4); min-width: 0; }
+.running { display: flex; align-items: center; gap: var(--space-2); font-weight: 620; }
+
+.sus { display: grid; gap: var(--space-4); margin: var(--space-4) 0; padding: 0; list-style: none; }
+.susItem { display: grid; gap: var(--space-2); margin: 0; padding: 0 0 var(--space-3); border: 0; border-bottom: 1px solid var(--line); min-width: 0; }
+.susItem[aria-invalid="true"] .susStatement { color: var(--high); }
+.susStatement { padding: 0; font-weight: 620; }
+.susScale { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: var(--space-1); max-width: 360px; }
+.susOption {
+  display: grid; place-items: center; min-height: 44px; border: 1px solid var(--line-strong); border-radius: var(--radius-sm);
+  background: var(--surface); font-weight: 650; cursor: pointer;
+}
+.susOption input { position: absolute; opacity: 0; width: 1px; height: 1px; }
+.susOption:has(input:checked) { border-color: var(--green-800); background: var(--green-800); color: var(--white); }
+.susOption:has(input:focus-visible) { outline: 3px solid var(--focus); outline-offset: 2px; }
+.susEnds { display: flex; justify-content: space-between; max-width: 360px; color: var(--ink-3); font-size: var(--text-xs); }
+.susActions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3); margin-top: var(--space-4); }

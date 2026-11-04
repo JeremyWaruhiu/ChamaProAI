@@ -23,7 +23,7 @@ from chamapro.api.db import (APPLICATION_STATUSES, Applicant, AuditLog, Intervie
                              Member, SessionLocal, User)
 from chamapro.api.main import app
 
-from conftest import BASE_URL, needs_classifier, uploads
+from conftest import BASE_URL, fresh_phone, needs_classifier, uploads
 
 
 @pytest.fixture
@@ -261,7 +261,8 @@ def accounts(tag, legacy=False):
             if legacy:
                 spec[k] = f"old.{k}.{spec['key']}.{tag}"
         return spec
-    members = [{**own(m), "member_no": f"{m['member_no']}-{tag}"} for m in seed_demo.MEMBERS]
+    members = [{**own(m), "member_no": f"{m['member_no']}-{tag}", "phone": fresh_phone()}
+               for m in seed_demo.MEMBERS]
     return own(seed_demo.OFFICER), members, f"t{tag}"
 
 

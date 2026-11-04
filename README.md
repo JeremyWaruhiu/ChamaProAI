@@ -436,6 +436,31 @@ the Docker image serves the built one.
 | GET    | `/api/me/applications`             | a member's own applications (members only) |
 | GET    | `/api/me/applications/{id}`        | status timeline, outcome, message and three plain-language reasons |
 | POST   | `/api/me/applications/{id}/guarantors` | `{guarantors: [{full_name, member_no, phone, relationship, amount_guaranteed_kes}]}`, when asked for |
+| POST   | `/api/me/applications`             | apply `{amount_requested_kes, purpose, purpose_other?, term_months, language, date, time, declared_savings_kes?, applicant?}` and book the interview; known fields come from the record and any other field is a 422 |
+| POST   | `/api/me/applications/{id}/booking` | `{date, time, language}`: book again after a cancellation or a missed slot |
+| POST   | `/api/me/applications/{id}/practice` | `{language}`: start, or resume, a practice interview on this application |
+| GET    | `/api/me/practice/{id}`            | questions, own transcripts, the result in words, today's limits (never scores) |
+| POST   | `/api/me/practice/{id}/responses`, `/responses/typed` | record or type an answer, as for staff |
+| PATCH/DELETE | `/api/me/practice/responses/{id}` | correct a transcript; discard an answer |
+| GET    | `/api/me/practice/responses/{id}/audio` | replay one's own answer |
+| POST   | `/api/me/practice/{id}/submit`     | run the assessment; 409 until every answer is ready, 429 past a daily cap |
+| POST   | `/api/me/practice/{id}/sus`        | the optional questionnaire `{answers: [10 x 1-5], comment?}`; 204 |
+| GET/PATCH | `/api/me/member`                | the member's record; may change `phone`, `email`, unverified `savings_kes`, `applicant`; anything else is a 422 |
+| POST   | `/api/me/consent`                  | `{consent, consent_version}`: for members staff created, before a first practice interview |
+| GET    | `/api/me/home`                     | upcoming events, next booked interview, application statuses |
+| GET    | `/api/me/apply-options`            | purposes, applicant-form choices and the SACCO rule's numbers |
+| GET    | `/api/booking/calendar`            | today in Nairobi, last bookable date, holidays and slot times (every role) |
+| GET    | `/api/booking/slots?date=`         | one day's slots and whether each is free, or why the day is closed; says nobody's name (every role) |
+| GET    | `/api/bookings?start=&end=&include_cancelled=` | booked interviews, soonest first, by Nairobi date; default from today (staff) |
+| POST   | `/api/bookings/{id}/confirm`, `/cancel` | confirm or cancel a booked interview (staff) |
+| POST   | `/api/bookings/{id}/reschedule`    | `{date, time}`; the member sees the new time (staff) |
+| POST   | `/api/bookings/{id}/start`         | open the live interview of a confirmed booking, with the application and applicant form attached (staff) |
+| POST   | `/api/members/{id}/verify`         | `{savings_kes?, joined_on?}`: verify a member's savings, correcting them if needed; audit-logged (staff) |
+| GET    | `/api/events`                      | upcoming SACCO events; past ones drop off by themselves (every role) |
+| POST   | `/api/events`                      | `{title, event_type: agm\|member_meeting\|training\|loan_deadline\|other, date, time, location?, online_link?, description?}` (staff, audit-logged) |
+| PUT/DELETE | `/api/events/{id}`             | change or delete an event (staff, audit-logged) |
+| GET    | `/api/admin/pilot`                 | volunteers, practice interviews by language, assessments, answers per member, mean SUS with its n, latest comments (admin) |
+| GET    | `/api/admin/pilot/export/aggregates.csv`, `/transcripts.csv` | the same figures, and transcripts per response, with no audio (admin, audit-logged) |
 | GET/POST | `/api/admin/users`               | list users; create `{username, password, role, display_name?, email?, member_id?}` (admin) |
 | POST   | `/api/admin/users/{id}/deactivate`, `/activate` | (admin) |
 | PUT    | `/api/admin/users/{id}/password`, `/role`, `/display-name`, `/google-email`, `/member` | reset a password, change role or display name, link a Google email or a member record (admin) |
@@ -444,6 +469,8 @@ the Docker image serves the built one.
 | POST   | `/api/auth/login`                  | `{username, password}`; sets the session cookie, returns `{username, role, display_name}` |
 | POST   | `/api/auth/google`                 | `{credential}` (Google ID token); signs in the linked user; 404 when not configured |
 | GET    | `/api/auth/config`                 | `{google_client_id}`, null when Google sign-in is off (no sign-in needed) |
+| GET    | `/api/auth/signup`                 | `{enabled, consent_version, consent_text}` (no sign-in needed) |
+| POST   | `/api/auth/signup`                 | `{full_name, phone, email?, password, password_confirm, invite_code, consent, consent_version}`: a member record, a login linked to it, and a session; 404 unless `PILOT_INVITE_CODE` is set, 429 past the limit per address (no sign-in needed) |
 | POST   | `/api/auth/logout`                 | ends the session and clears the cookie          |
 | GET    | `/api/auth/me`                     | `{username, role, display_name}` of the signed-in user, or 401 |
 | GET    | `/api/auth/profile`                | your own account: email, linked Google account, member record, sessions (every role) |
@@ -451,12 +478,12 @@ the Docker image serves the built one.
 | POST   | `/api/auth/logout-all`             | ends every session of yours, this one included |
 | GET    | `/api/results`                     | model and evaluation summary plus live stats, practice interviews excluded; the live stats are cached for 60 s and `live.computed_at` says when they were read (admin only) |
 
-Every endpoint except `/api/health`, `/api/auth/config` and the sign-in endpoints needs a signed-in
+Every endpoint except `/api/health`, `/api/auth/config`, `/api/auth/signup` and the sign-in endpoints needs a signed-in
 user: 401 without one, 403 for the wrong role. There are three roles. Officers
 and admins (staff) may use the interview, response, assessment, decision,
 member, application and guarantor endpoints; only admins may read
-`/api/results` and use `/api/admin/...`. Members may use only `/api/me/...`
-and see only the applications of the member record linked to their login;
+`/api/results` and use `/api/admin/...`. Members may use only `/api/me/...`,
+the booking calendar and the list of events, and see only the applications of the member record linked to their login;
 another member's application is a 404. A member never sees probabilities, the
 risk class, feature names or the officer's notes, only the status, the
 outcome, the officer's message to them and three plain-language reasons from
@@ -510,6 +537,34 @@ works the same way, but every dashboard screen of it shows a practice banner,
 its decision is labelled practice, and it is left out of every live figure
 on the Model & Evaluation page. Any answer can be typed instead of recorded.
 
+**Member applications and bookings.** A member applies for a loan themselves;
+name, member number, phone, savings and tenure come from their record, and the
+API refuses them in the request. Going over the SACCO rule's limit (3 x savings)
+or under 6 months' membership warns on the form and never blocks: the officer
+decides. Savings stay "Self-declared, pending verification" until staff verify
+or edit them (`POST /api/members/{id}/verify`, audit-logged); applications not yet
+decided then follow the verified figure, and the application page marks a figure
+that is still self-declared. A booking is a half-hour slot from 08:30 to 16:30
+(the last starts at 16:00) on a weekday that is not a public holiday, at the one
+branch. Times are stored in UTC and shown in Africa/Nairobi wherever the viewer is.
+A partial unique index on the slot makes double booking impossible; a member holds
+one upcoming interview at a time, so nobody can hold every slot.
+
+**Volunteer pilot.** `PILOT_INVITE_CODE` opens `/signup`. Volunteers sign in with
+their phone number (in any of its forms) or their generated member number. Numbers
+are stored as `+254XXXXXXXXX`, unique when present; staff-created members may have
+none. The email a volunteer gives is a contact address on the member record, not
+`users.email`, which signs in with Google: an unverified address must not be able to
+claim that. A member's practice interview runs the same eight questions through the
+same endpoints as staff, is always `practice`, and is linked in `practice_interviews`,
+not as the application's interview, so it can never move a real application or take
+the place of the officer's interview. The member sees their transcripts and a result
+in words; staff see the full assessment. Submissions are capped per member and in
+total per Nairobi day (`PILOT_MAX_SUBMISSIONS_PER_MEMBER`, `PILOT_MAX_ASSESSMENTS_PER_DAY`);
+staff interviews do not count, and a submission that fails costs nothing. The CSV
+exports identify members by number only, and escape cells that a spreadsheet would
+run as a formula.
+
 **Migrations.** The schema is owned by Alembic (`src/chamapro/migrations`,
 `alembic.ini`). `0001` is the baseline: it creates a fresh database, or adopts
 one made before Alembic by adding only what is missing (existing interviews
@@ -519,6 +574,11 @@ with ADD COLUMN only: existing decisions keep every value, read with
 `outcome` equal to their `decision`, and no immutability trigger fires or is
 dropped. `0003` adds `users.display_name` and a `seed_tag` on users, members
 and applicants (see [Demo data](#demo-data)), all nullable, ADD COLUMN only.
+`0004` adds the member's profile fields, makes `members.phone` unique when present,
+and adds `interview_bookings`, `sacco_events`, `practice_interviews`,
+`pilot_daily_usage` and `sus_responses`. It rewrites existing phones to
+`+254XXXXXXXXX`, and stops, changing nothing, if two members share a number (the
+message lists them): which of them keeps it is a person's decision.
 
     alembic upgrade head            # the database in DATABASE_URL, else data/chamapro.db
     alembic current
@@ -628,6 +688,14 @@ frontend.
 
    Run it again after every pull that adds a migration; the API refuses to
    start on an out-of-date PostgreSQL schema rather than migrating it itself.
+   `0004` stops if two members share a phone number. To see any beforehand, in
+   the Supabase SQL editor:
+
+       SELECT regexp_replace(regexp_replace(phone, '[ ()-]', '', 'g'), '^(\+?254|0)', '') AS number,
+              array_agg(id ORDER BY id) AS members
+       FROM members WHERE phone IS NOT NULL AND phone <> ''
+       GROUP BY 1 HAVING count(*) > 1;
+
    Every table gets row-level security with no policies, so Supabase's Data
    API (the anon and authenticated keys) can read nothing; the backend
    connects as the table owner and is not affected. To move existing SQLite
@@ -670,7 +738,13 @@ so never point it at production).
   for asset ownership (2 of 5) and chama (3 of 5); whisper-small's is 62.5%.
 - Feature extraction requires connectivity; capture and typed entry do not.
 - Question set v2 has no Kikuyu wording yet (`text_kik` is ""); the dashboard
-  shows the English until a native speaker supplies it.
+  shows the English until a native speaker supplies it, and a member's Kikuyu
+  practice interview says that answers may be given in Kikuyu.
+- The Idd-ul-Fitr and Idd-ul-Azha dates for 2027 in the holiday list are estimates:
+  they depend on the moon and are gazetted shortly before. Correct them with
+  `PUBLIC_HOLIDAYS`. A year with no listed holidays cannot be booked at all.
+- The sign-up limit is per process and in memory, like the sign-in limit: it resets
+  on restart and is per worker.
 - v2 questions 3-5 name exactly the FinAccess options behind their flags
   (B3A__1-11, F1__1-5, B1L__1-6). The codebook does not define F1__4
   "Digital non-financial assets"; the question gives cryptocurrency as the

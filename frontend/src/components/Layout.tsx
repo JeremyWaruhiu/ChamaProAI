@@ -20,14 +20,17 @@ interface NavItem { key: string; label: string; href: string; icon: IconName; sc
 const WORK: NavItem[] = [
   { key: 'home', label: t.nav.home, href: paths.home(), icon: 'home', screens: ['home'] },
   { key: 'interviews', label: t.nav.interviews, href: paths.interviews(), icon: 'mic', screens: ['interviews', 'record', 'review', 'assessment'] },
+  { key: 'bookings', label: t.nav.bookings, href: paths.bookings(), icon: 'clock', screens: ['bookings'] },
   { key: 'applications', label: t.nav.applications, href: paths.applications(), icon: 'file', screens: ['applications', 'application'] },
   { key: 'members', label: t.nav.members, href: paths.members(), icon: 'users', screens: ['members', 'member'] },
+  { key: 'events', label: t.nav.events, href: paths.events(), icon: 'calendar', screens: ['events'] },
 ]
 const ADMIN: NavItem[] = [
   { key: 'admin', label: t.nav.adminHome, href: paths.admin(), icon: 'overview', screens: ['admin'] },
   { key: 'users', label: t.nav.users, href: paths.users(), icon: 'user', screens: ['users'] },
   { key: 'audit', label: t.nav.audit, href: paths.audit(), icon: 'scroll', screens: ['audit'] },
   { key: 'results', label: t.nav.results, href: paths.results(), icon: 'chart', screens: ['results'] },
+  { key: 'pilot', label: t.nav.pilot, href: paths.pilot(), icon: 'activity', screens: ['pilot'] },
 ]
 
 const COLLAPSE_KEY = 'chamapro.nav.collapsed'
@@ -341,9 +344,13 @@ export function MemberLayout({ user, screen, children }: { user: Me; screen: Scr
         <UserMenu user={user} onDark />
       </header>
       <nav className={styles.memberNav} aria-label={t.nav.main}>
-        <a href={paths.my()} className={cx(styles.memberTab, (screen === 'my' || screen === 'myApplication') && styles.memberTabActive)}
+        <a href={paths.my()} className={cx(styles.memberTab, !['apply', 'profile'].includes(screen) && styles.memberTabActive)}
            aria-current={screen === 'my' ? 'page' : undefined}>
           <Icon name="file" size={18} /> {t.nav.myApplications}
+        </a>
+        <a href={paths.apply()} className={cx(styles.memberTab, screen === 'apply' && styles.memberTabActive)}
+           aria-current={screen === 'apply' ? 'page' : undefined}>
+          <Icon name="plus" size={18} /> {t.nav.apply}
         </a>
         <a href={paths.profile()} className={cx(styles.memberTab, screen === 'profile' && styles.memberTabActive)}
            aria-current={screen === 'profile' ? 'page' : undefined}>

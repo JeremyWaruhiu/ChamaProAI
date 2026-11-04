@@ -179,7 +179,8 @@ def test_forged_token_is_401():
 # --- Protection and roles ----------------------------------------------------------------
 
 PUBLIC = {("GET", "/api/health"), ("POST", "/api/auth/login"), ("POST", "/api/auth/logout"),
-          ("GET", "/api/auth/config"), ("POST", "/api/auth/google")}
+          ("GET", "/api/auth/config"), ("POST", "/api/auth/google"),
+          ("GET", "/api/auth/signup"), ("POST", "/api/auth/signup")}
 
 
 def api_routes():

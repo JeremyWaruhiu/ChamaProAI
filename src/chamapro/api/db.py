@@ -1,5 +1,6 @@
 """Storage: applicants, interviews, responses, assessments, users, members,
-loan applications, guarantors and the audit log.
+loan applications, guarantors, interview bookings, SACCO events, the volunteer
+pilot's records and the audit log.
 
 SQLite by default; PostgreSQL (Supabase) by setting DATABASE_URL. The schema
 is owned by the Alembic migrations in chamapro/migrations, not by this file:
@@ -14,6 +15,7 @@ holds even outside the API.
 from __future__ import annotations
 
 import logging
+import re
 import sqlite3
 from contextvars import ContextVar
 from datetime import date, datetime, timezone
@@ -22,7 +24,7 @@ from pathlib import Path
 from sqlalchemy import (JSON, Boolean, CheckConstraint, Date, DateTime, Engine,
                         Float, ForeignKey, Index, Integer, String, Text,
                         TypeDecorator, UniqueConstraint, create_engine, event,
-                        make_url)
+                        false, make_url, text)
 from sqlalchemy.orm import (DeclarativeBase, Mapped, mapped_column,
                             relationship, sessionmaker, validates)
 
@@ -39,6 +41,28 @@ def normalise_email(value: str | None) -> str | None:
     """Emails are compared lower-case; blank means none."""
     value = (value or "").strip().lower()
     return value or None
+
+
+def nairobi_today() -> date:
+    """The calendar date at the branch: bookings and daily limits count by this."""
+    return datetime.now(config.NAIROBI).date()
+
+
+# 07.. or 01.. nationally, 2547.. or 2541.. internationally, with or without the +.
+_PHONE = re.compile(r"(?:\+?254|0)([17][0-9]{8})")
+
+
+def normalise_phone(value: str | None) -> str | None:
+    """A Kenyan mobile number as +254XXXXXXXXX; blank means none. Raises
+    ValueError for anything else. One stored form, so a duplicate is a duplicate
+    however it was typed."""
+    value = re.sub(r"[\s()-]", "", value or "")
+    if not value:
+        return None
+    match = _PHONE.fullmatch(value)
+    if match is None:
+        raise ValueError("a Kenyan mobile number such as 0712345678 or +254712345678")
+    return "+254" + match[1]
 
 
 class UTCDateTime(TypeDecorator):
@@ -217,18 +241,41 @@ class Member(Base):
     """A SACCO member. No national ID number is stored (data minimisation,
     Kenya Data Protection Act 2019): the member number identifies them."""
     __tablename__ = "members"
+    __table_args__ = (Index("uq_members_phone", "phone", unique=True),)
     id: Mapped[int] = mapped_column(primary_key=True)
     member_no: Mapped[str] = mapped_column(String(32), unique=True)
     full_name: Mapped[str] = mapped_column(String(200))
+    # +254XXXXXXXXX, unique when present. Staff-created members may have none.
     phone: Mapped[str | None] = mapped_column(String(20))
     joined_on: Mapped[date] = mapped_column(Date)      # membership start, for the tenure rule
     # The member's own login, if they have one.
     user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), unique=True)
     seed_tag: Mapped[str | None] = mapped_column(String(40), index=True)   # as Applicant.seed_tag
     created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
+    # A contact address the member typed, unverified. Not users.email: that one
+    # signs in with Google, and must stay something only an admin can set.
+    email: Mapped[str | None] = mapped_column(String(254))
+    # Null: not entered. Self-declared until savings_verified_at is set.
+    savings_kes: Mapped[int | None] = mapped_column(Integer)
+    savings_verified_by: Mapped[str | None] = mapped_column(String(64))    # username
+    savings_verified_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
+    # The applicant form, kept for next time. A birth year rather than an age,
+    # so it does not go stale, and rather than a birth date, which is not needed.
+    birth_year: Mapped[int | None] = mapped_column(Integer)
+    sex: Mapped[str | None] = mapped_column(String(10))
+    education: Mapped[int | None] = mapped_column(Integer)
+    marital_status: Mapped[str | None] = mapped_column(String(10))
+    consent_version: Mapped[str | None] = mapped_column(String(32))
+    consent_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
+    # Volunteers who signed up themselves, as against members staff created.
+    self_signed_up: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())
 
     user: Mapped[User | None] = relationship()
     applications: Mapped[list[LoanApplication]] = relationship(back_populates="member")
+
+    @validates("phone")
+    def _canonical_phone(self, _key, value):
+        return normalise_phone(value)
 
 
 APPLICATION_STATUSES = ("draft", "interview_pending", "interview_complete", "assessed", "decided",
@@ -254,6 +301,9 @@ class LoanApplication(Base):
     purpose: Mapped[str] = mapped_column(Text)
     term_months: Mapped[int] = mapped_column(Integer)
     sacco_savings_kes: Mapped[int] = mapped_column(Integer)   # from the SACCO's records
+    # True while that figure is only what the member declared; see Member.savings_kes.
+    savings_self_declared: Mapped[bool] = mapped_column(Boolean, default=False,
+                                                        server_default=false())
     interview_id: Mapped[int | None] = mapped_column(ForeignKey("interviews.id"), unique=True)
     status: Mapped[str] = mapped_column(String(24), default="draft", index=True)
     created_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
@@ -288,6 +338,93 @@ class Guarantor(Base):
 
     application: Mapped[LoanApplication] = relationship(back_populates="guarantors")
     verifier: Mapped[User | None] = relationship()
+
+
+BOOKING_STATUSES = ("requested", "confirmed", "started", "cancelled")
+EVENT_TYPES = ("agm", "member_meeting", "training", "loan_deadline", "other")
+_HOLDS_SLOT = "status IN ('requested', 'confirmed', 'started')"
+_OPEN_BOOKING = "status IN ('requested', 'confirmed')"
+
+
+class InterviewBooking(Base):
+    """A half-hour interview slot at the one branch. The partial unique indexes
+    are what make double booking impossible, whichever request gets there first."""
+    __tablename__ = "interview_bookings"
+    __table_args__ = (
+        CheckConstraint(_one_of("status", BOOKING_STATUSES), name="ck_interview_bookings_status"),
+        Index("uq_interview_bookings_slot", "starts_at", unique=True,
+              sqlite_where=text(_HOLDS_SLOT), postgresql_where=text(_HOLDS_SLOT)),
+        Index("uq_interview_bookings_open", "application_id", unique=True,
+              sqlite_where=text(_OPEN_BOOKING), postgresql_where=text(_OPEN_BOOKING)),
+    )
+    id: Mapped[int] = mapped_column(primary_key=True)
+    application_id: Mapped[int] = mapped_column(ForeignKey("loan_applications.id"), index=True)
+    member_id: Mapped[int] = mapped_column(ForeignKey("members.id"), index=True)
+    starts_at: Mapped[datetime] = mapped_column(UTCDateTime)    # shown in Nairobi time
+    language: Mapped[str] = mapped_column(String(8))            # kik | en
+    status: Mapped[str] = mapped_column(String(12), default="requested")
+    interview_id: Mapped[int | None] = mapped_column(ForeignKey("interviews.id"))   # once started
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
+
+    application: Mapped[LoanApplication] = relationship()
+    member: Mapped[Member] = relationship()
+
+
+class SaccoEvent(Base):
+    __tablename__ = "sacco_events"
+    __table_args__ = (CheckConstraint(_one_of("event_type", EVENT_TYPES), name="ck_sacco_events_type"),)
+    id: Mapped[int] = mapped_column(primary_key=True)
+    title: Mapped[str] = mapped_column(String(200))
+    event_type: Mapped[str] = mapped_column(String(20))
+    starts_at: Mapped[datetime] = mapped_column(UTCDateTime, index=True)
+    location: Mapped[str | None] = mapped_column(String(200))
+    online_link: Mapped[str | None] = mapped_column(String(500))
+    description: Mapped[str | None] = mapped_column(Text)
+    created_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
+
+
+class PracticeInterview(Base):
+    """A member's own practice run on their application. Kept apart from
+    LoanApplication.interview_id, the one interview that moves the application:
+    a practice run must never advance a real application, or take the place of
+    the interview an officer holds."""
+    __tablename__ = "practice_interviews"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    interview_id: Mapped[int] = mapped_column(ForeignKey("interviews.id"), unique=True)
+    application_id: Mapped[int] = mapped_column(ForeignKey("loan_applications.id"), index=True)
+    member_id: Mapped[int] = mapped_column(ForeignKey("members.id"), index=True)
+    submitted_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
+
+    interview: Mapped[Interview] = relationship()
+    member: Mapped[Member] = relationship()
+    application: Mapped[LoanApplication] = relationship()
+
+
+class PilotDailyUsage(Base):
+    """Submissions used on one Nairobi day, per member and in total (scope
+    "member:<id>" or "all"), raised by a conditional UPDATE so two requests at
+    once cannot pass the cap together."""
+    __tablename__ = "pilot_daily_usage"
+    __table_args__ = (CheckConstraint("used >= 0", name="ck_pilot_daily_usage_used"),)
+    day: Mapped[date] = mapped_column(Date, primary_key=True)
+    scope: Mapped[str] = mapped_column(String(40), primary_key=True)
+    used: Mapped[int] = mapped_column(Integer, default=0)
+
+
+class SusResponse(Base):
+    """One System Usability Scale questionnaire, offered after a submission."""
+    __tablename__ = "sus_responses"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    interview_id: Mapped[int] = mapped_column(ForeignKey("interviews.id"), unique=True)
+    member_id: Mapped[int] = mapped_column(ForeignKey("members.id"), index=True)
+    answers: Mapped[list] = mapped_column(JSON)      # ten integers, 1-5, in question order
+    score: Mapped[float] = mapped_column(Float)      # 0-100
+    comment: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow, index=True)
 
 
 class AuditLog(Base):

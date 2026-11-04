@@ -23,7 +23,7 @@ from sqlalchemy.orm import Session, joinedload
 
 from chamapro import config
 
-from .db import AuthSession, User, get_db, normalise_email, utcnow
+from .db import AuthSession, Member, User, get_db, normalise_email, normalise_phone, utcnow
 
 log = logging.getLogger("chamapro.auth")
 
@@ -102,12 +102,30 @@ class LoginLimiter:
 
 
 limiter = LoginLimiter(config.LOGIN_MAX_FAILURES, config.LOGIN_WINDOW_SECONDS)
+# The same counter, for sign-up attempts per address; every attempt counts.
+signup_limiter = LoginLimiter(config.SIGNUP_MAX_PER_IP, config.SIGNUP_WINDOW_SECONDS)
+
+
+def phone_or_none(value: str) -> str | None:
+    try:
+        return normalise_phone(value)
+    except ValueError:
+        return None
+
+
+def login_key(username: str) -> str:
+    """What failed sign-ins are counted against. A phone number in any of its
+    forms is one key, so retyping it another way earns no extra attempts."""
+    return phone_or_none(username) or username.strip()
 
 
 # --- Sessions ---------------------------------------------------------------------
 
 def authenticate(db: Session, username: str, password: str) -> User | None:
     user = db.scalar(select(User).where(User.username == username.strip()))
+    if user is None and (phone := phone_or_none(username)):     # volunteers sign in by phone
+        user = db.scalar(select(User).join(Member, Member.user_id == User.id)
+                         .where(Member.phone == phone))
     ok = verify_password(password, user.password_hash if user else _DUMMY_HASH)
     return user if user is not None and ok and user.is_active else None
 

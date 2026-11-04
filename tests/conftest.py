@@ -255,8 +255,10 @@ def _still_on_scratch_storage(request):
 @pytest.fixture(autouse=True)
 def _reset_login_limiter():
     auth.limiter.clear()
+    auth.signup_limiter.clear()
     yield
     auth.limiter.clear()
+    auth.signup_limiter.clear()
 
 
 @pytest.fixture(autouse=True)
@@ -391,6 +393,11 @@ CONTRIBUTIONS = [{"feature": "B3A__1", "value": 1.0, "shap": -0.21},
                  {"feature": "age", "value": 42.0, "shap": 0.05}]
 
 
+def fresh_phone():
+    """A number no other member has: members.phone is unique."""
+    return f"07{secrets.randbelow(10 ** 8):08d}"
+
+
 def new_member(joined_on="2020-01-01", login=True):
     """(member id, member_no, signed-in client or None) for a fresh member."""
     no = "T-" + secrets.token_hex(4).upper()
@@ -403,7 +410,7 @@ def new_member(joined_on="2020-01-01", login=True):
                         role="member")
             db.add(user)
             db.flush()
-        m = Member(member_no=no, full_name=f"Fictional {no}", phone="0712345678",
+        m = Member(member_no=no, full_name=f"Fictional {no}", phone=fresh_phone(),
                    joined_on=date.fromisoformat(joined_on),
                    user_id=user.id if user else None)
         db.add(m)

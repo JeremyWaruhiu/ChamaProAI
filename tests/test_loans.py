@@ -24,7 +24,7 @@ def test_member_crud_and_search(client):
     r = client.post("/api/members", json=body)
     assert r.status_code == 201, r.text
     m = r.json()
-    assert m["phone"] == "0712345678" and m["user_id"] is None
+    assert m["phone"] == "+254712345678" and m["user_id"] is None
     assert "national_id" not in m and "id_number" not in m           # never collected
 
     assert client.post("/api/members", json=body).status_code == 409   # member_no unique

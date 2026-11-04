@@ -32,6 +32,22 @@ STATUS_LABEL = {
 }
 
 
+# A plain-language sentence for a practice result. It follows the model's class,
+# as a result must, but never names it: no class, score or probability is shown.
+PRACTICE_RESULT = {
+    "Low": "From these practice answers, a loan application like this one looks likely to go well.",
+    "Medium": "From these practice answers, a loan officer would probably want to look more closely "
+              "at an application like this one.",
+    "High": "From these practice answers, an application like this one would probably need more "
+            "support, such as savings or guarantors, before it could be approved.",
+}
+PRACTICE_NOTE = " This is practice only: it is not a loan decision and does not change your application."
+
+
+def practice_result(risk_class: str) -> str:
+    return PRACTICE_RESULT.get(risk_class, "Your practice answers have been looked at.") + PRACTICE_NOTE
+
+
 def default_message(outcome: str, approved: int | None, guarantors: int | None) -> str:
     """Shown when the officer left member_message blank."""
     amount = f"KSh {approved:,}" if approved else "your loan"

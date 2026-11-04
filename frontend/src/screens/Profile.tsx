@@ -1,14 +1,19 @@
-import { useCallback, useState, type FormEvent } from 'react'
+import { useCallback, useState, type FormEvent, type ReactNode } from 'react'
 import { ApiError, api } from '../api/client'
+import type { MyMember, MyMemberUpdate } from '../api/types'
 import { Icon } from '../components/Icon'
 import { ErrorNotice } from '../components/Notice'
 import { useToast } from '../components/toastContext'
 import { Badge, Card, DetailList, Field, Modal, PageHeader, SkeletonPage } from '../components/ui'
 import { useLoad } from '../hooks/useLoad'
 import { ROLE_LABEL, displayName, useAuth } from '../lib/auth'
-import { formatDate } from '../lib/format'
+import { formatDate, formatDay, formatKes, parseShillings } from '../lib/format'
 import { passwordErrors, type PasswordForm } from '../lib/forms'
+import { applicantProblems } from '../lib/applicant'
+import { toApplicantForm } from '../lib/apply'
+import { normalisePhone } from '../lib/phone'
 import { t } from '../strings'
+import { ApplicantFields } from './Apply'
 import styles from './Profile.module.css'
 
 const P = t.profile
@@ -24,6 +29,7 @@ export function Profile() {
   return (
     <>
       <PageHeader title={P.title} lead={P.lead} />
+      {me.role === 'member' && me.member && <MemberRecord />}
       <div className={styles.grid}>
         <Card title={P.account}>
           <div className={styles.who}>
@@ -37,7 +43,9 @@ export function Profile() {
             [P.username, me.username],
             [P.role, ROLE_LABEL[me.role]],
             ...(me.member ? [[P.memberNo, me.member.member_no] as [string, string]] : []),
-            [P.email, me.email ?? <span key="e" className="subtle">{P.noEmail}</span>],
+            // The Google sign-in address; a member's contact email is on their record above.
+            ...(me.role !== 'member' || me.email
+              ? [[P.email, me.email ?? <span key="e" className="subtle">{P.noEmail}</span>] as [string, ReactNode]] : []),
             [P.google, <span key="g" className={styles.google}>
               {me.email ? <Badge tone="low" icon="check">G</Badge> : <Badge>G</Badge>} {google}
             </span>],
@@ -51,6 +59,114 @@ export function Profile() {
         </div>
       </div>
     </>
+  )
+}
+
+/** A member's own record. Staff keep the name, number, start date and a verified savings figure. */
+function MemberRecord() {
+  const R = t.memberRecord
+  const load = useCallback(() => Promise.all([api.myMember(), api.applyOptions()]), [])
+  const { data, error, reload, setData } = useLoad(load)
+  if (error) return error.status === 404 ? null : <ErrorNotice doing={R.loadFailed} error={error} onRetry={reload} />
+  if (!data) return null
+  const [m, options] = data
+  return <MemberRecordForm key={m.member_no} m={m} options={options} onSaved={(next) => setData([next, options])} />
+}
+
+function MemberRecordForm({ m, options, onSaved }: {
+  m: MyMember; options: Awaited<ReturnType<typeof api.applyOptions>>; onSaved: (m: MyMember) => void
+}) {
+  const R = t.memberRecord
+  const toast = useToast()
+  const [phone, setPhone] = useState(m.phone ?? '')
+  const [email, setEmail] = useState(m.email ?? '')
+  const [savings, setSavings] = useState(m.savings_kes === null ? '' : String(m.savings_kes))
+  const [form, setForm] = useState({
+    age: m.age === null ? '' : String(m.age), sex: m.sex ?? '', education: m.education === null ? '' : String(m.education),
+    marital: m.marital_status ?? '',
+  } as { age: string; sex: MyMember['sex'] | ''; education: string; marital: MyMember['marital_status'] | '' })
+  const [tried, setTried] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<ApiError | null>(null)
+  const locked = m.savings_status === 'verified'
+  const formFilled = form.age !== '' || form.sex !== '' || form.education !== '' || form.marital !== ''
+  const formProblems = formFilled
+    ? applicantProblems({ age: form.age, sex: form.sex ?? '', education: form.education, marital: form.marital ?? '' })
+    : []
+  const errors = tried ? {
+    phone: !normalisePhone(phone) ? R.errors.phone : null,
+    email: email.trim() && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email.trim()) ? R.errors.email : null,
+    savings: !locked && savings.trim() && parseShillings(savings) === null ? R.errors.savings : null,
+  } : { phone: null, email: null, savings: null }
+  const formErrors = tried ? Object.fromEntries(formProblems.map((f) => [f, t.applicant.missing[f]])) : {}
+
+  async function submit(e: FormEvent) {
+    e.preventDefault()
+    setTried(true)
+    const typedSavings = parseShillings(savings)
+    if (!normalisePhone(phone) || formProblems.length
+        || (email.trim() && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email.trim()))
+        || (!locked && savings.trim() && typedSavings === null)) return
+    const body: MyMemberUpdate = { phone: normalisePhone(phone)!, email: email.trim() || null }
+    if (!locked && typedSavings !== null) body.savings_kes = typedSavings
+    if (formFilled) {
+      body.applicant = toApplicantForm({ age: form.age, sex: form.sex ?? '', education: form.education, marital: form.marital ?? '' })
+    }
+    setBusy(true)
+    setError(null)
+    try {
+      onSaved(await api.updateMyMember(body))
+      toast(R.saved)
+      setTried(false)
+    } catch (err) {
+      setError(err as ApiError)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div className={styles.record}>
+      <Card title={R.title}>
+        <p className="muted small">{R.lead}</p>
+        <DetailList items={[
+          [R.fullName, m.full_name],
+          [R.memberNo, m.member_no],
+          [R.joined, formatDay(m.joined_on)],
+          ...(locked ? [[R.savingsLocked, formatKes(m.savings_kes!)] as [string, string]] : []),
+          ...(m.savings_kes !== null ? [[t.apply.savingsVerification, (
+            <Badge key="sv" tone={locked ? 'low' : 'wait'} icon={locked ? 'check' : 'clock'}>{t.savingsStatus[m.savings_status]}</Badge>
+          )] as [string, ReactNode]] : []),
+        ]} />
+        <form className={styles.form} onSubmit={submit} noValidate>
+          <Field id="me-phone" label={R.phone} error={errors.phone}>
+            {(p) => <input {...p} className="input" type="tel" inputMode="tel" autoComplete="tel" maxLength={32} value={phone}
+                           onChange={(e) => setPhone(e.target.value)} />}
+          </Field>
+          <Field id="me-email" label={R.email} optional hint={R.emailHint} error={errors.email}>
+            {(p) => <input {...p} className="input" type="email" inputMode="email" autoComplete="email" maxLength={254} value={email}
+                           onChange={(e) => setEmail(e.target.value)} />}
+          </Field>
+          {!locked && (
+            <Field id="me-savings" label={R.savings} optional hint={R.savingsHint} error={errors.savings}>
+              {(p) => <input {...p} className="input num" inputMode="numeric" autoComplete="off" value={savings}
+                             onChange={(e) => setSavings(e.target.value)} />}
+            </Field>
+          )}
+          <div>
+            <p className="field-label">{R.applicant}</p>
+            <p className="subtle small">{R.applicantLead}</p>
+            <ApplicantFields d={{ age: form.age, sex: form.sex ?? '', education: form.education, marital: form.marital ?? '' }}
+                             options={options} errors={formErrors}
+                             put={(k, v) => setForm((f) => ({ ...f, [k]: v }))} />
+          </div>
+          {error && <ErrorNotice doing={R.failed} error={error} />}
+          <button type="submit" className="btn btn-primary" disabled={busy}>
+            {busy && <span className="spinner" aria-hidden />} {busy ? R.saving : R.save}
+          </button>
+        </form>
+      </Card>
+    </div>
   )
 }
 

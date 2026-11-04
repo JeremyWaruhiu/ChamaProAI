@@ -340,6 +340,11 @@ export interface Member {
   joined_on: string // YYYY-MM-DD
   user_id: number | null
   created_at: string
+  email?: string | null
+  savings_kes?: number | null
+  savings_verified_by?: string | null
+  savings_verified_at?: string | null
+  self_signed_up?: boolean
 }
 
 export interface MemberCreate {
@@ -419,6 +424,9 @@ export interface ApplicationSummary {
 export interface ApplicationDetail extends ApplicationSummary {
   purpose: string
   sacco_savings_kes: number
+  savings_self_declared?: boolean
+  booking?: Booking | null
+  practice_interviews?: PracticeBrief[]
   created_by: string
   member: Member
   interview: { id: number; status: InterviewStatus; question_set: QuestionSet; language: Language; mode: Mode; created_at: string } | null
@@ -467,6 +475,9 @@ export interface MyApplicationSummary {
 
 export interface MyApplication extends MyApplicationSummary {
   timeline: TimelineEntry[]
+  history?: { label: string; at: string }[]
+  booking?: MyBooking | null
+  practice?: MyPracticeBrief[]
   outcome: Outcome | null
   approved_amount_kes: number | null
   guarantors_required: number | null
@@ -518,4 +529,209 @@ export interface AuditFilter {
   until?: string
   limit?: number
   offset?: number
+}
+
+// --- Sign-up, a member's own record, bookings, practice, events, the pilot -----
+
+export interface SignupInfo {
+  enabled: boolean
+  consent_version: string
+  consent_text: string[]
+}
+
+export interface SignupBody {
+  full_name: string
+  phone: string
+  email: string | null
+  password: string
+  password_confirm: string
+  invite_code: string
+  consent: boolean
+  consent_version: string
+}
+
+export type SavingsStatus = 'none' | 'self_declared' | 'verified'
+
+export interface MyMember {
+  member_no: string
+  full_name: string
+  phone: string | null
+  email: string | null
+  savings_kes: number | null
+  savings_status: SavingsStatus
+  savings_label: string
+  savings_limit_kes: number | null
+  joined_on: string
+  tenure_months: number
+  age: number | null
+  sex: Sex | null
+  education: number | null
+  marital_status: MaritalStatus | null
+  applicant_complete: boolean
+  consent_current: boolean
+}
+
+export interface MyMemberUpdate {
+  phone?: string
+  email?: string | null
+  savings_kes?: number
+  applicant?: ApplicantForm
+}
+
+export interface ApplyOptions extends ApplicantFormOptions {
+  purposes: string[]
+  savings_multiplier: number
+  min_tenure_months: number
+  max_term_months: number
+}
+
+/** POST /me/applications. What the member types and nothing else: the API refuses any other field. */
+export interface MyApplicationCreate {
+  amount_requested_kes: number
+  purpose: string
+  purpose_other?: string
+  term_months: number
+  language: Language
+  date: string
+  time: string
+  declared_savings_kes?: number
+  applicant?: ApplicantForm
+}
+
+export type BookingStatus = 'requested' | 'confirmed' | 'started' | 'cancelled'
+
+export interface MyBooking {
+  id: number
+  application_id: number
+  starts_at: string
+  language: Language
+  status: BookingStatus
+}
+
+export interface Booking extends MyBooking {
+  member_id: number
+  member_no: string
+  member_name: string
+  member_phone: string | null
+  amount_requested_kes: number
+  purpose: string
+  term_months: number
+  interview_id: number | null
+}
+
+export interface BookingCalendar {
+  today: string
+  last_date: string
+  holidays: { date: string; name: string }[]
+  times: string[]
+  timezone: string
+}
+
+export interface SlotOut {
+  time: string
+  starts_at: string
+  available: boolean
+  reason: 'booked' | 'past' | null
+}
+
+export interface DaySlots {
+  date: string
+  blocked_reason: string | null
+  slots: SlotOut[]
+}
+
+export type EventType = 'agm' | 'member_meeting' | 'training' | 'loan_deadline' | 'other'
+
+export interface SaccoEvent {
+  id: number
+  title: string
+  event_type: EventType
+  starts_at: string
+  location: string | null
+  online_link: string | null
+  description: string | null
+}
+
+export interface EventBody {
+  title: string
+  event_type: EventType
+  date: string
+  time: string
+  location: string | null
+  online_link: string | null
+  description: string | null
+}
+
+export interface MemberHome {
+  events: SaccoEvent[]
+  next_interview: MyBooking | null
+  applications: MyApplicationSummary[]
+}
+
+export interface MyPracticeBrief {
+  id: number
+  language: Language
+  status: InterviewStatus
+  mode: 'practice'
+  answered: number
+  questions_total: number
+  created_at: string
+}
+
+export interface PracticeBrief {
+  interview_id: number
+  language: Language
+  status: InterviewStatus
+  answered: number
+  risk_class: string | null
+  created_at: string
+  submitted_at: string | null
+}
+
+export interface MyQuestion {
+  order: number
+  topic: string
+  text_en: string
+  text_kik: string
+}
+
+export interface MyResponse {
+  id: number
+  sentence_no: number
+  source: Source
+  status: ResponseStatus
+  transcript: string | null
+  edited: boolean
+  duration_s: number | null
+}
+
+/** What a member sees of a practice interview: never a class, score or probability. */
+export interface MyPractice {
+  id: number
+  application_id: number
+  language: Language
+  mode: 'practice'
+  status: InterviewStatus
+  created_at: string
+  questions: MyQuestion[]
+  responses: MyResponse[]
+  result: { message: string; reasons: string[] } | null
+  sus_answered: boolean
+  limits: { remaining_today: number; allowed_per_day: number; pilot_full_today: boolean }
+}
+
+export interface PilotStats {
+  volunteers: number
+  practice_by_language: Record<string, number>
+  completed_assessments: number
+  answers_total: number
+  answers_per_member: { member_no: string; answers: number; interviews: number }[]
+  sus_mean: number | null
+  sus_n: number
+  sus_members: number
+  comments: { member_no: string; comment: string; score: number; created_at: string }[]
+  signup_open: boolean
+  per_member_cap: number
+  daily_cap: number
+  used_today: number
 }

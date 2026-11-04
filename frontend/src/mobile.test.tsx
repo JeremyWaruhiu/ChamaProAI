@@ -9,6 +9,8 @@ import { useState } from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { InterviewSummary } from './api/types'
 import layout from './components/Layout.module.css?raw'
+import slots from './components/SlotPicker.module.css?raw'
+import practice from './screens/Practice.module.css?raw'
 import shell from './components/Shell.module.css?raw'
 import ui from './components/ui.module.css?raw'
 import { micUnavailable } from './hooks/useRecorder'
@@ -63,6 +65,9 @@ describe('tap targets on a phone are at least 44px', () => {
     ['question chips while recording', recording, '.chip', TOUCH],
     ['interview steps', shell, '.step', TOUCH],
     ['list filters', tables, '.segmented button', TOUCH],
+    ['calendar days', slots, '.day', undefined],
+    ['interview time slots', slots, '.slot', undefined],
+    ['the SUS scale', practice, '.susOption', undefined],
   ])('%s', (_, css, selector, at) => {
     expect(px(rule(css, selector, at), 'min-height')).toBeGreaterThanOrEqual(44)
   })
@@ -83,6 +88,13 @@ describe('nothing is wider than the phone', () => {
   it('keeps wide evaluation tables scrolling inside their card, never the page', () => {
     expect(rule(results, '.tableScroll')).toContain('overflow-x: auto')
     expect(rule(results, '.card')).toContain('grid-template-columns: minmax(0, 1fr)')
+  })
+})
+
+describe('the calendar on a phone', () => {
+  it('shares the width between seven columns, so it cannot widen the page', () => {
+    expect(rule(slots, '.grid')).toContain('repeat(7, minmax(0, 1fr))')
+    expect(rule(slots, '.navBtn')).toContain('width: 44px')
   })
 })
 

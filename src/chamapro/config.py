@@ -6,7 +6,9 @@ so there is exactly one place that knows where secrets and data live.
 from __future__ import annotations
 
 import os
+from datetime import date, timedelta, timezone
 from pathlib import Path
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from dotenv import load_dotenv
 
@@ -106,6 +108,60 @@ LOGIN_WINDOW_SECONDS = 15 * 60  # ... in this window, then 429
 COOKIE_SECURE: str | None = os.getenv("CHAMAPRO_COOKIE_SECURE") or None
 # OAuth 2.0 Web client ID for "Sign in with Google"; unset = Google sign-in off.
 GOOGLE_CLIENT_ID: str | None = os.getenv("GOOGLE_CLIENT_ID") or None
+
+# --- Volunteer pilot ---------------------------------------------------------
+# Self sign-up exists only while this is set; it is the code volunteers are given.
+PILOT_INVITE_CODE: str | None = os.getenv("PILOT_INVITE_CODE") or None
+SIGNUP_MAX_PER_IP: int = int(os.getenv("SIGNUP_MAX_PER_IP") or 10)    # sign-up attempts per address ...
+SIGNUP_WINDOW_SECONDS: int = int(os.getenv("SIGNUP_WINDOW_SECONDS") or 3600)   # ... in this window, then 429
+# Self-service practice submissions per Nairobi day. Staff assessments do not count.
+PILOT_MAX_SUBMISSIONS_PER_MEMBER: int = int(os.getenv("PILOT_MAX_SUBMISSIONS_PER_MEMBER") or 5)
+PILOT_MAX_ASSESSMENTS_PER_DAY: int = int(os.getenv("PILOT_MAX_ASSESSMENTS_PER_DAY") or 20)
+
+# --- Interview bookings ------------------------------------------------------
+# Kenya keeps no daylight saving, so the fixed offset is right wherever the
+# server has no time zone database (a slim container image).
+try:
+    NAIROBI = ZoneInfo("Africa/Nairobi")
+except ZoneInfoNotFoundError:
+    NAIROBI = timezone(timedelta(hours=3), "EAT")
+BOOKING_WINDOW_DAYS: int = int(os.getenv("BOOKING_WINDOW_DAYS") or 90)   # how far ahead a slot can be taken
+
+# Weekdays among these cannot be booked. Fixed dates and Easter are certain. The
+# two Idd dates depend on the moon and are gazetted shortly before: the 2027 ones
+# are estimates, to be corrected once gazetted. A holiday falling on a Sunday is
+# observed on the Monday (Public Holidays Act), so that Monday is listed as well.
+DEFAULT_PUBLIC_HOLIDAYS = {
+    "2026-01-01": "New Year's Day", "2026-03-20": "Idd-ul-Fitr", "2026-04-03": "Good Friday",
+    "2026-04-06": "Easter Monday", "2026-05-01": "Labour Day", "2026-05-27": "Idd-ul-Azha",
+    "2026-06-01": "Madaraka Day", "2026-10-10": "Mazingira Day", "2026-10-20": "Mashujaa Day",
+    "2026-12-12": "Jamhuri Day", "2026-12-25": "Christmas Day", "2026-12-26": "Boxing Day",
+    "2027-01-01": "New Year's Day", "2027-03-10": "Idd-ul-Fitr", "2027-03-26": "Good Friday",
+    "2027-03-29": "Easter Monday", "2027-05-01": "Labour Day", "2027-05-17": "Idd-ul-Azha",
+    "2027-06-01": "Madaraka Day", "2027-10-10": "Mazingira Day",
+    "2027-10-11": "Mazingira Day (observed)", "2027-10-20": "Mashujaa Day",
+    "2027-12-12": "Jamhuri Day", "2027-12-13": "Jamhuri Day (observed)",
+    "2027-12-25": "Christmas Day", "2027-12-26": "Boxing Day",
+    "2027-12-27": "Boxing Day (observed)",
+}
+
+
+def _public_holidays(value: str | None) -> dict[date, str]:
+    """PUBLIC_HOLIDAYS as YYYY-MM-DD:Name,YYYY-MM-DD:Name, replacing the list
+    above when set. A malformed entry stops startup: a holiday that silently
+    fell out of the list would be open for booking."""
+    if not value:
+        return {date.fromisoformat(d): name for d, name in DEFAULT_PUBLIC_HOLIDAYS.items()}
+    out = {}
+    for entry in value.split(","):
+        day, sep, name = entry.strip().partition(":")
+        if not sep or not name.strip():
+            raise ValueError(f"PUBLIC_HOLIDAYS: expected YYYY-MM-DD:Name, got {entry!r}")
+        out[date.fromisoformat(day)] = name.strip()
+    return out
+
+
+PUBLIC_HOLIDAYS: dict[date, str] = _public_holidays(os.getenv("PUBLIC_HOLIDAYS"))
 
 
 def require(name: str) -> str:

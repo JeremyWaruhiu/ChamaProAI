@@ -14,17 +14,21 @@ applications of the member record linked to their login; anyone else's is a
 """
 from __future__ import annotations
 
+from datetime import datetime
+
 from fastapi import APIRouter, Depends, HTTPException, Query, Response as HTTPResponse
 from sqlalchemy import func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, joinedload
 
+from chamapro import config
+
 from . import audit, comparator, member_text
 from . import schemas as s
 from .auth import require_member, require_officer
-from .db import (AuditLog, Decision, Guarantor, Interview, LoanApplication, Member, Response,
-                 User, get_db, utcnow)
-from .questions import QUESTION_SETS
+from .db import (Assessment, AuditLog, Decision, Guarantor, Interview, InterviewBooking,
+                 LoanApplication, Member, PracticeInterview, Response, User, get_db, utcnow)
+from .questions import CURRENT_SET, QUESTION_SETS
 
 ERRORS = {code: {"model": s.Error} for code in (401, 403, 404, 409, 422)}
 router = APIRouter(prefix="/api", responses=ERRORS)
@@ -177,6 +181,114 @@ def timeline(db: Session, app: LoanApplication) -> list[s.TimelineEntry]:
     return out
 
 
+def local_label(when: datetime) -> str:
+    """Tue 10 Nov 2026 at 09:00, in Nairobi time."""
+    t = when.astimezone(config.NAIROBI)
+    return f"{t:%a} {t.day} {t:%b %Y} at {t:%H:%M}"
+
+
+def booking_of(db: Session, application_id: int) -> InterviewBooking | None:
+    """The application's current booking: the latest that was not cancelled."""
+    return db.scalar(select(InterviewBooking)
+                     .where(InterviewBooking.application_id == application_id,
+                            InterviewBooking.status != "cancelled")
+                     .order_by(InterviewBooking.id.desc()).limit(1))
+
+
+def booking_out(b: InterviewBooking) -> s.BookingOut:
+    a, m = b.application, b.member
+    return s.BookingOut(id=b.id, application_id=b.application_id, member_id=b.member_id,
+                        member_no=m.member_no, member_name=m.full_name, member_phone=m.phone,
+                        amount_requested_kes=a.amount_requested_kes, purpose=a.purpose,
+                        term_months=a.term_months, starts_at=b.starts_at, language=b.language,
+                        status=b.status, interview_id=b.interview_id)
+
+
+def my_booking(b: InterviewBooking) -> s.MyBooking:
+    return s.MyBooking(id=b.id, application_id=b.application_id, starts_at=b.starts_at,
+                       language=b.language, status=b.status)
+
+
+def practice_briefs(db: Session, application_id: int) -> list[s.MyPracticeBrief]:
+    total = len(QUESTION_SETS[CURRENT_SET])
+    rows = db.execute(select(Interview, func.count(Response.id))
+                      .join(PracticeInterview, PracticeInterview.interview_id == Interview.id)
+                      .outerjoin(Response, Response.interview_id == Interview.id)
+                      .where(PracticeInterview.application_id == application_id)
+                      .group_by(Interview.id).order_by(Interview.id.desc()))
+    return [s.MyPracticeBrief(id=iv.id, language=iv.language, status=iv.status, answered=n,
+                              questions_total=total, created_at=iv.created_at) for iv, n in rows]
+
+
+def refresh_open_applications(db: Session, m: Member) -> list[int]:
+    """Applications not yet decided follow the member's current savings figure,
+    so the SACCO rule beside an assessment reads the verified one."""
+    apps = db.scalars(select(LoanApplication)
+                      .where(LoanApplication.member_id == m.id,
+                             LoanApplication.savings_self_declared.is_(True),
+                             LoanApplication.status.in_((*BEFORE_ASSESSMENT, "assessed")))).all()
+    for app in apps:
+        app.sacco_savings_kes = m.savings_kes
+        app.savings_self_declared = m.savings_verified_at is None
+        app.updated_at = utcnow()
+    return [a.id for a in apps]
+
+
+HISTORY_ACTIONS = ("application.create", "application.status", "booking.create", "booking.confirm",
+                   "booking.reschedule", "booking.cancel", "booking.start")
+
+
+def history(db: Session, app: LoanApplication) -> list[s.HistoryEntry]:
+    """What has happened to an application, in words, for its member: the same
+    audit rows as the timeline, with the interview bookings between them. A
+    cancelled booking returning the application to draft is said once, by the
+    cancellation."""
+    out = []
+    rows = db.scalars(select(AuditLog)
+                      .where(AuditLog.entity == "loan_application", AuditLog.entity_id == app.id,
+                             AuditLog.action.in_(HISTORY_ACTIONS))
+                      .order_by(AuditLog.id))
+    for r in rows:
+        d = r.details
+        when = local_label(datetime.fromisoformat(d["starts_at"])) if "starts_at" in d else ""
+        match r.action:
+            case "application.create":
+                label = member_text.STATUS_LABEL["draft"]
+            case "application.status":
+                if d.get("to") in ("draft", "interview_pending") and "booking_id" in d:
+                    continue
+                label = member_text.STATUS_LABEL.get(d.get("to"))
+            case "booking.create":
+                label = f"Interview booked for {when}"
+            case "booking.confirm":
+                label = f"Interview confirmed for {when}"
+            case "booking.reschedule":
+                label = f"Interview moved to {when}"
+            case "booking.cancel":
+                label = f"Interview on {when} cancelled"
+            case "booking.start":
+                label = "Interview started"
+        if label:
+            out.append(s.HistoryEntry(label=label, at=r.created_at))
+    return out
+
+
+def practice_briefs_for_staff(db: Session, app: LoanApplication) -> list[s.PracticeBrief]:
+    """A member's practice runs, with what staff may see of each."""
+    rows = db.execute(select(PracticeInterview, Interview.language, Interview.status,
+                             Assessment.risk_class, func.count(Response.id))
+                      .join(Interview, Interview.id == PracticeInterview.interview_id)
+                      .outerjoin(Assessment, Assessment.interview_id == Interview.id)
+                      .outerjoin(Response, Response.interview_id == Interview.id)
+                      .where(PracticeInterview.application_id == app.id)
+                      .group_by(PracticeInterview.id, Interview.language, Interview.status,
+                                Assessment.risk_class)
+                      .order_by(PracticeInterview.id.desc()))
+    return [s.PracticeBrief(interview_id=p.interview_id, language=lang, status=status, answered=n,
+                            risk_class=risk, created_at=p.created_at, submitted_at=p.submitted_at)
+            for p, lang, status, risk, n in rows]
+
+
 # Everything summary() reads, in the same query as the applications: without
 # it each row costs up to four more round trips (member, interview, assessment,
 # decision).
@@ -212,8 +324,12 @@ def detail(db: Session, app: LoanApplication) -> s.ApplicationDetail:
     if iv and iv.assessment:
         assessment = s.AssessmentOut.model_validate(iv.assessment)
         assessment.comparator = comparator_of(app)
+    booking = booking_of(db, app.id)
     return s.ApplicationDetail(
         **summary(app).model_dump(), purpose=app.purpose, sacco_savings_kes=app.sacco_savings_kes,
+        savings_self_declared=app.savings_self_declared,
+        booking=booking_out(booking) if booking else None,
+        practice_interviews=practice_briefs_for_staff(db, app),
         created_by=app.creator.username, member=s.MemberOut.model_validate(app.member),
         interview=s.InterviewBrief.model_validate(iv, from_attributes=True) if iv else None,
         assessment=assessment,
@@ -248,12 +364,15 @@ def my_view(db: Session, app: LoanApplication) -> s.MyApplication:
     if d is not None:
         message = d.member_message or member_text.default_message(
             outcome, d.approved_amount_kes, d.guarantors_required)
+    booking = booking_of(db, app.id)
     return s.MyApplication(
         id=app.id, amount_requested_kes=app.amount_requested_kes, purpose=app.purpose,
         term_months=app.term_months, status=app.status,
         status_label=member_text.STATUS_LABEL[app.status], mode=mode_of(app),
         created_at=app.created_at,
-        updated_at=app.updated_at, timeline=timeline(db, app), outcome=outcome,
+        updated_at=app.updated_at, timeline=timeline(db, app), history=history(db, app),
+        booking=my_booking(booking) if booking else None, practice=practice_briefs(db, app.id),
+        outcome=outcome,
         approved_amount_kes=d.approved_amount_kes if d else None,
         guarantors_required=d.guarantors_required if d else None,
         guarantors_still_needed=still, member_message=message, reasons=reasons,
@@ -278,6 +397,13 @@ def list_members(q: str | None = Query(None, max_length=200, description="Name o
     return [s.MemberOut.model_validate(m) for m in db.scalars(stmt)]
 
 
+def member_conflict(e: IntegrityError, member_no: str | None) -> HTTPException:
+    """Which of a member's two unique values the database refused."""
+    if "phone" in str(e.orig):
+        return HTTPException(409, "that phone number is already registered to another member")
+    return HTTPException(409, f"member number {member_no} already exists")
+
+
 @router.post("/members", status_code=201, response_model=s.MemberOut)
 def create_member(body: s.MemberCreate, db: Session = Depends(get_db),
                   user: User = Depends(require_officer)):
@@ -288,9 +414,9 @@ def create_member(body: s.MemberCreate, db: Session = Depends(get_db),
         # ids and field names only: the audit log cannot be erased, personal data can
         audit.record(db, user, "member.create", "member", m.id)
         db.commit()
-    except IntegrityError:
+    except IntegrityError as e:
         db.rollback()
-        raise HTTPException(409, f"member number {body.member_no} already exists")
+        raise member_conflict(e, body.member_no)
     return s.MemberOut.model_validate(m)
 
 
@@ -314,9 +440,33 @@ def update_member(member_id: int, body: s.MemberUpdate, db: Session = Depends(ge
         audit.record(db, user, "member.update", "member", m.id, fields=changed)
     try:
         db.commit()
-    except IntegrityError:
+    except IntegrityError as e:
         db.rollback()
-        raise HTTPException(409, f"member number {changes.get('member_no')} already exists")
+        raise member_conflict(e, changes.get("member_no"))
+    return s.MemberOut.model_validate(m)
+
+
+@router.post("/members/{member_id}/verify", response_model=s.MemberOut)
+def verify_member(member_id: int, body: s.MemberVerify, db: Session = Depends(get_db),
+                  user: User = Depends(require_officer)):
+    """Verify a member's savings, optionally correcting the figure or the
+    membership start date. Open applications move to the verified figure."""
+    m = get_or_404(db, Member, member_id, "member")
+    if body.savings_kes is None and m.savings_kes is None:
+        raise HTTPException(422, "savings_kes: this member has entered no savings; enter the figure")
+    edited = []
+    if body.savings_kes is not None and body.savings_kes != m.savings_kes:
+        m.savings_kes = body.savings_kes
+        edited.append("savings_kes")
+    if body.joined_on is not None and body.joined_on != m.joined_on:
+        m.joined_on = body.joined_on
+        edited.append("joined_on")
+    m.savings_verified_by, m.savings_verified_at = user.username, utcnow()
+    applications = refresh_open_applications(db, m)
+    # ids and field names only, as for every member change
+    audit.record(db, user, "member.verify_savings", "member", m.id, edited=edited,
+                 applications=applications)
+    db.commit()
     return s.MemberOut.model_validate(m)
 
 
@@ -453,11 +603,7 @@ def own_application(db: Session, user: User, application_id: int) -> LoanApplica
     return app
 
 
-@router.get("/me/applications", response_model=list[s.MyApplicationSummary])
-def my_applications(db: Session = Depends(get_db), user: User = Depends(require_member)):
-    member = my_member(db, user)
-    if member is None:
-        return []
+def my_summaries(db: Session, member: Member) -> list[s.MyApplicationSummary]:
     apps = db.scalars(select(LoanApplication).where(LoanApplication.member_id == member.id)
                       .options(joinedload(LoanApplication.interview))   # for mode_of
                       .order_by(LoanApplication.created_at.desc(), LoanApplication.id.desc()))
@@ -467,6 +613,12 @@ def my_applications(db: Session = Depends(get_db), user: User = Depends(require_
                                    mode=mode_of(a), created_at=a.created_at,
                                    updated_at=a.updated_at)
             for a in apps]
+
+
+@router.get("/me/applications", response_model=list[s.MyApplicationSummary])
+def my_applications(db: Session = Depends(get_db), user: User = Depends(require_member)):
+    member = my_member(db, user)
+    return [] if member is None else my_summaries(db, member)
 
 
 @router.get("/me/applications/{application_id}", response_model=s.MyApplication)

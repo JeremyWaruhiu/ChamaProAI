@@ -160,3 +160,50 @@ Also added beside the risk band: a plain-language explanation (the strongest fac
 | Rule agreement in the live statistics (`rule_agreement`) | The SACCO rule against the model on live applications, next to the officer-agreement figure; practice applications are left out. |
 | `GET /api/auth/profile`, `POST /api/auth/password`, `POST /api/auth/logout-all` | The profile page. Changing your password needs the current one, is rate-limited like sign-in, and ends your other sessions; signing out everywhere ends all of them. Both are written to the audit log. |
 | `mode` on application lists, the application detail and a member's own applications | Practice applications carry a badge in every list, including the member portal. |
+
+## Member loan workflow, SACCO activities and the volunteer pilot
+
+Migration `0004`. None of this has a wireframe; every row is an addition unless
+it says otherwise. The trained model, the evaluation results and the assessment
+pipeline are unchanged: `assess` runs as before, called with the member as the actor.
+
+| Change | Status | Reason |
+|---|---|---|
+| Public sign-up at `/signup` (`#/signup`), only while `PILOT_INVITE_CODE` is set; invite code, phone, password and a consent box; consent version and time stored | Added | Volunteers need to join without an administrator. The consent text says what happens to their answers, and asks for a fictional applicant. |
+| Volunteers sign in with their phone number or generated member number (`V-00042`) | Added | A username would be one more thing to remember on a phone. The number in any form counts as one key for the sign-in limit, so retyping it earns no extra attempts. |
+| `members.phone` stored as `+254XXXXXXXXX`, unique when present; `POST /api/members` now returns that form | Changed | A duplicate must be a duplicate however it was typed. Staff-created members may still have none. Guarantor numbers are not members' and stay as typed. |
+| A member's email is on `members.email`, not `users.email` | Added | `users.email` signs in with Google. If a sign-up form could set it, anyone could tie someone else's address to an account whose password they know. |
+| Savings on the member record, "Self-declared, pending verification" until staff verify or edit them; age kept as a birth year | Added | The SACCO rule needs a figure before anyone has checked it, and must say so. A birth year does not go stale, and a birth date is not needed. |
+| `joined_on` of a volunteer is the sign-up date until staff edit it | Added | Members cannot edit the verified fields, so a new volunteer sees the under-6-months warning until an officer corrects it. |
+| "Apply for a loan": known fields read-only, live limit hint, warnings that never block | Added | The officer decides; the form's job is to set expectations. The API refuses read-only fields rather than ignoring them, so a client bug shows up. |
+| A month calendar, not a native date input | Added | A native input cannot grey out weekends or holidays or say why. Closed days stay pressable, because a tooltip never shows on a phone: tapping one says "Jamhuri Day: public holiday". |
+| Half-hour slots 08:30 to 16:00 (the last ends at 16:30); one upcoming interview per member; booking up to 90 days ahead | Added | One branch, one interview per slot. The limit per member stops one person holding every slot; the window keeps bookings inside the configured holiday list. |
+| Bookings page (upcoming list and week calendar), confirm / reschedule / cancel / open interview; a rescheduled booking counts as confirmed | Added | The officer chose the new time. Opening a confirmed booking creates the live interview with the application and applicant form attached, and goes straight to the existing runner. |
+| Member's application page: booking card, booking again after a cancellation, "What has happened" history | Added | Status changes and every time change, in words, in Nairobi time. |
+| Practice interviews linked through `practice_interviews`, never `loan_applications.interview_id` | Added | That column is one interview per application and drives its status. Using it would have moved a real application to "assessed" and blocked the officer's own interview. |
+| One question per screen, record / upload / type; review, then submit | Added | The same flow as staff, on the member's own endpoints, which return only what a member may see: no translation, extraction signals, engine errors, feature names. |
+| The practice result is a sentence for each risk class, plus the existing reasons | Added | It tracks the class, as a result must, but never names it, and says it is not a loan decision. |
+| Every answer must be ready before a member can submit | Changed | Staff may assess a partial interview; a volunteer's partial run would only produce a poor evaluation record. |
+| Daily caps in `pilot_daily_usage`, raised by a conditional UPDATE, per Nairobi day; released if the assessment fails | Added | Counting assessments would let two requests at once pass the cap, and a Gemini outage would use up a member's day. Staff interviews do not count: the caps protect the pilot's budget, not the branch's work. |
+| SUS questionnaire after submitting, once per interview; the server scores it; the member sees their own score only as computed by their browser | Added | Standard wording, optional. The pilot page gives the number of responses and of members, since one person may answer more than once. |
+| SACCO events: staff create, change and delete; members and officers see upcoming ones | Added | Past events are filtered out when read, so nothing has to clean them up. Online links must be http(s), since they become links on members' phones. |
+| Pilot page and CSV exports (`#/admin/pilot`), self-service interviews only | Added | Staff practice runs and demo rows are not evaluation data. Exports use member numbers, no audio, and escape cells a spreadsheet would run as a formula. |
+| Member tabs drop their icons below 480 px; the sidebar says "Bookings" and "Events" | Changed | Three tabs must fit at 360 px. |
+| No SMS or email when a booking changes | Deferred | The member sees the change on their next visit; sending messages needs a provider and a budget. |
+| Kikuyu wording for question set v2 | Deferred | Needs a native speaker. A Kikuyu practice interview shows the English with a note that answers may be in Kikuyu. |
+
+New screens are in `docs/screenshots/pilot-*.png` (desktop) and `pilot-*-390.png`
+(390 px wide). Each was also measured at 360 and 430 px: nothing scrolls sideways.
+
+### API changes for this work
+
+| Change | Reason |
+|---|---|
+| `POST /api/auth/signup`, `GET /api/auth/signup` | Self sign-up. Separate from `/api/auth/config`, whose reply is fixed by its tests. |
+| `/api/me/member`, `/me/home`, `/me/consent`, `/me/apply-options`, `POST /me/applications`, `POST /me/applications/{id}/booking` | A member's own record and application. |
+| `/api/me/practice/...`, `POST /me/applications/{id}/practice` | Thin wrappers over the staff endpoints, each checking ownership first. Another member's interview, or a live one, is a 404. |
+| `/api/booking/calendar`, `/booking/slots`, `/api/bookings...` | Booking; the calendar is for every role, the list and its actions for staff. |
+| `POST /api/members/{id}/verify`; `email`, `savings_*` and `self_signed_up` on `MemberOut` | Verification, audit-logged by field name. |
+| `savings_self_declared` on `loan_applications`, `booking` and `practice_interviews` on the application detail | Officers can see what they are relying on. |
+| `/api/events`; `/api/admin/pilot`, `/admin/pilot/export/*.csv` | Activities and evaluation. |
+| Row-level security, with no policies, on the five new tables | As on every other table: Supabase's Data API must read nothing. |

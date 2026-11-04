@@ -14,6 +14,8 @@ import { paths } from '../lib/router'
 import { interviewDestination } from '../lib/selectors'
 import { interviewStatusText, interviewTone } from '../lib/status'
 import { t } from '../strings'
+import { UpcomingInterviews } from './Bookings'
+import { UpcomingEvents } from './Events'
 import styles from './OfficerHome.module.css'
 
 const H = t.officerHome
@@ -55,6 +57,8 @@ export function OfficerHome() {
       </div>
 
       <div className={styles.grid}>
+        <UpcomingInterviews />
+        <UpcomingEvents />
         <Card title={H.today} delay={0.05} actions={<a href={paths.interviews()} className="btn btn-quiet btn-sm">{H.viewAll}</a>}>
           {!interviews ? <SkeletonList rows={3} what={H.today} />
             : today.length ? <InterviewRows items={today} />

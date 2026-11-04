@@ -14,7 +14,7 @@ from datetime import date
 
 import pytest
 from alembic import command
-from sqlalchemy import create_engine, inspect, text
+from sqlalchemy import create_engine, inspect, select, text
 from sqlalchemy.engine import make_url
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -143,6 +143,66 @@ def test_mutable_tables_still_change(engine, rows):
         db.commit()
     with Session(engine) as db:
         assert db.get(LoanApplication, rows["application_id"]).status == "guarantor_submitted"
+
+
+def test_0004_on_postgres(engine, rows):
+    """What SQLite alone cannot show: partial unique indexes, the conditional
+    upsert behind the daily caps, and booleans in a real boolean column."""
+    from datetime import timedelta
+
+    from chamapro.api import pilot
+    from chamapro.api.db import InterviewBooking, PilotDailyUsage, nairobi_today, utcnow
+
+    with Session(engine) as db:
+        member = db.scalar(select(Member).where(Member.member_no == "PG-1"))
+        assert member.self_signed_up is False
+        member.phone = "0712345678"
+        db.flush()
+        assert member.phone == "+254712345678"
+        when = utcnow() + timedelta(days=1)
+        kw = dict(application_id=rows["application_id"], member_id=member.id, language="en")
+        db.add(InterviewBooking(starts_at=when, status="confirmed", **kw))
+        db.flush()
+        db.add(InterviewBooking(starts_at=when, status="cancelled", **kw))
+        db.flush()              # a cancelled row holds no slot
+        db.commit()
+    with Session(engine) as db:
+        db.add(InterviewBooking(starts_at=when, status="started", **kw))
+        with pytest.raises(IntegrityError, match="uq_interview_bookings_slot"):
+            db.commit()
+    with Session(engine) as db:
+        db.add(InterviewBooking(starts_at=when + timedelta(hours=1), status="requested", **kw))
+        with pytest.raises(IntegrityError, match="uq_interview_bookings_open"):
+            db.commit()
+    with Session(engine) as db:
+        day = nairobi_today()
+        assert pilot._take(db, day, "all", 2) is True
+        assert pilot._take(db, day, "all", 2) is True
+        assert pilot._take(db, day, "all", 2) is False
+        db.commit()
+        assert db.get(PilotDailyUsage, (day, "all")).used == 2
+
+
+def test_0004_stops_on_a_shared_number_on_postgres():
+    with scratch_database() as url:
+        cfg = alembic_config(url)
+        command.upgrade(cfg, "0003")
+        eng = create_engine(url)
+        with eng.begin() as c:
+            for i, phone in enumerate(("0712345678", "+254712345678", "0799000000", None)):
+                c.execute(text("INSERT INTO members (member_no, full_name, phone, joined_on, created_at) "
+                               "VALUES (:n, 'F', :p, '2020-01-01', now())"), {"n": f"M{i}", "p": phone})
+        with pytest.raises(RuntimeError, match="member 1"):
+            command.upgrade(cfg, "head")
+        with eng.connect() as c:           # one transaction: not even the rewrite stayed
+            assert c.execute(text("SELECT version_num FROM alembic_version")).scalar() == "0003"
+            assert c.execute(text("SELECT phone FROM members WHERE member_no = 'M0'")).scalar() == "0712345678"
+        with eng.begin() as c:
+            c.execute(text("UPDATE members SET phone = NULL WHERE member_no = 'M1'"))
+        command.upgrade(cfg, "head")
+        with eng.connect() as c:
+            assert c.execute(text("SELECT phone FROM members WHERE member_no = 'M0'")).scalar() == "+254712345678"
+        eng.dispose()
 
 
 def test_check_constraints(engine, rows):

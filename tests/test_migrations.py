@@ -60,7 +60,7 @@ def legacy(tmp_path):
 def test_fresh_database_reaches_head(tmp_path):
     engine = create_engine(f"sqlite:///{tmp_path / 'new.db'}")
     init_db(engine)
-    assert schema_revision(engine) == head_revision() == "0003"
+    assert schema_revision(engine) == head_revision() == "0004"
     names = set(inspect(engine).get_table_names())
     assert {"members", "loan_applications", "guarantors", "audit_log", "alembic_version"} <= names
     assert not list(tmp_path.glob("*.bak"))                  # nothing to back up
@@ -79,7 +79,7 @@ def test_legacy_rows_survive_exactly(legacy, tmp_path):
         assert [r[:len(cols)] for r in new_rows] == rows, t
     assert after["decisions"][1][len(before["decisions"][1]):] == \
         ["outcome", "approved_amount_kes", "guarantors_required", "officer_notes", "member_message"]
-    assert len(list(tmp_path.glob("chamapro.db.pre-0003-*.bak"))) == 1   # backed up once
+    assert len(list(tmp_path.glob("chamapro.db.pre-0004-*.bak"))) == 1   # backed up once
 
 
 def test_backup_holds_the_pre_migration_database(legacy, tmp_path):
@@ -156,6 +156,84 @@ def test_postgres_sql_has_the_triggers_and_row_level_security():
     for table in ["applicants", "interviews", "responses", "assessments", "decisions", "users",
                   "sessions", "members", "loan_applications", "guarantors", "audit_log"]:
         assert f"ALTER TABLE {table} ENABLE ROW LEVEL SECURITY" in sql
+
+
+def at_0003(tmp_path, *members):
+    """A database one revision back, holding these (id, phone) members."""
+    path = tmp_path / "m.db"
+    command.upgrade(alembic_config(f"sqlite:///{path}"), "0003")
+    con = sqlite3.connect(path)
+    con.executemany("INSERT INTO members (id, member_no, full_name, phone, joined_on, created_at) "
+                    "VALUES (?, ?, 'F', ?, '2020-01-01', '2020-01-01')",
+                    [(i, f"M-{i}", phone) for i, phone in members])
+    con.commit()
+    con.close()
+    return path
+
+
+def test_0004_rewrites_existing_phones_to_the_one_form(tmp_path):
+    path = at_0003(tmp_path, (1, "0712345678"), (2, "+254712345679"), (3, "0112 345-678"),
+                   (4, "254712345670"), (5, None), (6, ""), (7, "not a number"))
+    init_db(create_engine(f"sqlite:///{path}"))
+    con = sqlite3.connect(path)
+    rows = dict(con.execute("SELECT id, phone FROM members").fetchall())
+    con.close()
+    assert rows == {1: "+254712345678", 2: "+254712345679", 3: "+254112345678", 4: "+254712345670",
+                    5: None, 6: None, 7: "notanumber"}
+
+
+def test_0004_stops_on_a_shared_number_and_changes_nothing(tmp_path):
+    path = at_0003(tmp_path, (1, "0712345678"), (2, "+254712345678"), (3, "0799999999"))
+    engine = create_engine(f"sqlite:///{path}")
+    with pytest.raises(RuntimeError, match=r"member 1: \+254712345678; member 2: \+254712345678"):
+        init_db(engine)
+    assert schema_revision(engine) == "0003"
+    con = sqlite3.connect(path)
+    assert con.execute("SELECT phone FROM members ORDER BY id").fetchall() == \
+        [("0712345678",), ("+254712345678",), ("0799999999",)]
+    assert "self_signed_up" not in {r[1] for r in con.execute("PRAGMA table_info(members)")}
+    con.close()
+
+
+def test_phone_is_unique_only_when_present(tmp_path):
+    engine = create_engine(f"sqlite:///{tmp_path / 'p.db'}")
+    init_db(engine)
+    con = sqlite3.connect(tmp_path / "p.db")
+    insert = ("INSERT INTO members (member_no, full_name, phone, joined_on, created_at, self_signed_up) "
+              "VALUES (?, 'F', ?, '2020-01-01', '2020-01-01', 0)")
+    con.execute(insert, ("A", None))
+    con.execute(insert, ("B", None))
+    con.execute(insert, ("C", "+254712345678"))
+    with pytest.raises(sqlite3.IntegrityError, match="members.phone"):
+        con.execute(insert, ("D", "+254712345678"))
+    con.close()
+
+
+def test_0004_downgrades_and_comes_back(tmp_path):
+    path = tmp_path / "d.db"
+    url = f"sqlite:///{path}"
+    command.upgrade(alembic_config(url), "head")
+    command.downgrade(alembic_config(url), "0003")
+    names = set(inspect(create_engine(url)).get_table_names())
+    assert not names & {"interview_bookings", "sacco_events", "practice_interviews",
+                        "pilot_daily_usage", "sus_responses"}
+    assert "self_signed_up" not in {c["name"] for c in inspect(create_engine(url)).get_columns("members")}
+    command.upgrade(alembic_config(url), "head")
+    assert schema_revision(create_engine(url)) == "0004"
+
+
+def test_postgres_sql_covers_the_new_tables_offline():
+    out = io.StringIO()
+    with redirect_stdout(out):
+        command.upgrade(alembic_config("postgresql+psycopg://u:p@localhost/x"), "0003:0004", sql=True)
+    sql = out.getvalue()
+    for table in ("interview_bookings", "sacco_events", "practice_interviews", "pilot_daily_usage",
+                  "sus_responses"):
+        assert f"ALTER TABLE {table} ENABLE ROW LEVEL SECURITY" in sql
+    assert "CREATE UNIQUE INDEX uq_members_phone ON members (phone)" in sql
+    assert "CREATE UNIQUE INDEX uq_interview_bookings_slot ON interview_bookings (starts_at) " \
+           "WHERE status IN ('requested', 'confirmed', 'started')" in sql
+    assert "UPDATE members SET phone = '+254' || substr(phone, 2)" in sql
 
 
 def test_postgres_is_never_migrated_implicitly(monkeypatch):

@@ -119,3 +119,30 @@ describe('people are named by display name, with their role', () => {
     expect(userLabel(member)).toBe('grace (Member)')
   })
 })
+
+describe('the volunteer pilot\'s screens', () => {
+  const member = { username: 'V-00001', role: 'member' as const, display_name: null }
+  const officer = { username: 'o', role: 'officer' as const, display_name: null }
+  const admin = { username: 'a', role: 'admin' as const, display_name: null }
+
+  it('sign-up is public, and sends anyone signed in to their home', () => {
+    expect(redirectFor('#/signup', null)).toBeNull()
+    expect(redirectFor('#/signup', member)).toBe('#/my')
+    expect(redirectFor('#/signup', officer)).toBe('#/app')
+  })
+
+  it('applying and practising are for members', () => {
+    for (const hash of ['#/my/apply', '#/my/practice/7', '#/my/practice/7/review', '#/my/practice/7/result']) {
+      expect(redirectFor(hash, member)).toBeNull()
+      expect(redirectFor(hash, officer)).toBe('#/app')
+    }
+  })
+
+  it('bookings and events are for staff, the pilot page for admins', () => {
+    expect(redirectFor('#/bookings', officer)).toBeNull()
+    expect(redirectFor('#/events', admin)).toBeNull()
+    expect(redirectFor('#/bookings', member)).toBe('#/my')
+    expect(redirectFor('#/admin/pilot', admin)).toBeNull()
+    expect(redirectFor('#/admin/pilot', officer)).toBe('#/app')
+  })
+})

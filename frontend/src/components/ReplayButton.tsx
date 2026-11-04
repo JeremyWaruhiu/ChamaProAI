@@ -4,7 +4,12 @@ import { t } from '../strings'
 import { Icon } from './Icon'
 
 /** Play back a stored answer. One large toggle, as in Figure 4.10. */
-export function ReplayButton({ responseId, className = 'btn btn-secondary' }: { responseId: number; className?: string }) {
+export function ReplayButton({ responseId, url, className = 'btn btn-secondary' }: {
+  responseId: number
+  /** Where the clip is, when not at the staff address (a member's own practice answers). */
+  url?: string
+  className?: string
+}) {
   const audio = useRef<HTMLAudioElement | null>(null)
   const [playing, setPlaying] = useState(false)
   const [failed, setFailed] = useState(false)
@@ -19,7 +24,7 @@ export function ReplayButton({ responseId, className = 'btn btn-secondary' }: { 
       return
     }
     if (!audio.current) {
-      const a = new Audio(api.audioUrl(responseId))
+      const a = new Audio(url ?? api.audioUrl(responseId))
       a.onended = () => setPlaying(false)
       a.onerror = () => { setPlaying(false); setFailed(true) }
       audio.current = a

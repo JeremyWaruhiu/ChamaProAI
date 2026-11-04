@@ -29,6 +29,7 @@ export function Login({ onSignedIn }: { onSignedIn: (me: Me) => void }) {
   const userRef = useRef<HTMLInputElement>(null)
   const passRef = useRef<HTMLInputElement>(null)
 
+  const [signupOpen, setSignupOpen] = useState(false)
   const [clientId, setClientId] = useState<string | null>(null)
   const [google, setGoogle] = useState<GoogleStatus>('off')
   const [googleBusy, setGoogleBusy] = useState(false)
@@ -50,6 +51,9 @@ export function Login({ onSignedIn }: { onSignedIn: (me: Me) => void }) {
         setClientId(cfg.google_client_id)
       })
       .catch(() => { /* no config, no Google button; password sign-in is unaffected */ })
+    api.signupInfo()
+      .then((info) => { if (alive) setSignupOpen(info.enabled) })
+      .catch(() => { /* no sign-up link; signing in is unaffected */ })
     return () => { alive = false }
   }, [])
 
@@ -101,21 +105,23 @@ export function Login({ onSignedIn }: { onSignedIn: (me: Me) => void }) {
                  onUsername={setUsername} onPassword={setPassword}
                  onToggle={() => setShown((v) => !v)} onSubmit={submit}
                  google={google} googleRef={googleRef} googleBusy={googleBusy} googleError={googleError}
-                 onGooglePlaceholder={() => setGoogleError(GOOGLE_NOT_ENABLED)} />
+                 onGooglePlaceholder={() => setGoogleError(GOOGLE_NOT_ENABLED)} signupOpen={signupOpen} />
     </LoginPage>
   )
 }
 
 /** The page around the form: the brand panel beside it (above it on a phone). */
-function LoginPage({ children }: { children: ReactNode }) {
+export function LoginPage({ children, asideTitle = T.asideTitle, asideBody = T.asideBody }: {
+  children: ReactNode; asideTitle?: string; asideBody?: string
+}) {
   const reduced = useReducedMotion()
   return (
     <div className={styles.page}>
       <aside className={styles.panel}>
         <a href={paths.landing()} className={styles.brandLink} aria-label={T.backHome}><Brand onDark /></a>
         <div className={styles.panelText}>
-          <h2 className={`display ${styles.panelTitle}`}>{T.asideTitle}</h2>
-          <p className={styles.panelBody}>{T.asideBody}</p>
+          <h2 className={`display ${styles.panelTitle}`}>{asideTitle}</h2>
+          <p className={styles.panelBody}>{asideBody}</p>
         </div>
         <ul className={styles.panelPoints} aria-hidden>
           <li><Icon name="mic" size={18} /> {t.landing.steps[0].title}</li>
@@ -149,12 +155,14 @@ interface FormProps {
   googleError?: string | null
   /** Pressed the Google button while Google sign-in is not configured. */
   onGooglePlaceholder?: () => void
+  /** The volunteer pilot is taking sign-ups. */
+  signupOpen?: boolean
 }
 
 /** The sign-in form itself, stateless so it can be rendered in tests. */
 export function LoginForm({
   username, password, shown, busy, error, userRef, passRef, onUsername, onPassword, onToggle, onSubmit,
-  google = 'off', googleRef, googleBusy = false, googleError = null, onGooglePlaceholder,
+  google = 'off', googleRef, googleBusy = false, googleError = null, onGooglePlaceholder, signupOpen = false,
 }: FormProps) {
   const invalid = error ? true : undefined
   return (
@@ -221,6 +229,12 @@ export function LoginForm({
           )}
 
           <p className={styles.help}>{T.help}</p>
+          {signupOpen && (
+            <p className={styles.help}>
+              {T.phoneHint}<br />
+              {T.signupPrompt} <a href={paths.signup()}>{T.signupLink}</a>
+            </p>
+          )}
         </div>
   )
 }

@@ -10,3 +10,4 @@
 .form { display: grid; gap: var(--space-4); margin-top: var(--space-4); justify-items: stretch; }
 .form > button { justify-self: start; }
 .spaced { margin-top: var(--space-4); }
+.record { margin-bottom: var(--space-5); }

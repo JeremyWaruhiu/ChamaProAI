@@ -1,4 +1,4 @@
-import type { ApplicationStatus, InterviewSummary, Outcome, TimelineEntry } from '../api/types'
+import type { ApplicationStatus, BookingStatus, InterviewSummary, Outcome, TimelineEntry } from '../api/types'
 import { t } from '../strings'
 import { DECISION_LABEL } from './risk'
 
@@ -18,6 +18,8 @@ export const STATUS_TONE: Record<ApplicationStatus, Tone> = {
   approved: 'low',
   declined: 'high',
 }
+
+export const BOOKING_TONE: Record<BookingStatus, Tone> = { requested: 'wait', confirmed: 'low', started: 'info', cancelled: 'neutral' }
 
 export const APPLICATION_STATUSES = Object.keys(STATUS_TONE) as ApplicationStatus[]
 

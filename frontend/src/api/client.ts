@@ -1,8 +1,10 @@
 import type {
   ApplicantFormOptions, ApplicationCreate, ApplicationDetail, ApplicationStatus, ApplicationSummary,
-  Assessment, AuditEntry, AuditFilter, AuthConfig, Decision, DecisionCreate, Guarantor, GuarantorIn,
-  Health, InterviewCreate, InterviewState, InterviewSummary, Me, Member, MemberCreate, MyApplication,
-  MyApplicationSummary, Profile, Question, QuestionSet, ResponseOut, ResponseQueued, Results, Role,
+  ApplyOptions, Assessment, AuditEntry, AuditFilter, AuthConfig, Booking, BookingCalendar, DaySlots,
+  Decision, DecisionCreate, EventBody, Guarantor, GuarantorIn, Health, InterviewCreate, InterviewState,
+  InterviewSummary, Language, Me, Member, MemberCreate, MemberHome, MyApplication, MyApplicationCreate,
+  MyMember, MyMemberUpdate, MyPractice, MyResponse, PilotStats, Profile, Question,
+  QuestionSet, ResponseOut, ResponseQueued, Results, Role, SaccoEvent, SignupBody, SignupInfo,
   UserCreate, UserOut,
 } from './types'
 import { t } from '../strings'
@@ -33,7 +35,7 @@ export class ApiError extends Error {
 let onUnauthorized: (() => void) | null = null
 
 /** Paths whose 401 is a refused sign-in, shown on the login form, not a lost session. */
-const SIGN_IN_PATHS = new Set(['/auth/login', '/auth/google'])
+const SIGN_IN_PATHS = new Set(['/auth/login', '/auth/google', '/auth/signup'])
 
 /** Called on any 401 except a failed sign-in: the session is gone, so go back to login. */
 export function setUnauthorizedHandler(handler: (() => void) | null) {
@@ -101,6 +103,23 @@ export function query(params: Record<string, string | number | null | undefined>
   return out ? `?${out}` : ''
 }
 
+/**
+ * Delete a response so it can be recorded again. While the server is
+ * transcribing it, the API answers 409 with Retry-After; wait that long
+ * and try again, telling the caller each time it has to wait.
+ */
+async function deleteRetrying(path: string, onWait?: (seconds: number) => void, maxTries = 12) {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await request<{ id: number }>(path, { method: 'DELETE' })
+    } catch (e) {
+      if (!(e instanceof ApiError) || e.status !== 409 || e.retryAfter === null || attempt >= maxTries) throw e
+      onWait?.(e.retryAfter)
+      await sleep(e.retryAfter * 1000)
+    }
+  }
+}
+
 export const api = {
   health: () => request<Health>('/health'),
   me: () => request<Me>('/auth/me'),
@@ -128,22 +147,8 @@ export const api = {
     return request<ResponseQueued>(`/interviews/${interviewId}/responses`, { method: 'POST', body: form })
   },
 
-  /**
-   * Delete a response so it can be recorded again. While the server is
-   * transcribing it, the API answers 409 with Retry-After; wait that long
-   * and try again, telling the caller each time it has to wait.
-   */
-  async deleteResponse(responseId: number, onWait?: (seconds: number) => void, maxTries = 12) {
-    for (let attempt = 1; ; attempt++) {
-      try {
-        return await request<{ id: number }>(`/responses/${responseId}`, { method: 'DELETE' })
-      } catch (e) {
-        if (!(e instanceof ApiError) || e.status !== 409 || e.retryAfter === null || attempt >= maxTries) throw e
-        onWait?.(e.retryAfter)
-        await sleep(e.retryAfter * 1000)
-      }
-    }
-  },
+  deleteResponse: (responseId: number, onWait?: (seconds: number) => void, maxTries = 12) =>
+    deleteRetrying(`/responses/${responseId}`, onWait, maxTries),
 
   /** An answer typed instead of recorded: no audio, no transcription wait. */
   typeResponse: (interviewId: number, sentenceNo: number, text: string) =>
@@ -174,10 +179,71 @@ export const api = {
     request<Guarantor>(`/guarantors/${id}/reject`, json('POST', { reason: reason.trim() || null })),
 
   // a member's own applications
-  myApplications: () => request<MyApplicationSummary[]>('/me/applications'),
   myApplication: (id: number) => request<MyApplication>(`/me/applications/${id}`),
   submitGuarantors: (id: number, guarantors: GuarantorIn[]) =>
     request<MyApplication>(`/me/applications/${id}/guarantors`, json('POST', { guarantors })),
+
+  // sign-up (public)
+  signupInfo: () => request<SignupInfo>('/auth/signup'),
+  signup: (body: SignupBody) => request<Me & { member_no: string }>('/auth/signup', json('POST', body)),
+
+  // a member's own record and loan application
+  myHome: () => request<MemberHome>('/me/home'),
+  myMember: () => request<MyMember>('/me/member'),
+  updateMyMember: (body: MyMemberUpdate) => request<MyMember>('/me/member', json('PATCH', body)),
+  giveConsent: (version: string) =>
+    request<MyMember>('/me/consent', json('POST', { consent: true, consent_version: version })),
+  applyOptions: () => request<ApplyOptions>('/me/apply-options'),
+  apply: (body: MyApplicationCreate) => request<MyApplication>('/me/applications', json('POST', body)),
+  bookInterview: (applicationId: number, body: { date: string; time: string; language: Language }) =>
+    request<MyApplication>(`/me/applications/${applicationId}/booking`, json('POST', body)),
+
+  // the booking calendar (every role)
+  bookingCalendar: () => request<BookingCalendar>('/booking/calendar'),
+  bookingSlots: (date: string) => request<DaySlots>(`/booking/slots${query({ date })}`),
+
+  // practice interviews (a member's own)
+  startPractice: (applicationId: number, language: Language) =>
+    request<MyPractice>(`/me/applications/${applicationId}/practice`, json('POST', { language })),
+  practice: (id: number) => request<MyPractice>(`/me/practice/${id}`),
+  uploadPractice(id: number, sentenceNo: number, audio: Blob, filename: string) {
+    const form = new FormData()
+    form.append('sentence_no', String(sentenceNo))
+    form.append('file', audio, filename)
+    return request<ResponseQueued>(`/me/practice/${id}/responses`, { method: 'POST', body: form })
+  },
+  typePractice: (id: number, sentenceNo: number, text: string) =>
+    request<MyResponse>(`/me/practice/${id}/responses/typed`, json('POST', { sentence_no: sentenceNo, text: text.trim() })),
+  savePracticeTranscript: (responseId: number, transcript: string) =>
+    request<MyResponse>(`/me/practice/responses/${responseId}`, json('PATCH', { transcript })),
+  deletePracticeResponse: (responseId: number, onWait?: (seconds: number) => void) =>
+    deleteRetrying(`/me/practice/responses/${responseId}`, onWait),
+  practiceAudioUrl: (responseId: number) => `/api/me/practice/responses/${responseId}/audio`,
+  submitPractice: (id: number) =>
+    request<MyPractice>(`/me/practice/${id}/submit`, { method: 'POST' }, ASSESS_TIMEOUT_MS),
+  answerSus: (id: number, answers: number[], comment: string) =>
+    request<null>(`/me/practice/${id}/sus`, json('POST', { answers, comment: comment.trim() || null })),
+
+  // interview bookings (staff)
+  bookings: (filter: { start?: string; end?: string; limit?: number } = {}) =>
+    request<Booking[]>(`/bookings${query(filter)}`),
+  confirmBooking: (id: number) => request<Booking>(`/bookings/${id}/confirm`, { method: 'POST' }),
+  rescheduleBooking: (id: number, date: string, time: string) =>
+    request<Booking>(`/bookings/${id}/reschedule`, json('POST', { date, time })),
+  cancelBooking: (id: number) => request<Booking>(`/bookings/${id}/cancel`, { method: 'POST' }),
+  startBooking: (id: number) => request<Booking>(`/bookings/${id}/start`, { method: 'POST' }),
+  verifyMember: (id: number, body: { savings_kes?: number; joined_on?: string }) =>
+    request<Member>(`/members/${id}/verify`, json('POST', body)),
+
+  // SACCO events
+  events: () => request<SaccoEvent[]>('/events'),
+  createEvent: (body: EventBody) => request<SaccoEvent>('/events', json('POST', body)),
+  updateEvent: (id: number, body: EventBody) => request<SaccoEvent>(`/events/${id}`, json('PUT', body)),
+  deleteEvent: (id: number) => request<null>(`/events/${id}`, { method: 'DELETE' }),
+
+  // the volunteer pilot (admins)
+  pilot: () => request<PilotStats>('/admin/pilot'),
+  pilotExportUrl: (name: 'aggregates' | 'transcripts') => `/api/admin/pilot/export/${name}.csv`,
 
   // administration
   users: () => request<UserOut[]>('/admin/users'),

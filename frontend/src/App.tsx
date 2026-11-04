@@ -18,6 +18,7 @@ function screen<K extends string>(load: () => Promise<Record<K, ComponentType<ne
 
 const Landing = screen(() => import('./screens/Landing'), 'Landing')
 const Login = screen(() => import('./screens/Login'), 'Login')
+const Signup = screen(() => import('./screens/Signup'), 'Signup')
 const Profile = screen(() => import('./screens/Profile'), 'Profile')
 const OfficerHome = screen(() => import('./screens/OfficerHome'), 'OfficerHome')
 const StartInterview = screen(() => import('./screens/StartInterview'), 'StartInterview')
@@ -35,6 +36,13 @@ const AuditLog = screen(() => import('./screens/AuditLog'), 'AuditLog')
 const Results = screen(() => import('./screens/Results'), 'Results')
 const MyApplications = screen(() => import('./screens/MyApplications'), 'MyApplications')
 const MyApplication = screen(() => import('./screens/MyApplication'), 'MyApplication')
+const Apply = screen(() => import('./screens/Apply'), 'Apply')
+const PracticeRunner = screen(() => import('./screens/Practice'), 'PracticeRunner')
+const PracticeReview = screen(() => import('./screens/Practice'), 'PracticeReview')
+const PracticeResult = screen(() => import('./screens/Practice'), 'PracticeResult')
+const Bookings = screen(() => import('./screens/Bookings'), 'Bookings')
+const Events = screen(() => import('./screens/Events'), 'Events')
+const Pilot = screen(() => import('./screens/Pilot'), 'Pilot')
 
 type Session = { status: 'checking' } | { status: 'failed'; error: ApiError } | { status: 'ready'; user: Me | null }
 
@@ -43,6 +51,7 @@ function screenFor(route: Route, onSignedIn: (me: Me) => void): ReactNode {
   switch (route.screen) {
     case 'landing': return <Landing />
     case 'login': return <Login onSignedIn={onSignedIn} />
+    case 'signup': return <Signup onSignedIn={onSignedIn} />
     case 'profile': return <Profile />
     case 'home': return <OfficerHome />
     case 'start': return <StartInterview key={`s${route.memberId}`} memberId={route.memberId} />
@@ -54,12 +63,19 @@ function screenFor(route: Route, onSignedIn: (me: Me) => void): ReactNode {
     case 'application': return <ApplicationDetail key={`p${route.id}`} id={route.id} />
     case 'members': return <Members />
     case 'member': return <MemberDetail key={`m${route.id}`} id={route.id} />
+    case 'bookings': return <Bookings />
+    case 'events': return <Events />
     case 'admin': return <AdminHome />
     case 'users': return <Users />
     case 'audit': return <AuditLog />
     case 'results': return <Results />
+    case 'pilot': return <Pilot />
     case 'my': return <MyApplications />
     case 'myApplication': return <MyApplication key={`y${route.id}`} id={route.id} />
+    case 'apply': return <Apply />
+    case 'practice': return <PracticeRunner key={`q${route.id}`} id={route.id} question={route.question} />
+    case 'practiceReview': return <PracticeReview key={`w${route.id}`} id={route.id} />
+    case 'practiceResult': return <PracticeResult key={`z${route.id}`} id={route.id} />
     case 'notFound': return null
   }
 }
@@ -113,7 +129,7 @@ export default function App() {
       <Suspense fallback={<SkeletonPage what={t.app.loadingApp} />}>{screenFor(route, onSignedIn)}</Suspense>
     </ErrorBoundary>
   )
-  const publicPage = route.screen === 'landing' || route.screen === 'login'
+  const publicPage = route.screen === 'landing' || route.screen === 'login' || route.screen === 'signup'
   let page: ReactNode = content
   if (user && !publicPage) {
     page = isStaff(user.role)

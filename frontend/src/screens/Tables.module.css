@@ -45,7 +45,7 @@
 }
 
 /* Detail pages built from the same pieces */
-.detailGrid { display: grid; gap: var(--space-5); grid-template-columns: minmax(260px, 1fr) minmax(0, 2fr); align-items: start; }
+.detailGrid { display: grid; gap: var(--space-5); grid-template-columns: minmax(340px, 1fr) minmax(0, 2fr); align-items: start; }
 @media (max-width: 900px) { .detailGrid { grid-template-columns: 1fr; } }
 .cardList { display: grid; gap: var(--space-2); margin: 0; padding: 0; list-style: none; }
 .cardLink {

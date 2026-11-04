@@ -2,6 +2,7 @@
 // SVG keeps the app free of an icon dependency and of extra requests.
 
 const PATHS = {
+  calendar: 'M4 6h16v15H4zM4 10.5h16M8.5 3v5M15.5 3v5',
   home: 'M3 10.5 12 3l9 7.5M5.5 9v11h13V9',
   mic: 'M12 3a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V6a3 3 0 0 0-3-3ZM5 11a7 7 0 0 0 14 0M12 18v3',
   list: 'M8 6h13M8 12h13M8 18h13M3.5 6h.01M3.5 12h.01M3.5 18h.01',
@@ -27,6 +28,7 @@ const PATHS = {
   play: 'M7 4v16l13-8L7 4Z',
   stop: 'M6 6h12v12H6z',
   upload: 'M12 16V4M7 9l5-5 5 5M4 20h16',
+  download: 'M12 4v12M7 11l5 5 5-5M4 20h16',
   keyboard: 'M3 6h18v12H3zM7 10h.01M11 10h.01M15 10h.01M7 14h10',
   key: 'M15 7.5a3.5 3.5 0 1 1-3.4 4.3L4 19.5V22h3v-2h2v-2h2l1.2-1.2A3.5 3.5 0 0 1 15 7.5ZM16.5 6.5h.01',
   arrowRight: 'M5 12h14M13 6l6 6-6 6',

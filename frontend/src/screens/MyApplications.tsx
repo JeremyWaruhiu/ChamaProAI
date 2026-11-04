@@ -4,9 +4,11 @@ import { api } from '../api/client'
 import type { MyApplicationSummary } from '../api/types'
 import { Icon } from '../components/Icon'
 import { ErrorNotice } from '../components/Notice'
-import { Badge, EmptyState, PageHeader, PracticeBadge, SkeletonList } from '../components/ui'
+import { EventList } from '../components/EventList'
+import { Badge, Card, EmptyState, PageHeader, PracticeBadge, SkeletonList } from '../components/ui'
 import { useLoad } from '../hooks/useLoad'
 import { formatDate } from '../lib/format'
+import { formatNairobi } from '../lib/nairobi'
 import { fadeUp, stagger, useReducedMotion } from '../lib/motion'
 import { paths } from '../lib/router'
 import { STATUS_TONE, memberStages } from '../lib/status'
@@ -14,26 +16,52 @@ import { t } from '../strings'
 import styles from './Member.module.css'
 
 const Y = t.my
+const H = t.home
 
 export function MyApplications() {
-  const load = useCallback(() => api.myApplications(), [])
+  const load = useCallback(() => api.myHome(), [])
   const { data, error, reload } = useLoad(load)
   const reduced = useReducedMotion()
+  const apps = data?.applications
+  const next = data?.next_interview
 
   return (
     <>
-      <PageHeader title={Y.title} lead={Y.lead} />
+      <PageHeader title={Y.title} lead={Y.lead} actions={
+        <a href={paths.apply()} className="btn btn-accent"><Icon name="plus" /> {H.apply}</a>
+      } />
       {error && <ErrorNotice doing={Y.loadFailed} error={error} onRetry={reload} />}
       {!data && !error && <SkeletonList rows={3} what={Y.title} />}
-      {data?.length === 0 && <div className="card"><EmptyState icon="file" title={Y.empty}>{Y.emptyBody}</EmptyState></div>}
-      {data && data.length > 0 && (
-        <ul className={styles.list}>
-          {data.map((a, i) => (
-            <m.li key={a.id} {...fadeUp(reduced, stagger(reduced, i, 0.06))}>
-              <ApplicationCard a={a} />
-            </m.li>
-          ))}
-        </ul>
+      {data && (
+        <div className={styles.detail}>
+          {next && (
+            <Card title={H.nextInterview}>
+              <p className={styles.nextWhen}><Icon name="clock" size={18} /> {formatNairobi(next.starts_at)}</p>
+              <div className={styles.badges}>
+                <Badge tone={next.status === 'confirmed' ? 'low' : 'wait'}>{t.booking.status[next.status]}</Badge>
+                <Badge>{next.language === 'en' ? t.common.english : t.common.kikuyu}</Badge>
+              </div>
+              <a href={paths.myApplication(next.application_id)} className={styles.nextLink}>{H.view}</a>
+            </Card>
+          )}
+          {apps?.length === 0 && (
+            <div className="card">
+              <EmptyState icon="file" title={Y.empty} action={<a href={paths.apply()} className="btn btn-primary">{H.apply}</a>}>
+                {H.emptyAction}
+              </EmptyState>
+            </div>
+          )}
+          {apps && apps.length > 0 && (
+            <ul className={styles.list}>
+              {apps.map((a, i) => (
+                <m.li key={a.id} {...fadeUp(reduced, stagger(reduced, i, 0.06))}>
+                  <ApplicationCard a={a} />
+                </m.li>
+              ))}
+            </ul>
+          )}
+          {data.events.length > 0 && <Card title={H.events} delay={0.1}><EventList events={data.events} /></Card>}
+        </div>
       )}
     </>
   )
