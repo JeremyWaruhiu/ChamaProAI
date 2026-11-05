@@ -8,6 +8,7 @@ from sqlalchemy.orm import sessionmaker
 from chamapro import config
 from chamapro.api import main
 from chamapro.api.db import Applicant, Assessment, Base, Decision, Interview, SessionLocal
+from conftest import needs_classifier
 
 
 @pytest.fixture
@@ -156,6 +157,7 @@ def _rf_ready():
 
 @pytest.mark.skipif(not _rf_ready(), reason="needs models/random_forest.joblib, the classifier "
                                             "and the FinAccess modelling frame (not in the repo)")
+@needs_classifier
 def test_real_random_forest_is_scored_on_the_deployed_models_held_out_rows():
     import export_results as ex
     meta = json.loads(ex.META.read_text(encoding="utf-8"))

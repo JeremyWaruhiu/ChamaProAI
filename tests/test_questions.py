@@ -10,7 +10,7 @@ import pytest
 import score_interview
 from chamapro import config
 
-from conftest import new_interview
+from conftest import needs_classifier, new_interview
 
 FIELDS = {"id", "version", "topic", "order", "text_en", "text_kik", "features"}
 # The classifier features the applicant form fills (score_interview.build_vector).
@@ -68,7 +68,7 @@ def test_form_and_v2_cover_every_classifier_feature_exactly_once():
     assert len(counts) == 40
 
 
-@pytest.mark.skipif(not config.CLASSIFIER_META_PATH.exists(), reason="needs models/classifier_meta.json")
+@needs_classifier
 def test_feature_mapping_is_the_trained_classifiers_feature_set():
     assert sorted(score_interview.FEATURE_FIELD) == sorted(feature_order())
 

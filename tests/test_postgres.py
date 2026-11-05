@@ -33,6 +33,7 @@ from chamapro.api import db as db_module
 from chamapro.api.db import (Applicant, AuditLog, Conversation, ConversationTurn, Decision, Guarantor, GuarantorPledge, Interview,
                              LoanAccount, LoanApplication, Member, MemberNotice, User, alembic_config, head_revision, init_db, make_engine)
 from chamapro.conversation import service
+from conftest import needs_classifier
 
 ROOT = Path(__file__).resolve().parents[1]
 SERVER = os.getenv("CHAMAPRO_TEST_POSTGRES_URL")
@@ -811,6 +812,7 @@ def corpus(tmp_path):
 FLAG = "--replace-everything-in-this-database"
 
 
+@needs_classifier     # its refusal comes before those about users and the host
 def test_demo_postgres_refuses_all_it_should_and_changes_nothing(corpus, tmp_path):
     with scratch_database() as url:
         # Not at head.
@@ -844,7 +846,7 @@ def test_demo_postgres_refuses_all_it_should_and_changes_nothing(corpus, tmp_pat
     assert not (tmp_path / "x.db").exists() or (tmp_path / "x.db").stat().st_size == 0
 
 
-@pytest.mark.skipif(not config.CLASSIFIER_PATH.exists(), reason="needs models/classifier.joblib")
+@needs_classifier
 def test_demo_postgres_builds_rebuilds_and_the_reset_works_on_it(corpus, tmp_path):
     uploads = tmp_path / "uploads"
     with scratch_database() as url:

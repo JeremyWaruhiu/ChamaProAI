@@ -3,8 +3,10 @@ whose speed the test controls, a fake Gemini, and no network.
 
     pytest
 
-Tests that score with the real classifier are marked needs_classifier and
-skip when models/classifier.joblib is absent.
+Tests that score with the real classifier, or run a script that does (seed_demo.py's
+--demo-db and --demo-postgres, warm_demo.py without --source, latency_demo.py), are marked
+needs_classifier and skip when models/classifier.joblib or its meta file is absent: models/
+is not in git, so CI never has them. train_and_save.py makes them.
 
 `client` is signed in as an officer; `admin_client` as an admin; `anon_client`
 not at all; new_member() makes a member record with its own signed-in login.
@@ -93,7 +95,7 @@ _abort_if_unsafe("before anything ran")   # again, now that the engine exists
 
 needs_classifier = pytest.mark.skipif(
     not (config.CLASSIFIER_PATH.exists() and config.CLASSIFIER_META_PATH.exists()),
-    reason="needs models/classifier.joblib (run scripts/train_and_save.py)")
+    reason="needs models/classifier.joblib (not in git)")
 needs_ffmpeg = pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="needs ffmpeg")
 
 

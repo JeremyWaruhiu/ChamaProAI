@@ -383,6 +383,7 @@ def test_warm_demo_runs_the_exact_answers_on_a_copy_and_leaves_the_source_alone(
     assert hashlib.sha256(source.read_bytes()).hexdigest() == before
 
 
+@needs_classifier
 def test_warm_demo_builds_its_own_database_and_never_opens_the_one_in_the_environment(tmp_path):
     """DATABASE_URL here is what .env holds on the day: nothing is listening at it, and it must not matter."""
     scripts = Path(__file__).resolve().parents[1] / "scripts"

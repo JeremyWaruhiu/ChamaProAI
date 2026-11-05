@@ -14,11 +14,10 @@ from pathlib import Path
 
 import pytest
 
-from chamapro import config
+from conftest import needs_classifier
 
 SERVER = os.getenv("CHAMAPRO_TEST_POSTGRES_URL")
-pytestmark = pytest.mark.skipif(not (SERVER and config.CLASSIFIER_PATH.exists()),
-                                reason="set CHAMAPRO_TEST_POSTGRES_URL, and needs models/classifier.joblib")
+pytestmark = [needs_classifier, pytest.mark.skipif(not SERVER, reason="set CHAMAPRO_TEST_POSTGRES_URL to run")]
 ROOT = Path(__file__).resolve().parents[1]
 UNDER_SECONDS = 2.0
 
