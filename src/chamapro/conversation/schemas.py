@@ -50,19 +50,13 @@ class C4(Fields):
     chama_instalment_kes: int | None = Field(default=None, ge=0, le=KES_MAX)
 
 
-class C5(Fields):
-    full_name: str | None = Field(default=None, max_length=200)
-    member_no: str | None = Field(default=None, max_length=32)
-    nobody: bool | None = None
-
-
 class CheckAmount(Fields):
     answer: YesNoValue | None = None
     amount_kes: int | None = Field(default=None, ge=0, le=KES_MAX)
 
 
 QUESTIONS: dict[str, type[Fields]] = {
-    "CONSENT": YesNo, "G2": YesNo, "G2_NO_INCOME": YesNo, "R1": R1, "C1": C1, "C2": C2, "C2_NEW": C2, "C3": C3, "C4": C4, "C5": C5, "C6": YesNo,
+    "CONSENT": YesNo, "G2": YesNo, "G2_NO_INCOME": YesNo, "R1": R1, "C1": C1, "C2": C2, "C2_NEW": C2, "C3": C3, "C4": C4, "C6": YesNo,
     "CHECK_AMOUNT": CheckAmount, "CONFIRM": YesNo,
 }
 # The one money figure a question can give, for comparing the model with the parser.

@@ -792,14 +792,13 @@ const en = {
     translation: 'In English',
     chip: {
       amount_kes: 'Amount', purpose_text: 'Purpose', term_months: 'Term', monthly_income_kes: 'Income',
-      expected_monthly_return_kes: 'Brings in', chama_instalment_kes: 'Chama instalment', full_name: 'Guarantor',
-      member_no: 'Member number', household_size: 'People at home', children: 'Children', answer: 'Answer',
-      chama_loan_active: 'Chama loan now', nobody: 'Guarantor',
+      expected_monthly_return_kes: 'Brings in', chama_instalment_kes: 'Chama instalment',
+      household_size: 'People at home', children: 'Children', answer: 'Answer',
+      chama_loan_active: 'Chama loan now',
     } as Record<string, string>,
     months: (n: number) => plural(n, 'month', 'months'),
     answerYes: 'Yes',
     answerNo: 'No',
-    nobody: 'Nobody',
     outcome: {
       approved: 'Your loan is paid out',
       reversed: 'This payout was reversed',

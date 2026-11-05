@@ -7,15 +7,14 @@ import { useToast } from '../components/toastContext'
 import { Modal, SkeletonList } from '../components/ui'
 import { extensionFor, micUnavailable, useRecorder } from '../hooks/useRecorder'
 import { useSpeech, type Spoken } from '../hooks/useSpeech'
+import { ChatText, chatStrings, useChatText } from '../lib/chatStrings'
 import { closingActions, lastBotTurns, latestExplain, laterStage, memberStage, quickReplies, TEXT_STAGES, understood,
   VOICE_STAGES, type Stage } from '../lib/conversation'
 import { cx } from '../lib/cx'
-import { navigate, paths, redirect } from '../lib/router'
+import { chatOnStage, navigate, paths, redirect } from '../lib/router'
 import { t } from '../strings'
 import styles from './Chat.module.css'
 
-const C = t.chat
-const O = C.outcome
 const POLL_MS = 400
 const SHORTEST_HOLD_MS = 500
 const LONGEST_HOLD_MS = 55_000     // the server takes up to 60 s
@@ -25,6 +24,7 @@ const spoken = (turns: Turn[]): Spoken[] => turns.filter((x) => x.audio_url).map
 // --- Pieces ------------------------------------------------------------------------------------
 
 export function StageIndicator({ stages, current }: { stages: Stage[]; current: Stage | null }) {
+  const C = useChatText()
   const here = current ? stages.indexOf(current) : -1
   return (
     <ol className={styles.stages} role="status" aria-label={C.stagesLabel} data-testid="stages">
@@ -43,6 +43,7 @@ export function StageIndicator({ stages, current }: { stages: Stage[]; current: 
 export function BotBubble({ turn, playing, loading, onReplay }: {
   turn: Pick<Turn, 'seq' | 'text' | 'audio_url'>; playing: boolean; loading: boolean; onReplay: (line: Spoken) => void
 }) {
+  const C = useChatText()
   return (
     <li className={cx(styles.bubble, styles.bot)} data-testid="bot-bubble">
       <p>{turn.text}</p>
@@ -57,7 +58,8 @@ export function BotBubble({ turn, playing, loading, onReplay }: {
 }
 
 export function MemberBubble({ turn, latest }: { turn: Turn; latest: boolean }) {
-  const chips = understood(turn.extraction?.used)
+  const C = useChatText()
+  const chips = understood(turn.extraction?.used, C)
   const translated = turn.translation && turn.translation !== turn.text ? turn.translation : null
   const [chosen, setChosen] = useState<boolean | null>(null)
   const open = chosen ?? latest     // only the newest stays open on a small screen, unless they chose otherwise
@@ -80,6 +82,7 @@ export function MemberBubble({ turn, latest }: { turn: Turn; latest: boolean }) 
 }
 
 export function WhySheet({ explain, onClose }: { explain: MemberExplain | null; onClose: () => void }) {
+  const C = useChatText()
   return (
     <Modal open={explain !== null} title={C.whyTitle} onClose={onClose}>
       {explain && (
@@ -112,6 +115,8 @@ export function WhySheet({ explain, onClose }: { explain: MemberExplain | null; 
 export function OutcomeCard({ outcome, turns, onChanged }: {
   outcome: ConversationOutcome; turns: Turn[]; onChanged: () => void
 }) {
+  const C = useChatText()
+  const O = C.outcome
   const toast = useToast()
   const [why, setWhy] = useState<MemberExplain | null>(null)
   const [error, setError] = useState<ApiError | null>(null)
@@ -177,6 +182,7 @@ export function OutcomeCard({ outcome, turns, onChanged }: {
 }
 
 function LanguageChoice() {
+  const C = t.chat
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<ApiError | null>(null)
 
@@ -185,7 +191,7 @@ function LanguageChoice() {
     setError(null)
     try {
       const started = await api.startConversation(language)
-      redirect(paths.chat(started.conversation.id))
+      redirect(paths.chat(started.conversation.id, chatOnStage()))
     } catch (e) {
       setError(e as ApiError)
       setBusy(false)
@@ -209,6 +215,7 @@ function LanguageChoice() {
 type Pending = { voice: true } | { voice: false; text: string }
 
 function Conversation({ initial, reload }: { initial: ConversationDetail; reload: () => Promise<ConversationDetail | null> }) {
+  const C = useChatText()
   const [conv, setConv] = useState<ConversationBrief>(initial.conversation)
   const [turns, setTurns] = useState<Turn[]>(initial.turns)
   const [outcome, setOutcome] = useState<ConversationOutcome | null>(initial.outcome)
@@ -344,7 +351,7 @@ function Conversation({ initial, reload }: { initial: ConversationDetail; reload
     void send({ text })
   }
 
-  const replies = open && !busy ? quickReplies(conv.state, conv.language) : []
+  const replies = open && !busy ? quickReplies(conv.state, conv.language, C) : []
   const lastMember = turns.map((x) => x.speaker).lastIndexOf('member')
   const recording = rec.state === 'recording'
   const stages = pending?.voice === false ? TEXT_STAGES : VOICE_STAGES
@@ -419,6 +426,7 @@ function Conversation({ initial, reload }: { initial: ConversationDetail; reload
 // --- The screen --------------------------------------------------------------------------------
 
 export function Chat({ id }: { id: number | null }) {
+  const onStage = chatOnStage()
   const [detail, setDetail] = useState<ConversationDetail | null>(null)
   const [nothingOpen, setNothingOpen] = useState(false)
   const [error, setError] = useState<ApiError | null>(null)
@@ -428,26 +436,30 @@ export function Chat({ id }: { id: number | null }) {
     setError(null)
     try {
       const found = await reload()
-      if (found && !id) redirect(paths.chat(found.conversation.id))
+      if (found && !id) redirect(paths.chat(found.conversation.id, onStage))
       else if (found) setDetail(found)
       else setNothingOpen(true)
     } catch (e) {
       setError(e as ApiError)
     }
-  }, [id, reload])
+  }, [id, reload, onStage])
   // oxlint-disable-next-line react/set-state-in-effect -- fetch on mount; state is set after the await
   useEffect(() => { void load() }, [load])
 
-  return (
-    <div className={styles.chat}>
-      <header className={styles.top}>
-        <a href={paths.my()} className={styles.back} aria-label={C.back} title={C.back}><Icon name="arrowLeft" size={24} /></a>
-        <h1 className={styles.title}>{C.title}</h1>
-      </header>
-      {error && <div className={styles.padded}><ErrorNotice doing={C.loadFailed} error={error} onRetry={load} /></div>}
-      {!error && !detail && !nothingOpen && <div className={styles.padded}><SkeletonList rows={3} what={C.title} /></div>}
-      {nothingOpen && <LanguageChoice />}
-      {detail && <Conversation initial={detail} reload={reload as () => Promise<ConversationDetail | null>} />}
-    </div>
+  const C = chatStrings(detail?.conversation.language)
+  const screen = (
+    <ChatText.Provider value={C}>
+      <div className={cx(styles.chat, onStage && styles.onStage)} data-testid="chat">
+        <header className={styles.top}>
+          <a href={paths.my()} className={styles.back} aria-label={C.back} title={C.back}><Icon name="arrowLeft" size={24} /></a>
+          <h1 className={styles.title}>{C.title}</h1>
+        </header>
+        {error && <div className={styles.padded}><ErrorNotice doing={C.loadFailed} error={error} onRetry={load} /></div>}
+        {!error && !detail && !nothingOpen && <div className={styles.padded}><SkeletonList rows={3} what={C.title} /></div>}
+        {nothingOpen && <LanguageChoice />}
+        {detail && <Conversation initial={detail} reload={reload as () => Promise<ConversationDetail | null>} />}
+      </div>
+    </ChatText.Provider>
   )
+  return onStage ? <div className={styles.stageBackdrop} data-testid="chat-stage">{screen}</div> : screen
 }

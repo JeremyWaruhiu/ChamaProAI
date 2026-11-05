@@ -19,6 +19,8 @@ from __future__ import annotations
 import logging
 import re
 import sqlite3
+import time
+from contextlib import contextmanager
 from contextvars import ContextVar
 from datetime import date, datetime, timezone
 from pathlib import Path
@@ -26,9 +28,10 @@ from pathlib import Path
 from sqlalchemy import (JSON, Boolean, CheckConstraint, Date, DateTime, Engine,
                         Float, ForeignKey, ForeignKeyConstraint, Index, Integer, String, Text,
                         TypeDecorator, UniqueConstraint, create_engine, event,
-                        false, make_url, text)
-from sqlalchemy.orm import (DeclarativeBase, Mapped, mapped_column,
+                        exc, false, make_url, text)
+from sqlalchemy.orm import (DeclarativeBase, Mapped, Session, mapped_column,
                             relationship, sessionmaker, validates)
+from starlette.requests import Request
 
 from chamapro import config
 
@@ -234,6 +237,10 @@ class User(Base):
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     seed_tag: Mapped[str | None] = mapped_column(String(40), index=True)   # as Applicant.seed_tag
     created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
+
+    # Read with the session (auth.current_user) so a member's request costs one round trip fewer.
+    member: Mapped[Member | None] = relationship(primaryjoin="User.id == foreign(Member.user_id)", viewonly=True,
+                                                 uselist=False)
 
     @validates("email")
     def _lower_email(self, _key, value):
@@ -806,17 +813,38 @@ class AuditLog(Base):
     created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow, index=True)
 
 
+# A connection used this recently is taken to be alive, and costs no ping.
+PING_AFTER_IDLE_SECONDS = 30
+
+
 def make_engine(url: str) -> Engine:
     if make_url(url).get_backend_name() != "sqlite":
-        # Supabase's pooler closes idle connections, and recycling ahead of
-        # its idle timeout does not catch one dropped for any other reason: a
-        # dead pooled connection hangs the request that gets it. The pre-ping
-        # costs a round trip per checkout (~200 ms from Nairobi to eu-west-1),
-        # so a request checks out once (auth shares get_db's session).
-        # connect_timeout stops a stalled connect at 10 s instead of hanging.
-        return create_engine(url, pool_size=5, max_overflow=5, pool_recycle=240,
-                             pool_timeout=10, pool_pre_ping=True,
-                             connect_args={"connect_timeout": 10})
+        # Supabase's pooler closes idle connections, and recycling ahead of its idle timeout
+        # does not catch one dropped for any other reason: a dead pooled connection hangs the
+        # request that gets it. So a connection that has sat idle is pinged when it is taken
+        # out, and a dead one is replaced there and then. One used in the last 30 s is not: a
+        # ping per checkout is a round trip (~200 ms from Nairobi to eu-west-1) on every request.
+        # The newest connection goes out first, so that while anything is polling the others
+        # can age out rather than each needing its own ping. connect_timeout stops a stalled
+        # connect at 10 s instead of hanging. psycopg would prepare a statement on its fifth
+        # use, a round trip of its own that saves a little of the server's time and none of ours.
+        eng = create_engine(url, pool_size=5, max_overflow=5, pool_recycle=240, pool_timeout=10, pool_use_lifo=True,
+                            connect_args={"connect_timeout": 10, "prepare_threshold": None})
+
+        @event.listens_for(eng, "checkin")
+        def _note_last_use(_dbapi_conn, record):
+            record.info["last_used"] = time.monotonic()
+
+        @event.listens_for(eng, "checkout")
+        def _ping_if_idle(dbapi_conn, record, _proxy):
+            last = record.info.get("last_used")
+            if last is None or time.monotonic() - last <= PING_AFTER_IDLE_SECONDS:
+                return      # just connected, or just used
+            try:
+                eng.dialect.do_ping(dbapi_conn)
+            except eng.dialect.loaded_dbapi.Error as e:
+                raise exc.DisconnectionError(str(e)) from e     # the pool connects afresh
+        return eng
     eng = create_engine(url, connect_args={"check_same_thread": False, "timeout": 30})
 
     @event.listens_for(eng, "connect")
@@ -851,8 +879,37 @@ def _count_query(*_):
         n[0] += 1
 
 
-def get_db():
+@contextmanager
+def one_round_trip():
+    """What this block runs is sent to PostgreSQL as one statement and to SQLite as several, one
+    table at a time (batch.py). The request log counts what PostgreSQL would be sent, so that
+    the query-count tests can hold the conversation to its limits on either."""
+    n = query_count.get()
+    before = n[0] if n is not None else 0
+    try:
+        yield
+    finally:
+        if n is not None:
+            n[0] = before + 1
+
+
+def use_autocommit(db: Session) -> None:
+    """PostgreSQL only, and only between transactions: what this session runs next, until its
+    next commit, is not wrapped in BEGIN and COMMIT. Each is a round trip to Supabase, and under
+    READ COMMITTED a transaction of reads sees nothing a statement on its own would not. A single
+    write is atomic either way. Anything that needs row locks or several writes commits first."""
+    if db.get_bind().dialect.name == "postgresql" and not db.in_transaction():
+        db.connection(execution_options={"isolation_level": "AUTOCOMMIT"})
+
+
+# Writes that manage their own transactions: a reply holds none while it listens and speaks.
+_OWN_TRANSACTIONS = re.compile(r"/api/conversations(/\d+/reply)?")
+
+
+def get_db(request: Request):
     with SessionLocal() as db:
+        if request.method in ("GET", "HEAD") or _OWN_TRANSACTIONS.fullmatch(request.url.path):
+            use_autocommit(db)
         yield db
 
 

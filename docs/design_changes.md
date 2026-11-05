@@ -662,3 +662,144 @@ heard of those answers.
 | `GET /api/present/conversations`, `/{id}`, `/{id}/turns/{seq}/audio` | Officers and admins. |
 | `GET` and `POST /api/admin/demo-reset` | Admins. |
 | `warmed` on each ASR in `/api/health` | So the presenter knows when to start. |
+
+## Phase 5: Supabase readiness and the online presentation (5 November 2026)
+
+The final presentation runs against Supabase from Nairobi, where a round trip takes about 200 ms. Phase 4's reply
+made up to 125 of them, or 25 s on the database for the one that pays out.
+
+### Rulings
+
+| Ruling | What it means here |
+|---|---|
+| A yes at G2 does not satisfy C2 | Kept as built: an income left out at G2 can still be asked about at C2. |
+| C5 removed as a question (a later ruling in this phase; it replaced a new wording for it) | See "Guarantors come only from standing pledges" below. |
+
+### What was measured, and how
+
+`tests/latency_demo.py` runs both demo conversations in both languages over HTTP on a scratch database on a local
+PostgreSQL 16, through a TCP proxy that counts every time the client waits for the server. That is every statement and
+also every BEGIN, COMMIT, ping and statement prepare, which a statement count cannot see, so this figure and not the
+request log's is the true cost. The database time adds up, per turn, what each statement really took, with a hook sleeping
+200 ms for each, and 200 ms for each round trip the hook cannot see.
+
+| Turn | Round trips, phase 4 | Round trips now | Database time now at 200 ms |
+|---|---:|---:|---:|
+| Starting the conversation | 17 | 5 | 1.0 to 1.2 s |
+| Consent, then G2 | 21 | 4 | 0.8 to 1.0 s |
+| G2 answered, then R1 | 18 | 3 | 0.6 to 0.8 s |
+| R1 answered, then C1 | 29 | 4 | 0.8 to 1.0 s |
+| C1 answered, then CONFIRM or C2 | 28 | 4 | 0.8 to 1.1 s |
+| C2 answered, then CONFIRM (Njeri) | 28 | 4 | 0.8 to 1.0 s |
+| Yes, paid out: Wanjiru, O1 | 82 | 8 | 1.6 to 1.7 s |
+| Yes, offer taken and paid out: Njeri, O2 | 125 | 8 | 1.6 to 1.8 s |
+| `/present` conversation poll, changed | 12 | 3 | 0.6 s |
+| `/present` conversation poll, nothing moved (304) | 12 | 1 | 0.2 s |
+| `/present` list poll | 5 | 2 | 0.4 s |
+| Chat stage poll | 6 | 2 | 0.4 s |
+| Chat transcript | 13 | 3 | 0.6 s |
+| My applications | 6 | 2 | 0.4 s |
+| My SACCO (not polled) | 19 | 14 | 2.8 to 2.9 s |
+
+This is the database's share of a turn and nothing else: not the classifier, Gemini, speech, the Paza transcription,
+nor the upload of a voice reply to Supabase Storage, which is an HTTP request of its own before Paza runs. Nothing here
+has run on Supabase, and 200 ms is an estimate of the path to it. A new connection costs several round trips more (TLS and
+SCRAM), at the first request, and on whichever request finds its connection past `pool_recycle` (four minutes).
+
+My SACCO is unchanged but for the sign-in: it is not polled, and the demo need not open it. It is the one screen left
+that a member can click on and wait about 3 s for.
+
+### How it got there
+
+| Decision | Reason |
+|---|---|
+| A reply makes one atomic write, of everything | Member's turn, bot's turns, state, profile confirmation and, if there is one, the decision and the payout. The money and the words announcing it can no longer be parted: **this reverses phase 3's design**, in which a decision committed first and a retry found it by its key. A failure at any point now leaves nothing changed and no money moved; answering again pays once. The idempotency keys are still written and still looked at. |
+| `batch.py`: one statement per reply | A decision touches a dozen tables, and each INSERT through the ORM is a round trip. On PostgreSQL the batch is one WITH of one INSERT or UPDATE per table, with no driver feature that could behave differently through Supabase's pooler. Foreign keys are checked at its end. SQLite cannot write inside a WITH, so there it is a statement per table in one transaction, and the same code runs on both. Ids are reserved first, so rows can refer to each other, and an id reserved and not used is skipped, as after a rollback. |
+| Speech comes before the write, and the words are chosen before the locks | A pay-out reply evaluates once without locks to choose its words and speak them, then takes the locks and evaluates again on what the database now says. If the answer has changed, nothing is written, the words are chosen again, and the member hears what is true. Nothing is locked while speech is made, on a cold line or a warm one. |
+| Row locks kept, in one statement | `ledger.lock_for_decision` takes the same rows in the same order as `lock_members`: members first, lowest id first, then accounts. It is one statement, and it reserves the ids too. What is decided on is read in the next statement, because a statement sees the database as it was when it began, whatever it waited for. |
+| One read per evaluation | `decisions.read_snapshot` reads everything `evaluate` needs as one UNION ALL: 13 parts, written to give what the ledger's own functions give, and tested against them. The model reruns only if the features changed. |
+| No BEGIN or COMMIT around what does not need them | Under READ COMMITTED a transaction of reads sees nothing a statement alone would not, and one write is atomic by itself, so these run in autocommit: every GET, and a reply up to its write. Only a decision has a transaction. GET handlers that write (the idle sweep, an export's audit row) still commit, one statement at a time. |
+| A ping only after 30 s idle, and the newest connection first | `pool_pre_ping` cost a round trip on every checkout. A connection used in the last 30 s is taken as alive, and one idle longer is still pinged and replaced. The price: a connection that dies within those 30 s fails its next request, instead of the ping catching it, and SQLAlchemy then replaces the pool. With `/present` polling, that window is small and a retry works. |
+| psycopg's statement prepare is off | On a statement's fifth use it costs a round trip of its own, on each connection, which turned up as two extra on Njeri's payout. It saves the server a little and us nothing. |
+| A member's record and profile come with the session | A joined read: one round trip fewer on every member page. |
+| The `/present` poll is one statement for sign-in and tag | An ETag covers the conversation, the stage, and anything that changes how it came out: the application, the loan and the number of decisions on it. A browser revalidates by itself (`no-cache`), checked in a real browser: unchanged, its polls come back 304. The poll makes `require_officer`'s refusals itself, in the same words. |
+
+### The demo dataset on PostgreSQL
+
+`seed_demo.py --demo-postgres` refuses, without changing anything, unless it has `--replace-everything-in-this-database`,
+DATABASE_URL is PostgreSQL at head, the classifier and the 40 clips are all present, every user has a seed tag, and the host
+is typed back. TRUNCATE is stopped on the append-only tables by their own triggers, so it turns those off for its one
+transaction, as table owner, needing no superuser. It puts back the `system` user, which `0006` made and nothing else would.
+
+| Decision | Reason |
+|---|---|
+| The phone pre-flight is still needed | The seeder needs the schema at head, so `0004` runs first, on the rows there now. |
+| The clips go in a folder named for the build | `RESTART IDENTITY` reuses interview ids, and the storage backend refuses to overwrite. Earlier clips stay in the bucket, unreferenced, until someone deletes them. |
+| A user with no tag stops it | They may be real. Marking the test run's leftovers as disposable is an UPDATE the README gives you to run, after looking at the list. |
+| `warm_demo.py` builds its own SQLite from the seed | It no longer needs `data/demo.db`, and cannot reach Supabase. `--source` still copies a file. |
+
+The seed makes about 2,700 statements, so about 10 minutes from Nairobi. It was not worth speeding up for something run once.
+
+### Row-level security
+
+Nothing was missing, so no migration was added: every table, including those from `0004` to `0007` and `alembic_version`, has
+RLS on and no policies. `tests/test_postgres.py` now runs a SELECT on every table as a role with SELECT granted, as
+Supabase grants anon and authenticated, and gets nothing. `scripts/check_rls.py` lists any table without RLS and any policy open to those roles, for running against Supabase.
+
+### Online presentation
+
+`?stage=1` frames the chat. Presentation mode needed three changes for 960 px: the working stacks into one column, the
+verdict stacks, and each turn's four timings go two by two. `tests/browser/online_layout.mjs` measures both in Chromium:
+no sideways scrolling and nothing past the window's edge, at 1366x768 and 960x950 and 960x700, with the chat at 390x800. It checks the stage indicator's words are not clipped.
+
+### Kikuyu translation
+
+`scripts/translations.py export` writes `translations/kikuyu.csv`, 194 lines, and `import` reads it back, refusing everything if a slot is missing or extra, or if the English has moved on since.
+
+| Decision | Reason |
+|---|---|
+| What is on the sheet | Every template, `t.chat`, the Why sentences (reasons, checks, drivers), the Yes and No buttons. |
+| What is not | The six strings shown before a language is chosen, and `member_text.py`'s status labels and practice results: those screens have no Kikuyu to switch to, so a translation there would do nothing. |
+| `_check_sentence` is now a table of sentences with ids | They were f-strings, which cannot be translated. The English comes out the same; `test_member_text.py` says so. |
+| An explanation's reason needs its figures, kept on the turn from now on | The reason was stored as finished English. A turn from before this keeps it. |
+| The tap sends the word `lexicon.py` reads, whatever the button says | A translator's wording of Yes must not change what the parser hears. |
+| Tests pin the Kikuyu to empty | So that filling in the sheet breaks no test about the wording. `test_translations.py` reads the files as they are. |
+
+### Guarantors come only from standing pledges
+
+Ruling, after the above: C5 is no longer a question. A member is never asked to name anyone. Guarantors come from the
+pledges in the database, and policy version `2026.11.4` records decisions made this way.
+
+| When the pledges cannot cover the amount | What happens |
+|---|---|
+| What they can cover is at least half the request, and within the other maximums | C6: "We can offer up to ...". A yes goes to CONFIRM at that amount, and a yes there pays it out. |
+| The member says no to that | Refer, `guarantors_short`: "This loan needs another guarantor; an officer will add one." |
+| It is under half the request | The same referral, with no question. |
+| Fewer than two pledges have anything free | The same referral, with no question: two guarantors are the SACCO rule at any amount. |
+| No pledge at all | "Not now", as before (`no_guarantors`). |
+
+What they can cover is the member's own free deposits plus every free guarantor's capacity, each held to their pledge's
+ceiling, and it is on the trace as `maximums.capacity_kes`. The offer is the lowest of that, the 3 x rule and affordability.
+
+| Decision | Reason |
+|---|---|
+| The reason is the old code, `guarantors_short`, with the ruling's words | A referral for the same fact. `named_guarantor` is gone with what could cause it. |
+| An offer above the automatic limit is not made | A yes could only lead to `above_limit`, so that referral comes straight away. "Within the other maximums" is read to include this limit. |
+| Medium with nothing that could clear it is not asked | An officer decides whichever way it answers. C3 can still clear it first, and C6 follows. |
+| Under half because of the deposits or income is still `offer_too_small` | Another guarantor would not change that. |
+| C6 above both maximums keeps `offer_declined` when guarantors are not the limit | Turning it down is a different thing to refer. |
+| The lookup is deleted | `named_member`, the extra option, `parse_guarantor`, the `extra_guarantor` answer and `extra_guarantor_found` served C5 alone. The branch and member flows read member numbers in `loans.py`, which this leaves alone. |
+| Old records still work | A stored `extra_guarantor` answer is ignored when the engine runs again on a decision (review, or accepting an offer), and stays on the immutable record. A conversation waiting on C5 is closed at startup. |
+
+C6 tells a member a figure that their guarantors' free capacity limits. Over the conversation, with several tries, that is
+something about those guarantors' capacity, though only as a total and only within the rate limits. The ruling asks for it,
+and it is the first place a member can infer that figure at all.
+
+### API changes for this work
+
+| Change | Reason |
+|---|---|
+| `extra_guarantor` is no longer an answer (422), and `extra_guarantor_found` is gone from an evaluation; `questions[].id` can no longer be `C5` | The ruling. |
+| `ETag` and `304` on `GET /api/present/conversations/{id}` | The poll. |
+| `POST /api/conversations/{id}/reply` checks the body before the conversation | The lease is the first look at the conversation. A stranger's reply with a bad body gets 422 rather than 404, which tells them nothing. |
+| `reason_values` on the recorded explain | See above. Staff see it; `plain_explain` builds a member's view field by field and it stays out. |

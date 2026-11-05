@@ -1,7 +1,7 @@
 """Committing an automatic decision, the endpoints the next phase's conversation calls,
 and the officer's page of decisions.
 
-commit(evaluation, key) writes a loan application, an interview holding its immutable
+record(evaluation, key) writes a loan application, an interview holding its immutable
 assessment (with the features, provenance, overrides, SHAP and the policy's full trace)
 and a decision by the system user. On an automatic approval the member's standing
 guarantors become guarantors rows accepted under their pledge, and the loan is paid out.
@@ -12,14 +12,21 @@ pledge is used hears about it on My SACCO.
 Nothing trusts the evaluation handed in: under the locks, the engine runs again on what
 the database now says, and if that is not what the member was told, nothing is written.
 
+The whole of it goes to the database as one statement (batch.py), with whatever else the
+caller wants kept with it: a conversation sends its turns along, so that the money and the
+words that announce it cannot be parted. From lock to commit that is five round trips.
+
 Members get only what schemas.SelfServiceEvaluation allows, built field by field; the
 trace, the class, the SHAP values and any guarantor's capacity are for staff.
 """
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, replace
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
@@ -31,9 +38,11 @@ from chamapro.conversation import templates
 from . import audit, comparator, decisions, idempotency, ledger, loans, member_text
 from . import schemas as s
 from .auth import LoginLimiter, require_member, require_officer
-from .db import (SYSTEM_USERNAME, Applicant, Assessment, Decision, Guarantor, GuarantorPledge, Interview, LoanAccount,
-                 LoanApplication, Member, MemberNotice, SelfServiceRun, User, get_db, utcnow)
-from .decisions import Evaluation, LoanRequest
+from .batch import Batch, reserve as reserve_ids
+from .db import (SYSTEM_USERNAME, AccountEntry, Applicant, Assessment, Decision, Guarantor, GuarantorPledge, IdempotencyKey,
+                 Interview, LoanAccount, LoanApplication, Member, MemberNotice, SelfServiceRun, User, get_db, nairobi_today,
+                 utcnow)
+from .decisions import FINISHED, Evaluation, LoanRequest, Snapshot
 from .ledger_api import IdemKey, reversal_deadline
 from .pilot import required_member
 from .sacco import STANDING_GUARANTOR
@@ -47,8 +56,6 @@ router = APIRouter(prefix="/api", responses=ERRORS)
 TERM_FOR_THE_RECORD = 12
 COARSE = {"approve": "approve", "approve_reduced": "approve", "refer": "refer", "not_now": "decline"}
 STATUS_AFTER = {"approve": "approved", "approve_reduced": "offered", "refer": "decided", "not_now": "declined"}
-# Where a self-service application is finished with, once any loan has been paid out.
-FINISHED = ("declined", "reversed")
 # Recorded on an assessment instead of an extraction model: nothing was extracted.
 PROFILE_NOT_EXTRACTED = "none: read from the member's profile"
 
@@ -69,21 +76,14 @@ class DecisionChanged(CannotCommit):
         return "Something has changed since you were told this. Please ask again."
 
 
+@dataclass(frozen=True)
+class SystemActor:
+    """Who an automatic decision is by: the system user, as far as a row needs to know."""
+    id: int
+
+
 def system_user(db: Session) -> User:
     return db.scalar(select(User).where(User.username == SYSTEM_USERNAME))
-
-
-def lock_everyone(db: Session, member: Member, overrides: dict) -> set[int]:
-    """The borrower and everyone who could back them, in the fixed order. A pledge made
-    after this is not among them; commit notices and stops."""
-    ids = {member.id, *db.scalars(select(GuarantorPledge.guarantor_member_id)
-                                  .where(GuarantorPledge.borrower_member_id == member.id,
-                                         GuarantorPledge.status == "active"))}
-    named = decisions.named_member(db, member, overrides.get("extra_guarantor"))
-    if named is not None:
-        ids.add(named.id)
-    ledger.lock_members(db, ids)
-    return ids
 
 
 def has_open_application(db: Session, member_id: int) -> bool:
@@ -95,58 +95,93 @@ def has_open_application(db: Session, member_id: int) -> bool:
                             LoanApplication.status.not_in(FINISHED), LoanAccount.id.is_(None)).limit(1)) is not None
 
 
-def record_run(db: Session, ev: Evaluation, app: LoanApplication, member: Member, system: User, trigger: str,
-               move_application: bool = True) -> Decision:
+def answers_on_record(assessment: Assessment) -> dict:
+    """What an earlier decision was given, to run the engine on again. A guarantor named at the
+    question that no longer exists stays on the record and is not an answer any more."""
+    return {k: v for k, v in (assessment.overrides or {}).items() if k in decisions.OVERRIDE_KEYS}
+
+
+def rows_for(*evaluations_: Evaluation) -> dict[str, int]:
+    """The ids an evaluation's decision will be written under, reserved with the locks. If the
+    fresh evaluation under them turns out to want more, Batch fetches them, at a round trip."""
+    runs, paid = len(evaluations_), [e for e in evaluations_ if e.outcome == "approve"]
+    return {"applicants": runs, "interviews": runs, "assessments": runs, "decisions": runs, "self_service_runs": runs,
+            "loan_accounts": len(paid), "account_entries": len(paid), "member_accounts": len(paid),
+            "guarantors": sum(len(e.worked.chosen) for e in paid)}
+
+
+def record_run(out: Batch, ev: Evaluation, app: LoanApplication, member: Member, system, trigger: str,
+               move_application: bool = True) -> SelfServiceRun:
     """The immutable record of one automatic decision: an interview with no answers,
     its assessment and its decision. The application moves on to it, unless the loan
     it decided is already out and this is only a request to look at it."""
-    iv = Interview(applicant=Applicant(name=member.full_name, age=ev.features.get("age"), sex=member.sex,
-                                       education=ev.features.get("education_level"),
-                                       marital_status=ev.features.get("marital_status")),
-                   question_set="v2", language="en", mode="self_service", status="assessed")
-    a = Assessment(interview=iv, risk_class=ev.risk_class, probabilities=ev.probabilities,
+    who = Applicant(name=member.full_name, age=ev.features.get("age"), sex=member.sex,
+                    education=ev.features.get("education_level"), marital_status=ev.features.get("marital_status"))
+    iv = Interview(applicant_id=out.give_id(who), question_set="v2", language="en", mode="self_service", status="assessed")
+    out.give_id(iv)
+    a = Assessment(interview_id=iv.id, risk_class=ev.risk_class, probabilities=ev.probabilities,
                    feature_vector=ev.feature_vector, contributions=ev.contributions, extracted=ev.features,
                    applicant_form=None, extraction_completeness=ev.extraction_completeness,
                    features_populated=ev.features_populated, features_total=ev.features_total,
                    features_not_extractable=[], extraction_model=PROFILE_NOT_EXTRACTED,
                    model_file=ev.model_file, model_sha256=ev.model_sha256, assessed_by=SYSTEM_USERNAME,
                    provenance=ev.provenance, overrides=ev.overrides, policy_trace=ev.trace)
-    d = Decision(interview=iv, decision=COARSE[ev.outcome], outcome=ev.outcome, approved_amount_kes=ev.amount_kes,
+    d = Decision(interview_id=iv.id, decision=COARSE[ev.outcome], outcome=ev.outcome, approved_amount_kes=ev.amount_kes,
                  guarantors_required=comparator.MIN_GUARANTORS if ev.amount_kes else None,
                  member_message=ev.reason, decided_by=SYSTEM_USERNAME, policy_version=ev.policy_version)
-    db.add_all([iv, a, d])
-    db.flush()
     run = SelfServiceRun(application_id=app.id, interview_id=iv.id, trigger=trigger)
-    db.add(run)
+    out.give_id(a), out.give_id(d), out.give_id(run)
+    for row in (who, iv, a, d, run):
+        out.add(row)
     if move_application:
         app.interview_id = iv.id
-    db.flush()
-    audit.record(db, system, "assessment.create", "assessment", a.id, interview_id=iv.id, risk_class=a.risk_class)
-    audit.record(db, system, "decision.create", "decision", d.id, interview_id=iv.id, application_id=app.id,
+    audit.record(out, system, "assessment.create", "assessment", a.id, interview_id=iv.id, risk_class=a.risk_class)
+    audit.record(out, system, "decision.create", "decision", d.id, interview_id=iv.id, application_id=app.id,
                  outcome=ev.outcome, approved_amount_kes=ev.amount_kes, policy_version=ev.policy_version)
-    return d
+    return run
 
 
-def accept_guarantors_and_pay(db: Session, ev: Evaluation, app: LoanApplication, system: User) -> LoanAccount:
+@dataclass
+class PaidOut:
+    loan: LoanAccount
+    entry: AccountEntry
+    guarantors: list[str]
+
+
+def accept_guarantors_and_pay(out: Batch, ev: Evaluation, app: LoanApplication, member: Member, system,
+                              locked: ledger.Locked, snap: Snapshot) -> PaidOut:
     """Standing guarantors become guarantors rows accepted under their pledge, holding
-    what is needed of the loan, and the loan is paid out."""
-    now = utcnow()
-    for g, amount in ev.guarantor_shares():
-        row = Guarantor(application=app, full_name=g.full_name, member_no=g.member_no, phone=g.phone,
+    what is needed of the loan, and the loan is paid out. The caller has locked them all,
+    and an application held by an automatic offer has no other guarantors to release."""
+    now, shares = utcnow(), ev.guarantor_shares()
+    short = [g for g, amount in shares if amount > snap.capacity(g.member_id).available_kes]
+    if short:
+        raise ledger.LedgerError(f"guarantor {short[0].member_no} no longer has the capacity for this loan")
+    term = app.term_months
+    loan = LoanAccount(member_id=member.id, application_id=app.id, principal_kes=ev.amount_kes, disbursed_on=nairobi_today(),
+                       term_months=term, monthly_instalment_kes=ledger.instalment_kes(ev.amount_kes, term),
+                       status="active", created_by=system.id)
+    out.give_id(loan)
+    for g, amount in shares:
+        row = Guarantor(application_id=app.id, full_name=g.full_name, member_no=g.member_no, phone=g.phone,
                         relationship_=STANDING_GUARANTOR, amount_guaranteed_kes=amount, status="verified",
                         verified_by=system.id, verified_at=now, member_id=g.member_id, pledge_id=g.pledge_id,
-                        accepted_under_pledge=True)
-        db.add(row)
-        db.flush()
-        audit.record(db, system, "guarantor.accept_pledge", "guarantor", row.id, application_id=app.id,
+                        accepted_under_pledge=True, loan_account_id=loan.id)
+        out.give_id(row)
+        out.add(row)
+        audit.record(out, system, "guarantor.accept_pledge", "guarantor", row.id, application_id=app.id,
                      pledge_id=g.pledge_id)
-    loan = ledger.pay_out(db, app, ev.amount_kes, system)
-    audit.record(db, system, "loan.pay_out", "loan_account", loan.id, application_id=app.id, automatic=True)
-    borrower = db.get(Member, app.member_id).full_name
-    for g, _ in ev.guarantor_shares():
-        db.add(MemberNotice(member_id=g.member_id, kind="guarantee_started", loan_account_id=loan.id,
-                            text=f"You are now guaranteeing {borrower}'s loan of KSh {loan.principal_kes:,}."))
-    return loan
+    entry = AccountEntry(account_id=ledger.account_id_in(out, locked, member.id, "transactional"),
+                         account_kind="transactional", entry_type="loan_disbursement", amount_kes=loan.principal_kes,
+                         posted_at=now, reference=f"LOAN-{loan.id}", created_by=system.id, loan_account_id=loan.id)
+    out.give_id(entry)
+    out.add(loan)
+    out.add(entry)
+    audit.record(out, system, "loan.pay_out", "loan_account", loan.id, application_id=app.id, automatic=True)
+    for g, _ in shares:
+        out.add(MemberNotice(member_id=g.member_id, kind="guarantee_started", loan_account_id=loan.id,
+                             text=f"You are now guaranteeing {member.full_name}'s loan of KSh {loan.principal_kes:,}."))
+    return PaidOut(loan, entry, [g.full_name for g, _ in shares])
 
 
 def committed_reply(ev: Evaluation, app: LoanApplication, loan: LoanAccount | None) -> s.SelfServiceCommitted:
@@ -158,88 +193,165 @@ def committed_reply(ev: Evaluation, app: LoanApplication, loan: LoanAccount | No
         policy_version=ev.policy_version)
 
 
-def apply_outcome(db: Session, ev: Evaluation, app: LoanApplication, member: Member, trigger: str,
-                  locked: set[int]) -> s.SelfServiceCommitted:
+@dataclass
+class Recorded:
+    """What record() wrote. reply is what an API caller is given and what its key keeps."""
+    reply: dict
+    application_id: int
+    run_id: int | None = None
+    paid: PaidOut | None = None
+    snapshot: Snapshot | None = None
+    final: Evaluation | None = None
+
+
+def apply_outcome(out: Batch, ev: Evaluation, app: LoanApplication, member: Member, trigger: str, locked: ledger.Locked,
+                  snap: Snapshot) -> tuple[s.SelfServiceCommitted, SelfServiceRun, PaidOut | None]:
     """Record the decision, move the application, and pay out if it says so."""
-    if any(g.member_id not in locked for g in ev.worked.chosen):
+    if any(g.member_id not in locked.members for g in ev.worked.chosen):
         raise DecisionChanged(ev)       # a pledge made since the locks: start again
-    system = system_user(db)
-    record_run(db, ev, app, member, system, trigger)
-    loans.set_status(db, app, STATUS_AFTER[ev.outcome], system, automatic=True)
-    loan = accept_guarantors_and_pay(db, ev, app, system) if ev.outcome == "approve" else None
-    return committed_reply(ev, app, loan)
+    system = SystemActor(snap.system_user_id)
+    run = record_run(out, ev, app, member, system, trigger)
+    loans.set_status(out, app, STATUS_AFTER[ev.outcome], system, automatic=True)
+    paid = accept_guarantors_and_pay(out, ev, app, member, system, locked, snap) if ev.outcome == "approve" else None
+    return committed_reply(ev, app, paid.loan if paid else None), run, paid
 
 
-def commit(db: Session, evaluation: Evaluation, idempotency_key: str, actor: User,
-           expected: tuple[str, int | None] | None = None) -> dict:
-    """Write the decision, once per key: a repeat gets the first reply and pays out
-    nothing. expected is (outcome, amount) as the member was told, by default the
-    evaluation's own. Commits. Raises CannotCommit, having written nothing."""
-    request, overrides = evaluation.request, evaluation.overrides
+def stored_reply(db: Session, actor_id: int, key: str, wanted: str) -> dict:
+    row = db.scalar(select(IdempotencyKey).where(IdempotencyKey.actor_user_id == actor_id, IdempotencyKey.key == key))
     try:
-        row, stored = idempotency.claim(db, actor, idempotency_key, "self_service.commit",
-                                        {"member": evaluation.member_id, "amount_kes": request.amount_kes,
-                                         "purpose": request.purpose, "term_months": request.term_months,
-                                         "overrides": overrides})
+        return idempotency.stored_reply(db, row, wanted)
     except idempotency.KeyReused as e:
         raise CannotCommit(str(e)) from None
-    if row is None:
-        return stored
+
+
+def key_row(actor_id: int, key: str, wanted: str, reply) -> IdempotencyKey:
+    row = IdempotencyKey(actor_user_id=actor_id, key=key, request_hash=wanted)
+    idempotency.finish(row, reply)
+    return row
+
+
+def accepted_as_well(db: Session, member: Member, fresh: Evaluation, snap: Snapshot) -> Evaluation:
+    """Taking a reduced offer at once: the engine again at that amount, with no more questions."""
+    request = fresh.request
+    overrides = {**fresh.overrides, "accepted_amount_kes": fresh.amount_kes}
+    return decisions.evaluate(db, member, LoanRequest(request.amount_kes, request.purpose,
+                                                      fresh.facts.term_months or TERM_FOR_THE_RECORD),
+                              overrides, final=True, snapshot=snap, reuse=fresh)
+
+
+def record(db: Session, evaluation: Evaluation, idempotency_key: str, actor: User, expected: tuple[str, int | None] | None = None,
+           accept_key: str | None = None, accepted: Evaluation | None = None,
+           along: Callable[[Batch, Recorded], Any] | None = None) -> Recorded:
+    """Write the decision, once per key: a repeat gets the first reply and pays out nothing.
+    expected is (outcome, amount) as the member was told, by default the evaluation's own.
+
+    accept_key: a reduced offer is taken in the same breath, and accepted is that evaluation as
+    the member was told it. along: anything else to keep with it, added to the batch.
+
+    Commits, or rolls back and raises CannotCommit, having written nothing."""
+    request, overrides = evaluation.request, evaluation.overrides
+    wanted_hash = idempotency.request_hash("self_service.commit",
+                                           {"member": evaluation.member_id, "amount_kes": request.amount_kes,
+                                            "purpose": request.purpose, "term_months": request.term_months,
+                                            "overrides": overrides})
     try:
         member = db.get(Member, evaluation.member_id)
-        locked = lock_everyone(db, member, overrides)
-        fresh = decisions.evaluate(db, member, request, overrides, refer_reason=evaluation.facts.refer_reason)
+        locked = ledger.lock_for_decision(db, member.id, {"loan_applications": 1, **rows_for(*(e for e in (evaluation, accepted) if e))})
+        keys = (idempotency_key,) if accept_key is None else (idempotency_key, accept_key)
+        snap = decisions.read_snapshot(db, member, keys=keys, key_owner_id=actor.id)
+        if idempotency_key in snap.keys_used:
+            reply = stored_reply(db, actor.id, idempotency_key, wanted_hash)
+            db.rollback()
+            return Recorded(reply, reply["application_id"])
+        fresh = decisions.evaluate(db, member, request, overrides, refer_reason=evaluation.facts.refer_reason, snapshot=snap,
+                                   reuse=evaluation)
         wanted = expected or (evaluation.outcome, evaluation.amount_kes)
         if (fresh.outcome, fresh.amount_kes) != wanted:
             raise DecisionChanged(fresh)
         if fresh.outcome == "clarify":
             raise CannotCommit("There are questions still to answer before this can be decided.")
-        if has_open_application(db, member.id):
+        if snap.open_application:
             raise CannotCommit("You already have an application being decided. Please finish that one first.")
+        taken = accepted_as_well(db, member, fresh, snap) if accept_key and fresh.outcome == "approve_reduced" else None
+        if taken is not None and accepted is not None and (taken.outcome, taken.amount_kes) != (accepted.outcome, accepted.amount_kes):
+            raise DecisionChanged(fresh)
+
+        out = Batch(db, locked.ids)
         term = fresh.facts.term_months or TERM_FOR_THE_RECORD
         savings = fresh.facts.deposits_kes if fresh.facts.deposits_kes is not None else fresh.facts.declared_savings_kes
         app = LoanApplication(member_id=member.id, amount_requested_kes=request.amount_kes, purpose=request.purpose,
                               term_months=term, sacco_savings_kes=max(savings, 0),
                               savings_self_declared=fresh.facts.deposits_kes is None, channel="self_service",
                               status="draft", created_by=actor.id)
-        db.add(app)
-        db.flush()
-        audit.record(db, actor, "application.create", "loan_application", app.id, status="draft", member_id=member.id,
+        out.give_id(app)
+        audit.record(out, actor, "application.create", "loan_application", app.id, status="draft", member_id=member.id,
                      amount_requested_kes=request.amount_kes, via="self_service")
-        reply = idempotency.finish(row, apply_outcome(db, fresh, app, member, "commit", locked))
+        made, run, paid = apply_outcome(out, fresh, app, member, "commit", locked, snap)
+        out.add(key_row(actor.id, idempotency_key, wanted_hash, made))
+        reply, final = made, fresh
+        if taken is not None:
+            reply, run, paid = apply_outcome(out, taken, app, member, "acceptance", locked, snap)
+            out.add(key_row(actor.id, accept_key, idempotency.request_hash("self_service.accept", {"application": app.id}),
+                            reply))
+            final = taken
+        out.add(app)        # last, holding where it ended up: a row cannot be written twice in one statement
+        done = Recorded(jsonable_encoder(reply), app.id, run.id, paid, snap, final)
+        if along is not None:
+            along(out, done)
+        out.send()
         db.commit()
-        return reply
-    except (CannotCommit, ledger.LedgerError, IntegrityError) as e:
+        return done
+    except IntegrityError as e:
         db.rollback()
-        if isinstance(e, CannotCommit):
-            raise
+        # A second request with this key, for someone else's locks: it came first, and stands.
+        if db.scalar(select(IdempotencyKey.id).where(IdempotencyKey.actor_user_id == actor.id,
+                                                     IdempotencyKey.key == idempotency_key)) is not None:
+            reply = stored_reply(db, actor.id, idempotency_key, wanted_hash)
+            db.rollback()
+            return Recorded(reply, reply["application_id"])
         raise CannotCommit("That could not be saved just now. Please try again.") from e
+    except ledger.LedgerError as e:
+        db.rollback()
+        raise CannotCommit("That could not be saved just now. Please try again.") from e
+    except CannotCommit:
+        db.rollback()
+        raise
+
+
+def commit(db: Session, evaluation: Evaluation, idempotency_key: str, actor: User,
+           expected: tuple[str, int | None] | None = None) -> dict:
+    """record(), for a caller that only wants the reply."""
+    return record(db, evaluation, idempotency_key, actor, expected).reply
 
 
 def accept_offer(db: Session, app: LoanApplication, idempotency_key: str, actor: User) -> dict:
     """The member takes the reduced offer. The engine runs again at that amount, with
     no more questions: an approval pays out; anything else goes where it says, recorded
     the same way, because a capacity can have been spent since the offer was made."""
-    try:
-        row, stored = idempotency.claim(db, actor, idempotency_key, "self_service.accept", {"application": app.id})
-    except idempotency.KeyReused as e:
-        raise CannotCommit(str(e)) from None
-    if row is None:
-        return stored
+    wanted = idempotency.request_hash("self_service.accept", {"application": app.id})
     try:
         member = db.get(Member, app.member_id)
-        previous = app.interview.assessment.overrides or {}
+        previous = answers_on_record(app.interview.assessment)
         offered = app.interview.decision.approved_amount_kes
         overrides = {**previous, "accepted_amount_kes": offered}
-        locked = lock_everyone(db, member, overrides)
+        db.commit()     # what was read so far was only to find the application: nothing is held across this
+        locked = ledger.lock_for_decision(db, member.id)
+        snap = decisions.read_snapshot(db, member, keys=(idempotency_key,), key_owner_id=actor.id)
+        if idempotency_key in snap.keys_used:
+            reply = stored_reply(db, actor.id, idempotency_key, wanted)
+            db.rollback()
+            return reply
         db.refresh(app)
         if app.status != "offered":
             raise CannotCommit("This offer is no longer open.")
         request = LoanRequest(app.amount_requested_kes, app.purpose, app.term_months)
-        fresh = decisions.evaluate(db, member, request, overrides, final=True)
-        reply = idempotency.finish(row, apply_outcome(db, fresh, app, member, "acceptance", locked))
+        fresh = decisions.evaluate(db, member, request, overrides, final=True, snapshot=snap)
+        out = Batch(db, reserve_ids(db, rows_for(fresh)))
+        made, _, _ = apply_outcome(out, fresh, app, member, "acceptance", locked, snap)
+        out.add(key_row(actor.id, idempotency_key, wanted, made))
+        out.send()
         db.commit()
-        return reply
+        return jsonable_encoder(made)
     except (CannotCommit, ledger.LedgerError, IntegrityError) as e:
         db.rollback()
         if isinstance(e, CannotCommit):
@@ -271,7 +383,7 @@ def request_review(db: Session, app: LoanApplication, idempotency_key: str, acto
                 or not loans.held_by_automatic_decision(app)):
             raise CannotCommit("This application is already with a loan officer.")
         paid_out = db.scalar(select(LoanAccount.id).where(LoanAccount.application_id == app.id)) is not None
-        overrides = app.interview.assessment.overrides or {}
+        overrides = answers_on_record(app.interview.assessment)
         request = LoanRequest(app.amount_requested_kes, app.purpose, app.term_months)
         fresh = decisions.evaluate(db, member, request, overrides, refer_reason="review_requested")
         # The reasons a member cannot apply yet come first in the policy; this is a person looking anyway.
@@ -279,8 +391,9 @@ def request_review(db: Session, app: LoanApplication, idempotency_key: str, acto
         ev = replace(fresh, settled=settled, questions=[],
                      reason=member_text.decision_reason("review_requested", {}),
                      trace={**fresh.trace, "outcome": "refer", "reason_code": "review_requested", "amount_kes": None})
-        system = system_user(db)
-        record_run(db, ev, app, member, system, "review", move_application=not paid_out)
+        out = Batch(db, reserve_ids(db, rows_for(ev)))
+        record_run(out, ev, app, member, SystemActor(fresh.snapshot.system_user_id), "review", move_application=not paid_out)
+        out.send()
         if not paid_out:
             loans.set_status(db, app, "decided", actor, review_requested=True)
         audit.record(db, actor, "self_service.review_request", "loan_application", app.id, loan_paid_out=paid_out)
@@ -307,7 +420,6 @@ def member_view(ev: Evaluation) -> s.SelfServiceEvaluation:
         amount_requested_kes=ev.request.amount_kes, amount_on_offer_kes=ev.amount_kes,
         term_months=ev.facts.term_months, monthly_instalment_kes=ev.instalment_kes,
         maximum_by_savings_kes=w.rule_max_kes, maximum_affordable_kes=w.affordable_max_kes,
-        extra_guarantor_found=ev.extra_guarantor_found,
         reasons=member_text.reasons(ev.risk_class, ev.contributions) if final else [],
         policy_version=ev.policy_version, consent_version=templates.consent_version(),
         consent_text=templates.text_of("CONSENT"))

@@ -122,7 +122,7 @@ PILOT_MAX_ASSESSMENTS_PER_DAY: int = int(os.getenv("PILOT_MAX_ASSESSMENTS_PER_DA
 # The policy's thresholds (api/decisions.py). A decision records the version, and
 # changing any of these from its default adds a hash of the values to it, so one
 # version always means one set of thresholds.
-POLICY_BASE_VERSION = "2026.11.3"
+POLICY_BASE_VERSION = "2026.11.4"
 POLICY_DEFAULTS = {"AUTO_APPROVE_LIMIT_KES": 50_000, "LOAN_INTEREST_MONTHLY": 0.01,
                    "AFFORDABILITY_RATIO": 1 / 3, "AFFORDABILITY_NEAR_BAND": 0.15, "PROFILE_STALE_DAYS": 180,
                    "UNVERIFIED_INCREASE_TOLERANCE": 0.30}

@@ -8,11 +8,11 @@ import secrets
 import pytest
 from sqlalchemy import event, select
 
-from conftest import assessed, guarantor, new_application, new_interview, new_member
-from chamapro.api import ledger, live_cache
-from chamapro.api.db import Applicant, Interview, SessionLocal, make_engine
-
-QUERIES = re.compile(r"^(\w+) (\S+) (\d+): (\d+) queries, \d+ ms$")
+from conftest import QUERIES, assessed, guarantor, new_application, new_interview, new_member
+from chamapro.api import decisions, ledger, live_cache, self_service
+from chamapro.api.db import Applicant, Interview, Member, SessionLocal, make_engine
+from test_conversation import begin, say
+from test_decisions import age_income, borrower, model, post_entry  # noqa: F401  (model is a fixture)
 
 
 @pytest.fixture
@@ -21,22 +21,6 @@ def summary(monkeypatch, tmp_path):
     path = tmp_path / "summary.json"
     path.write_text('{"generated_at": "2026-10-19T00:00:00+00:00"}', encoding="utf-8")
     monkeypatch.setattr(config, "RESULTS_SUMMARY_PATH", path)
-
-
-@pytest.fixture
-def queries(caplog):
-    """queries(client, path) -> (response, statements the request ran), from its log line."""
-    def run(client, path):
-        caplog.clear()
-        with caplog.at_level(logging.INFO, logger="chamapro.requests"):
-            r = client.get(path)
-        assert r.status_code == 200, r.text
-        lines = [m for rec in caplog.records if rec.name == "chamapro.requests"
-                 if (m := QUERIES.match(rec.getMessage())) and m[2] == path.split("?")[0]]
-        assert len(lines) == 1, caplog.text
-        assert (lines[0][1], lines[0][3]) == ("GET", "200")
-        return r, int(lines[0][4])
-    return run
 
 
 def more_rows(client, n):
@@ -86,7 +70,7 @@ def test_the_overview_list_of_applications_is_one_query(client, queries):
 def test_a_member_lists_their_own_applications_in_two_queries(client, queries):
     member = more_rows(client, 3)
     r, n = queries(member, "/api/me/applications")
-    assert len(r.json()) == 3 and n == 1 + 2   # their member record; the applications
+    assert len(r.json()) == 3 and n == 2   # who is asking, with their member record; the applications
 
 
 def full_sacco(member_id, others, entries=12, loans_n=1):
@@ -207,7 +191,7 @@ def test_a_commit_while_computing_is_not_cached(admin_client, summary, monkeypat
 
 # --- The PostgreSQL engine -----------------------------------------------------------
 
-def test_postgres_connections_are_pinged_and_time_out():
+def test_postgres_connections_time_out_and_a_used_one_goes_out_first():
     eng = make_engine("postgresql+psycopg://u:p@db.example.invalid:5432/x")
     seen = {}
 
@@ -216,10 +200,161 @@ def test_postgres_connections_are_pinged_and_time_out():
         seen.update(cparams)
         raise ConnectionAbortedError("not connecting in a test")
     try:
-        assert eng.pool._pre_ping is True
+        assert eng.pool._pre_ping is False and eng.pool._pool.use_lifo     # pinged only when idle: test_postgres.py
         assert (eng.pool._recycle, eng.pool.size(), eng.pool._max_overflow) == (240, 5, 5)
         with pytest.raises(Exception, match="not connecting"):
             eng.connect()
         assert seen["connect_timeout"] == 10
     finally:
         eng.dispose()
+
+
+# --- The conversation ----------------------------------------------------------------------
+
+# Statements, as the request log counts them: on PostgreSQL what batch.py sends as one counts as
+# one here too, on either database. A reply that writes a decision also has a BEGIN and a COMMIT,
+# which no statement count sees; test_latency.py counts those on the wire. So: at most 8 round
+# trips means at most 6 statements here for a decision and 8 for anything else.
+ORDINARY, WITH_A_DECISION = 4, 6
+
+
+@pytest.fixture
+def replies(caplog):
+    """replies(member, cid, words) -> (the reply's JSON, statements it ran)."""
+    def run(member, cid, words):
+        caplog.clear()
+        with caplog.at_level(logging.INFO, logger="chamapro.requests"):
+            r = member.post(f"/api/conversations/{cid}/reply", data={"text": words})
+        assert r.status_code == 200, r.text
+        lines = [m for rec in caplog.records if rec.name == "chamapro.requests" and (m := QUERIES.match(rec.getMessage()))]
+        assert len(lines) == 1, caplog.text
+        return r.json(), int(lines[0][4])
+    return run
+
+
+@pytest.fixture
+def started(caplog):
+    def run(member, language="en"):
+        caplog.clear()
+        with caplog.at_level(logging.INFO, logger="chamapro.requests"):
+            r = member.post("/api/conversations", json={"language": language})
+        assert r.status_code == 201, r.text
+        lines = [m for rec in caplog.records if rec.name == "chamapro.requests" and (m := QUERIES.match(rec.getMessage()))]
+        return r.json(), int(lines[0][4])
+    return run
+
+
+def test_every_step_of_a_conversation_to_a_payout(client, model, started, replies):
+    _, member, _ = borrower()
+    body, n = started(member)
+    assert n <= 5
+    cid = body["conversation"]["id"]
+    for words, want in [("yes", "G2"), ("yes", "R1"), ("Forty thousand for school fees", "C1"), ("twelve months", "CONFIRM")]:
+        out, n = replies(member, cid, words)
+        assert out["bot_turns"][0]["template_id"] == want
+        assert n <= ORDINARY, f"{want}: {n} statements"
+    out, n = replies(member, cid, "yes")
+    assert out["bot_turns"][0]["template_id"] == "O1" and out["outcome"]["decision"] == "approved"
+    assert n <= WITH_A_DECISION, f"the payout: {n} statements"
+
+
+def test_a_re_ask_a_correction_and_a_second_question_are_ordinary_replies(client, model, replies):
+    mid, member, _ = borrower()
+    age_income(mid, 300)
+    cid = begin(member)["conversation"]["id"]
+    for words, want in [("banana", "REASK"), ("yes", "G2_NO_INCOME"), ("No, we are 6 people at home now", "R1"),
+                        ("Forty thousand for school fees", "C1"), ("twelve months", "C2"), ("yes that is right", "CONFIRM")]:
+        out, n = replies(member, cid, words)
+        assert out["bot_turns"][0]["template_id"] == want
+        assert n <= ORDINARY, f"{want}: {n} statements"
+
+
+def test_an_offer_the_guarantors_limit_stays_within_the_limit_to_the_end(client, model, replies):
+    mid, member, gs = borrower(free=2000)
+    cid = begin(member)["conversation"]["id"]
+    for words, want in [("yes", "G2"), ("yes", "R1"), ("Forty thousand for school fees", "C1"), ("twelve months", "C6"), ("yes", "CONFIRM")]:
+        out, n = replies(member, cid, words)
+        assert out["bot_turns"][0]["template_id"] == want
+        assert n <= ORDINARY, f"{want}: {n} statements"
+    out, n = replies(member, cid, "yes")
+    assert out["bot_turns"][0]["template_id"] == "O2" and n <= WITH_A_DECISION, f"{n} statements"
+
+
+@pytest.mark.parametrize("risk, joined, want", [("High", "2020-01-01", "O3"), ("Low", "2026-09-01", "O4")])
+def test_a_referral_and_a_not_now_are_within_the_limit(client, model, replies, risk, joined, want):
+    model["risk"] = risk
+    _, member, _ = borrower(joined=joined)
+    cid = begin(member)["conversation"]["id"]
+    for words in ("yes", "yes", "Forty thousand for school fees", "twelve months"):
+        out, n = replies(member, cid, words)
+        if out["conversation"]["status"] != "open":
+            break
+    assert out["bot_turns"][0]["template_id"] == want
+    assert out["outcome"]["decision"] == ("referred" if want == "O3" else "not_now")
+    assert n <= WITH_A_DECISION, f"{n} statements"
+
+
+def test_the_reply_that_says_how_it_came_out_says_what_the_transcript_says(client, model):
+    """The reply works it out from what it wrote, at no further cost; the transcript reads it back."""
+    for answers in (("yes", "yes", "Forty thousand for school fees", "twelve months", "yes"),   # paid out
+                    ("no",)):                                                                   # nothing decided
+        _, member, _ = borrower()
+        cid = begin(member)["conversation"]["id"]
+        for words in answers:
+            out = say(member, cid, words)
+        assert out["outcome"] == member.get(f"/api/conversations/{cid}").json()["outcome"], answers
+
+
+def test_the_snapshot_reads_what_the_ledgers_own_functions_read(client, model):
+    mid, member, gs = borrower(deposits=30000, free=30000)
+    conversation = begin(member)["conversation"]["id"]
+    for words in ("yes", "yes", "Forty thousand for school fees", "twelve months", "yes"):
+        say(member, conversation, words)
+    with SessionLocal() as db:
+        ledger.post_entry(db, gs[0], "deposits", "deposit", 1234, f"T-{secrets.token_hex(3)}")
+        loan = ledger.issue_loan(db, mid, 12000, 12, ledger.instalment_kes(12000, 12))
+        ledger.record_repayment(db, loan, 500, f"T-{secrets.token_hex(3)}")
+        db.commit()
+        m = db.get(Member, mid)
+        snap = decisions.read_snapshot(db, m)
+        everyone = {mid, *gs}
+        assert {i: snap.capacity(i) for i in everyone} == ledger.capacities(db, everyone)
+        assert snap.deposits.get(mid) == ledger.deposits_balance(db, mid)
+        statuses, entries, lost = ledger.known_to_the_sacco(db, mid)
+        assert sorted(snap.records[0]) == sorted(statuses) and snap.records[1:] == (entries, lost)
+        assert snap.paid == ledger.paid_on_loans(db, [loan.id, *(x.id for x in snap.loans if x.status in ledger.STILL_OWED)])
+        assert snap.transactional_kes == ledger.balances(db, mid)["transactional"]
+        assert snap.held == ledger.held_under_pledges(db, [p[0] for p in snap.pledges])
+        assert sorted(a for a, _ in snap.confirmed) == sorted(a for a, _ in decisions.confirmations(db, mid))
+        assert snap.open_application is self_service.has_open_application(db, mid)
+        assert snap.system_user_id == self_service.system_user(db).id
+
+
+# --- What a screen polls -------------------------------------------------------------------
+
+def test_the_presenter_poll_is_three_at_most_and_one_if_nothing_moved(client, model, queries, caplog):
+    _, member, _ = borrower()
+    cid = begin(member)["conversation"]["id"]
+    say(member, cid, "yes")
+    path = f"/api/present/conversations/{cid}"
+    first, n = queries(client, path)
+    assert n <= 3
+    caplog.clear()
+    with caplog.at_level(logging.INFO, logger="chamapro.requests"):
+        again = client.get(path, headers={"If-None-Match": first.headers["etag"]})
+    assert again.status_code == 304 and again.content == b""
+    assert next(int(m[4]) for rec in caplog.records if (m := QUERIES.match(rec.getMessage()))) == 1
+    say(member, cid, "yes")
+    moved, n = queries(client, path)     # sent without the tag it holds, the same answer as with it
+    assert moved.headers["etag"] != first.headers["etag"] and n <= 3
+    _, n = queries(client, "/api/present/conversations")
+    assert n <= 3
+
+
+def test_what_the_chat_polls_is_cheap(client, model, queries):
+    _, member, _ = borrower()
+    cid = begin(member)["conversation"]["id"]
+    say(member, cid, "yes")
+    assert queries(member, f"/api/conversations/{cid}/stage")[1] == 2
+    assert queries(member, f"/api/conversations/{cid}")[1] <= 3
+    assert queries(member, "/api/conversations/current")[1] == 2

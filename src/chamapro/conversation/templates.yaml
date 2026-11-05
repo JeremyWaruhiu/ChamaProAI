@@ -33,9 +33,6 @@ C3:
 C4:
   en: "Are you repaying a chama loan at the moment?"
   kik: ""
-C5:
-  en: "You need one more guarantor for this loan. Who else could guarantee it?"
-  kik: ""
 C6:
   en: "We can offer up to {max_amount} shillings. Would that amount work for you?"
   kik: ""

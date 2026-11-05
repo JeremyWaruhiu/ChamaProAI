@@ -2,15 +2,16 @@
 included, goes into data/tts_cache, and Paza transcribes one corpus clip.
 
     python scripts/warm_demo.py
-    python scripts/warm_demo.py --source <another demo database>
+    python scripts/warm_demo.py --source <a demo database to copy instead of building one>
 
-Everything runs on a temporary copy of the demo database: data/demo.db itself is copied, never
-opened, and its hash is checked at the end. Each conversation runs through service.reply, the
-code the API runs, and is then undone with the admin's reset. Nothing reaches Gemini: only the
-parsers read the answers, so the timings are without it. The first pass fills the cache and the
-second measures it; a line the second pass has to make is an error.
-
-Run it with the server stopped, or it may copy a database that is being written.
+Everything runs on a temporary SQLite database built here from the same seed as seed_demo.py's
+--demo-db and --demo-postgres, whatever .env says: warming never writes to Supabase. The cache is
+keyed by the text and the voice, so the lines it makes here are the lines the demo will ask for,
+on either database. With --source, that file is copied, never opened, and its hash is checked at
+the end. Each conversation runs through service.reply, the code the API runs, and is then undone
+with the admin's reset. Nothing reaches Gemini: only the parsers read the answers, so the timings
+are without it. The first pass fills the cache and the second measures it; a line the second pass
+has to make is an error.
 """
 from __future__ import annotations
 
@@ -26,11 +27,11 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 
 ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-ap.add_argument("--source", type=Path, default=ROOT / "data" / "demo.db", help="the demo database to copy")
+ap.add_argument("--source", type=Path, help="a demo database to copy, rather than building one from the seed")
 ap.add_argument("--no-speech", action="store_true", help="check the script only: nothing is spoken or cached")
 ap.add_argument("--no-asr", action="store_true", help="leave Paza alone")
 args = ap.parse_args()
-if not args.source.is_file():
+if args.source is not None and not args.source.is_file():
     sys.exit(f"no demo database at {args.source}: build one with scripts/seed_demo.py --demo-db")
 
 
@@ -38,13 +39,14 @@ def sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-source_hash = sha256(args.source)
+source_hash = sha256(args.source) if args.source else None
 _tmp = tempfile.TemporaryDirectory(prefix="chamapro-warm-")
 scratch = Path(_tmp.name)
 copy = scratch / "demo.db"
-shutil.copy2(args.source, copy)
-if args.source.with_name(args.source.name + "-wal").is_file():
-    shutil.copy2(args.source.with_name(args.source.name + "-wal"), scratch / "demo.db-wal")
+if args.source is not None:
+    shutil.copy2(args.source, copy)
+    if args.source.with_name(args.source.name + "-wal").is_file():
+        shutil.copy2(args.source.with_name(args.source.name + "-wal"), scratch / "demo.db-wal")
 
 # Before chamapro is imported: config reads these once, and .env must not choose the database.
 os.environ.update(DATABASE_URL=f"sqlite:///{copy}", CHAMAPRO_DB=str(copy), STORAGE_BACKEND="local",
@@ -58,24 +60,11 @@ from chamapro.api import pipeline as pl  # noqa: E402
 from chamapro.api import presenter  # noqa: E402
 from chamapro.api.db import Member, SessionLocal, User, engine, init_db  # noqa: E402
 from chamapro.conversation import service, tts  # noqa: E402
+from demo_scripts import SCRIPTS  # noqa: E402
 
 if engine.url.get_backend_name() != "sqlite" or Path(engine.url.database) != copy:
     sys.exit("this script runs only on its temporary copy")
 
-# The exact demo answers. Njeri gives no term with her request, so she hears C1 as well.
-SCRIPTS = {
-    ("Wanjiru Kamau", "en"): [("Yes, I agree", ["G2"]), ("Yes, that is correct", ["R1"]),
-                              ("Forty thousand for a dairy cow", ["C1"]), ("Twelve months", ["CONFIRM"]),
-                              ("Yes, go ahead", ["O1", "END"])],
-    ("Wanjiru Kamau", "kik"): [("Ĩĩ", ["G2"]), ("Nĩ guo", ["R1"]), ("Ngũkwenda ngiri mĩrongo ĩna ngũre ng'ombe", ["C1"]),
-                               ("Mĩeri ikũmi na igĩrĩ", ["CONFIRM"]), ("Ĩĩ", ["O1", "END"])],
-    ("Njeri Mwangi", "en"): [("Yes, I agree", ["G2_NO_INCOME"]), ("Yes, that is correct", ["R1"]),
-                             ("Sixty thousand for school fees", ["C1"]), ("Twelve months", ["C2"]),
-                             ("No, it is twenty two thousand now", ["CONFIRM"]), ("Yes, go ahead", ["O2", "END"])],
-    ("Njeri Mwangi", "kik"): [("Ĩĩ", ["G2_NO_INCOME"]), ("Nĩ guo", ["R1"]),
-                              ("Ngũkwenda ngiri mĩrongo ĩtandatũ cia cukuru", ["C1"]), ("Mĩeri ikũmi na igĩrĩ", ["C2"]),
-                              ("Aca, nĩ ngiri mĩrongo ĩĩrĩ na igĩrĩ", ["CONFIRM"]), ("Ĩĩ", ["O2", "END"])],
-}
 STALE = ("It looks older than the code: rebuild it with\n"
          "    STORAGE_BACKEND=local CHAMAPRO_UPLOADS=data/demo_uploads python scripts/seed_demo.py --demo-db data/demo.db --replace\n"
          "and note the new passwords it prints.")
@@ -84,7 +73,7 @@ STALE = ("It looks older than the code: rebuild it with\n"
 def run_one(db, name: str, language: str, script: list, cold: bool) -> list[tuple]:
     member = db.scalar(select(Member).where(Member.full_name == name, Member.seed_tag.in_(presenter.DEMO_TAGS)))
     if member is None:
-        sys.exit(f"{name} is not in {args.source} as a demo member. {STALE}")
+        sys.exit(f"{name} is not in {args.source or 'the seed'} as a demo member. {STALE}")
     user = db.get(User, member.user_id)
     rows, started = [], time.perf_counter()
     conv, _ = service.start(db, member, language)
@@ -121,6 +110,11 @@ def show(name: str, language: str, rows: list) -> None:
 
 def main() -> None:
     sys.stdout.reconfigure(encoding="utf-8")
+    if args.source is None:
+        import seed_demo
+        started = time.perf_counter()
+        seed_demo.seed_demo_db()
+        print(f"temporary database built from the seed: {time.perf_counter() - started:.1f} s")
     init_db()
     if config.TTS_ENABLED:
         started = time.perf_counter()
@@ -143,9 +137,10 @@ def main() -> None:
         print(f"\nPaza: loaded in {time.perf_counter() - started:.1f} s on {pl.asr_status()['kik']['device']}")
         for attempt in ("first clip", "second clip"):
             print(f"Paza: {attempt} {pl.warm_asr()['kik']:.1f} s")
-    if sha256(args.source) != source_hash:
-        sys.exit(f"{args.source} changed while this ran: something else has it open")
-    print(f"\n{args.source} is as it was.")
+    if args.source is not None:
+        if sha256(args.source) != source_hash:
+            sys.exit(f"{args.source} changed while this ran: something else has it open")
+        print(f"\n{args.source} is as it was.")
     engine.dispose()
 
 

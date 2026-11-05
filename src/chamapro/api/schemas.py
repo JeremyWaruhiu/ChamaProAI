@@ -1286,12 +1286,6 @@ class Refunded(BaseModel):
 
 # --- Self-service: what the next phase's conversation calls -------------------------------
 
-class ExtraGuarantor(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    full_name: str = Field(min_length=1, max_length=200)
-    member_no: str = Field(min_length=1, max_length=32)
-
-
 class ConversationAnswers(BaseModel):
     """What the member said, by what it sets. Null means they were asked and gave no answer."""
     model_config = ConfigDict(extra="forbid")
@@ -1300,7 +1294,6 @@ class ConversationAnswers(BaseModel):
     expected_monthly_return_kes: int | None = Field(default=None, ge=0, le=100_000_000)
     chama_loan_use: Literal[0, 1, 2] | None = None
     chama_instalment_kes: int | None = Field(default=None, ge=0, le=100_000_000)
-    extra_guarantor: ExtraGuarantor | None = None
     accepted_amount_kes: int | None = Field(default=None, gt=0, le=100_000_000)
     household_size: int | None = Field(default=None, ge=1, le=60)
     children: int | None = Field(default=None, ge=0, le=60)
@@ -1332,7 +1325,7 @@ class SelfServiceCommit(SelfServiceRequest):
 
 
 class ClarificationOut(BaseModel):
-    id: Literal["C1", "C2", "C3", "C4", "C5", "C6"]
+    id: Literal["C1", "C2", "C3", "C4", "C6"]
     reason: str
     sets: list[str] = Field(description="The override keys its answer goes in")
 
@@ -1349,7 +1342,6 @@ class SelfServiceEvaluation(BaseModel):
     monthly_instalment_kes: int | None
     maximum_by_savings_kes: int
     maximum_affordable_kes: int | None
-    extra_guarantor_found: bool | None = Field(description="Null unless a guarantor was named")
     reasons: list[str] = Field(description="What counted, in words, once there is an outcome")
     policy_version: str
     consent_version: str

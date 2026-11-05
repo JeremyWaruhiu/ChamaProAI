@@ -26,6 +26,7 @@ from chamapro import config
 from . import audit, comparator, ledger, member_text
 from . import schemas as s
 from .auth import require_member, require_officer
+from .batch import Batch
 from .db import (Assessment, AuditLog, Conversation, Decision, Guarantor, GuarantorPledge, Interview,
                  InterviewBooking, LoanAccount, LoanApplication, Member, MemberAccount, MemberNotice, MemberProfile,
                  MemberProfileHistory, PracticeInterview, Response, User, get_db, utcnow)
@@ -52,7 +53,7 @@ def get_or_404(db: Session, model, ident: int, what: str):
 
 # --- Lifecycle -----------------------------------------------------------------
 
-def set_status(db: Session, app: LoanApplication, new: str, actor: User | None, **details) -> None:
+def set_status(db: Session | Batch, app: LoanApplication, new: str, actor: User | None, **details) -> None:
     if app.status == new:
         return
     audit.record(db, actor, "application.status", "loan_application", app.id,
@@ -623,7 +624,9 @@ def reject_guarantor(guarantor_id: int, body: s.GuarantorReview | None = None,
 # --- A member's own applications -------------------------------------------------------
 
 def my_member(db: Session, user: User) -> Member | None:
-    return db.scalar(select(Member).where(Member.user_id == user.id))
+    """Already here if current_user found one with the session; otherwise looked for, since
+    a login made or linked in this request would not be there yet."""
+    return user.__dict__.get("member") or db.scalar(select(Member).where(Member.user_id == user.id))
 
 
 def own_application(db: Session, user: User, application_id: int) -> LoanApplication:

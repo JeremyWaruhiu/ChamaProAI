@@ -115,3 +115,27 @@
 .met .whyMark { color: var(--low); }
 .notMet .whyMark { color: var(--high); }
 .whyDrivers { list-style: disc; padding-left: var(--space-5); }
+
+/* ?stage=1: the phone, in a narrow window on a shared screen. Everything the audience must read is
+   larger; the frame fills a 390 px window and stays centred in a wider one. */
+.stageBackdrop {
+  height: 100vh; height: 100dvh; display: grid; place-items: center; overflow: hidden;
+  background: var(--green-950);
+}
+.onStage {
+  width: min(390px, 100vw); height: min(100dvh, 844px); margin: 0; flex: none; overflow: hidden;
+}
+@media (min-width: 430px) and (min-height: 700px) {
+  .onStage { height: min(calc(100dvh - 32px), 844px); border-radius: 24px; box-shadow: 0 0 0 8px var(--green-900); }
+}
+.onStage .title { font-size: var(--text-xl); }
+.onStage .bubble { font-size: 1.125rem; line-height: 1.4; }
+.onStage .member { font-size: 1.25rem; font-weight: 600; }
+.onStage .bot { font-size: 1.125rem; }
+.onStage .more { font-size: 1rem; }
+/* Two by two: the four words are too wide for one row at this size. */
+.onStage .stages { grid-auto-flow: row; grid-template-columns: 1fr 1fr; gap: var(--space-2) var(--space-3); font-size: 1.0625rem; font-weight: 600; }
+.onStage .stage { flex-direction: row; gap: var(--space-2); padding: var(--space-1) var(--space-2); text-align: left; }
+.onStage .spinner, .onStage .stageDot { flex: none; width: 20px; height: 20px; }
+.onStage .mic { min-height: 64px; }
+.onStage .quickReply { min-height: 56px; }

@@ -29,7 +29,6 @@ from chamapro.api.decisions import Facts, GuarantorOption, LoanRequest
 from chamapro.conversation import templates
 from conftest import assessed, needs_classifier, new_application, new_member
 from test_member_access import leaks
-from test_query_counts import queries  # noqa: F401  (a fixture)
 
 
 def pledged(n=2, free=30000):
@@ -95,12 +94,13 @@ POLICY_TABLE = [
      "details_missing", None),
     ("would not confirm stale income", dict(income_age_days=400, asked=frozenset({"C2"}), declined=frozenset({"C2"})),
      "refer", "details_missing", None),
-    ("guarantors do not cover it", dict(guarantors=pledged(free=2000), own_free_kes=30000,
-                                        asked=frozenset({"C5"}), declined=frozenset({"C5"})), "refer", "guarantors_short", None),
-    ("one guarantor only", dict(guarantors=pledged(n=1), asked=frozenset({"C5"}), declined=frozenset({"C5"})), "refer",
-     "guarantors_short", None),
-    ("a named guarantor is needed", dict(guarantors=(*pledged(n=1), GuarantorOption(9, "G-9", "Named", "07", 30000)),
-                                         asked=frozenset({"C5"}), answered=frozenset({"C5"})), "refer", "named_guarantor", None),
+    ("the smaller amount their guarantors can cover, refused", dict(guarantors=pledged(free=2000), own_free_kes=30000,
+                                                                    refer_reason="guarantors_short"), "refer", "guarantors_short", None),
+    ("guarantors cover less than half", dict(guarantors=pledged(free=1000), own_free_kes=10000), "refer", "guarantors_short", None),
+    ("one guarantor only", dict(guarantors=pledged(n=1)), "refer", "guarantors_short", None),
+    ("two pledges, one with nothing free", dict(guarantors=(*pledged(n=1), *pledged(n=1, free=0))), "refer", "guarantors_short", None),
+    ("the guarantors' offer is above the auto limit", dict(requested_kes=120000, amount_kes=120000, deposits_kes=50000, own_free_kes=50000,
+                                                           income_kes=200000, guarantors=pledged(free=10000)), "refer", "above_limit", None),
     ("membership under six months", dict(months_member=5), "not_now", "membership", None),
     ("no guarantors at all", dict(guarantors=(), any_guarantor=False), "not_now", "no_guarantors", None),
     ("a question to ask first", dict(term_months=None), "clarify", "clarify", None),
@@ -174,8 +174,11 @@ LOW_INCOME = [{"feature": f"B3A__{i}", "value": 1.0, "shap": 0.5} for i in range
     (dict(purpose="A dairy cow"), []),
     (dict(chama_use_known=False), ["C4"]),
     (dict(credit_age_days=181), ["C4"]),
-    (dict(guarantors=pledged(free=1000), own_free_kes=0), ["C5"]),
-    (dict(guarantors=pledged(n=1)), ["C5"]),
+    (dict(guarantors=pledged(free=15000), own_free_kes=0), ["C6"]),
+    (dict(guarantors=pledged(free=9999), own_free_kes=0), []),                  # 19,998: under half of 40,000
+    (dict(guarantors=pledged(free=10000), own_free_kes=0), ["C6"]),             # 20,000: exactly half
+    (dict(guarantors=pledged(n=1)), []),                                        # one is not enough at any amount
+    (dict(guarantors=pledged(free=15000), own_free_kes=0, risk_class="Medium"), []),    # an officer decides anyway
     (dict(requested_kes=40000, amount_kes=40000, deposits_kes=5000, own_free_kes=5000, income_kes=6000, term_months=6), ["C6"]),
 ])
 def test_each_question_fires_on_its_own_condition(over, want):
@@ -183,17 +186,35 @@ def test_each_question_fires_on_its_own_condition(over, want):
 
 
 def test_priority_order_and_the_two_question_cap():
-    over = dict(term_months=None, income_age_days=999, chama_use_known=False, guarantors=pledged(free=1), own_free_kes=0)
+    over = dict(term_months=None, income_age_days=999, chama_use_known=False)
     assert asked_list(**over) == ["C1", "C2"]
     assert asked_list(**over, asked=frozenset({"C1"})) == ["C2", "C4"]
-    assert asked_list(**over, asked=frozenset({"C1", "C2"})) == ["C4", "C5"]
-    assert asked_list(**over, asked=frozenset({"C1", "C2", "C4"})) == ["C5"]
+    assert asked_list(**over, asked=frozenset({"C1", "C2"})) == ["C4"]
+    short = dict(income_age_days=999, chama_use_known=False, guarantors=pledged(free=15000), own_free_kes=0)
+    assert asked_list(**short) == ["C2", "C4"]                      # C6 waits: the affordability figure may move
+    assert asked_list(**short, asked=frozenset({"C2", "C4"})) == ["C6"]
+
+
+def test_there_is_no_question_about_another_guarantor():
+    assert "C5" not in decisions.ANSWER_KEY and "extra_guarantor" not in decisions.OVERRIDE_KEYS
+    assert "C5" not in decisions.question_triggers(facts(guarantors=pledged(free=1)), decisions.work_out(facts(guarantors=pledged(free=1))))
+    with pytest.raises(decisions.BadOverride, match="extra_guarantor"):
+        decisions.clean_overrides({"extra_guarantor": {"full_name": "A", "member_no": "M-1"}}, LoanRequest(1000, "x"))
+
+
+def test_what_the_pledges_can_cover_is_own_deposits_and_every_free_guarantor():
+    w = decisions.work_out(facts(guarantors=pledged(n=3, free=4000), own_free_kes=20000))
+    assert w.capacity_max_kes == 32000 and w.offer_kes == 32000 and not w.capacity_passes
+    assert decisions.work_out(facts(guarantors=pledged(n=1, free=99999))).capacity_max_kes == 0
+    # Within the other maximums: the rule is lower than what they could cover, so it is what is on offer.
+    w = decisions.work_out(facts(requested_kes=90000, amount_kes=90000, deposits_kes=10000, own_free_kes=10000))
+    assert w.rule_max_kes == 30000 and w.capacity_max_kes == 70000 and w.offer_kes == 30000 and w.capacity_passes
 
 
 def test_a_question_is_never_asked_twice_even_when_its_condition_still_holds():
-    f = dict(guarantors=pledged(free=1000), own_free_kes=0, asked=frozenset({"C5"}), declined=frozenset({"C5"}))
+    f = dict(guarantors=pledged(free=15000), own_free_kes=0, asked=frozenset({"C6"}), declined=frozenset({"C6"}))
     assert asked_list(**f) == []
-    assert settled(**f).outcome == "refer"
+    assert (settled(**f).outcome, settled(**f).reason_code) == ("refer", "guarantors_short")
 
 
 def test_no_question_for_what_an_answer_cannot_change():
@@ -270,11 +291,10 @@ def test_the_rule_is_three_times_deposits_and_capacity_covers_the_rest():
     assert w.capacity_need_kes == 26000 and not w.capacity_passes     # the rest of her deposits back someone else
 
 
-def test_standing_pledges_come_first_and_more_only_as_needed():
-    named = GuarantorOption(9, "G-9", "Named", "07", 90000)
+def test_the_most_capacity_goes_first_and_more_only_as_needed():
     a, b, c = pledged(n=3, free=1000)
     big = GuarantorOption(5, "G-5", "Big", "07", 8000, pledge_id=5)
-    assert decisions.choose_guarantors((named, a, b), 500) == (a, b)
+    assert decisions.choose_guarantors((a, b, c), 500) == (a, b)
     assert decisions.choose_guarantors((a, b, c, big), 8000) == (big, a)
     assert [g.member_no for g in decisions.choose_guarantors((a, b, c, big), 9500)] == ["G-5", "G-1", "G-2"]
     assert decisions.choose_guarantors((GuarantorOption(1, "x", "x", "x", 0, 1), a), 0) == (a,)
@@ -464,7 +484,7 @@ def test_the_trace_has_every_check_with_its_values(client, model):
     assert by["affordability"]["instalment_kes"] == 2666 and by["affordability"]["limit_kes"] == 15000
     assert by["guarantor_capacity"]["need_kes"] == 20000
     assert t["thresholds"]["AUTO_APPROVE_LIMIT_KES"] == 50000 and t["model"]["risk_class"] == "Low"
-    assert t["maximums"] == {"rule_kes": 30000, "affordable_kes": 168826}
+    assert t["maximums"] == {"rule_kes": 30000, "affordable_kes": 168826, "capacity_kes": 70000}
 
 
 def test_income_age_counts_a_real_confirmation_but_not_an_edit_elsewhere(client, model):
@@ -515,32 +535,8 @@ def test_guarantee_capacity_already_spent_is_not_counted_twice(client, model):
                          phone=g.phone, relationship_="x", amount_guaranteed_kes=11000, status="verified"))
         db.commit()
     ev = evaluate(mid, LoanRequest(30000, "School fees", 12))
-    assert ev.outcome == "clarify" and ev.questions == ["C5"]
-
-
-def test_c5_looks_the_guarantor_up_by_name_and_number(client, model):
-    mid, _, _ = borrower(guarantors=1)
-    gid, no, _ = new_member(login=False)
-    post_entry(gid, 30000)
-    with SessionLocal() as db:
-        name = db.get(Member, gid).full_name
-    assert evaluate(mid).questions == ["C5"]
-    for wrong in ({"full_name": "Someone Else", "member_no": no}, {"full_name": name, "member_no": "NOPE"}, None):
-        ev = evaluate(mid, overrides={"extra_guarantor": wrong})
-        assert ev.outcome == "refer" and ev.settled.reason_code == "guarantors_short"
-        assert ev.extra_guarantor_found is False
-    # Someone who has only been named has agreed to nothing: never automatic.
-    ev = evaluate(mid, overrides={"extra_guarantor": {"full_name": f"  {name.upper()} ", "member_no": no.lower()}})
-    assert ev.extra_guarantor_found is True and ev.worked.capacity_passes
-    assert (ev.outcome, ev.settled.reason_code) == ("refer", "named_guarantor")
-
-
-def test_a_member_cannot_name_themselves(client, model):
-    mid, _, _ = borrower(guarantors=1)
-    with SessionLocal() as db:
-        me = db.get(Member, mid)
-        named = {"full_name": me.full_name, "member_no": me.member_no}
-    assert evaluate(mid, overrides={"extra_guarantor": named}).extra_guarantor_found is False
+    assert ev.outcome == "clarify" and ev.questions == ["C6"]
+    assert ev.worked.offer_kes == 10000 + 1000 + 12000      # their own, and what is left of each guarantor's
 
 
 def test_medium_needs_an_answered_clarification(client, model):
@@ -1319,14 +1315,16 @@ def test_ledger_endpoints_need_a_key(client, method, path, body):
 
 def test_evaluate_gives_a_member_only_what_they_may_see(client, model):
     model["contributions"] = TOP_DRIVER
-    mid, member, gs = borrower(deposits=10000, guarantors=1, free=12345)
+    mid, member, gs = borrower(deposits=10000, free=4321)
     r = member.post("/api/self-service/evaluate", json={**BODY, "amount_kes": 30000})
     assert r.status_code == 200, r.text
     body = r.json()
-    assert leaks(body) == [] and body["outcome"] == "clarify" and [q["id"] for q in body["questions"]] == ["C5"]
-    assert body["questions"][0]["sets"] == ["extra_guarantor"] and body["reasons"] == []
+    assert leaks(body) == [] and body["outcome"] == "clarify" and [q["id"] for q in body["questions"]] == ["C6"]
+    assert body["questions"][0]["sets"] == ["accepted_amount_kes"] and body["reasons"] == []
     text_of = str(body)
-    assert "12345" not in text_of and "risk" not in text_of.lower()
+    assert "4321" not in text_of and "18642" not in text_of and "risk" not in text_of.lower()
+    r = member.post("/api/self-service/evaluate", json={**BODY, "overrides": {"extra_guarantor": {"full_name": "A", "member_no": "M-1"}}})
+    assert r.status_code == 422
     final = member.post("/api/self-service/evaluate", json=BODY).json()
     assert final["outcome"] != "clarify" or final["questions"]
     assert leaks(final) == []

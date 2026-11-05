@@ -2,13 +2,18 @@
 asked; advance() takes the member's answer as extraction read it and says what comes next.
 
     G1 -> CONSENT -> G2 -> R1 -> [CHECK_AMOUNT] -> evaluate
-       -> C1..C6, as the engine asks, at most config.CONVERSATION_MAX_QUESTIONS in all
+       -> C1, C2, C3, C4 and C6, as the engine asks, at most config.CONVERSATION_MAX_QUESTIONS in all
        -> CONFIRM on an approval or a reduced offer -> commit -> O1..O4 -> END
 
 The language model writes nothing here and decides nothing: the engine decides, and every
 line comes from templates.yaml. Three rules hold throughout: nothing is evaluated without
 the member's consent; an answer that cannot be understood gets REASK once, and then a
 person; a yes to CONSENT or CONFIRM is never assumed from silence or confusion.
+
+advance() only reads. A decision to record is left on the Step as a ToRecord, with the words
+that announce it already chosen, so that they can be spoken with nothing locked; service.py
+writes it, the engine runs again under the locks, and if the answer has changed changed() or
+cannot_record() says what to tell the member instead.
 """
 from __future__ import annotations
 
@@ -16,13 +21,12 @@ import copy
 from dataclasses import dataclass, field
 from datetime import date
 
-from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from chamapro import config
 from chamapro.api import decisions, member_text, profiles, self_service
-from chamapro.api.db import Conversation, LoanApplication, Member, SelfServiceRun, User
-from chamapro.api.decisions import Evaluation, LoanRequest
+from chamapro.api.db import Conversation, Member, User
+from chamapro.api.decisions import Evaluation, LoanRequest, Snapshot
 
 from . import templates
 from .extract import Extracted
@@ -35,6 +39,8 @@ CLOSED = "END"
 PURPOSE_NOT_GIVEN = "Not given"
 # A conversation's own keys: asking again after a dropped connection pays out nothing new.
 COMMIT_KEY, ACCEPT_KEY = "conversation-{}-commit", "conversation-{}-accept"
+# Stands in an action until the application it belongs to has its id.
+THIS_APPLICATION = -1
 
 
 def first_name(member: Member) -> str:
@@ -53,7 +59,8 @@ def explain(ev: Evaluation) -> dict:
     for name, source in sorted(ev.provenance.items()):
         sources[{"declared": "profile", "verified": "profile"}.get(source, source)].append(name)
     contributions = ev.contributions if isinstance(ev.contributions, list) else []
-    return {"outcome": ev.outcome, "reason_code": ev.settled.reason_code, "reason": ev.reason, "risk_class": ev.risk_class,
+    return {"outcome": ev.outcome, "reason_code": ev.settled.reason_code, "reason": ev.reason,
+            "reason_values": decisions.reason_values(ev.facts, ev.worked, ev.settled), "risk_class": ev.risk_class,
             "probabilities": ev.probabilities,
             "contributions": [{**c, "in_favour": member_text.in_favour(ev.risk_class, c["shap"])} for c in contributions],
             "shap_error": ev.contributions if isinstance(ev.contributions, str) else None,
@@ -64,8 +71,21 @@ def explain(ev: Evaluation) -> dict:
 
 
 @dataclass
+class ToRecord:
+    """A decision to write, and how far the Step had got before the lines announcing it."""
+    evaluation: Evaluation
+    accepted: Evaluation | None
+    commit_key: str
+    accept_key: str
+    said: int
+    acted: int
+    state: str
+    status: str
+
+
+@dataclass
 class Step:
-    """What one answer leads to. Nothing here has been written yet, except a decision."""
+    """What one answer leads to. Nothing here has been written yet."""
     lines: list[Rendered] = field(default_factory=list)
     state: str = ""
     context: dict = field(default_factory=dict)
@@ -75,9 +95,9 @@ class Step:
     consent: bool | None = None
     corrections: dict | None = None
     confirmed_groups: list[str] | None = None
-    application_id: int | None = None
-    run_id: int | None = None
     evaluated: bool = False
+    to_record: ToRecord | None = None
+    turn: Turn | None = None
 
 
 class Turn:
@@ -86,7 +106,9 @@ class Turn:
         # A copy to the bottom: the row's own dict must still say what it said, or the
         # new state can compare equal to it and never be written.
         self.ctx = copy.deepcopy(conv.context or {})
-        self.step = Step(state=conv.state, context=self.ctx)
+        self.step = Step(state=conv.state, context=self.ctx, turn=self)
+        self._snapshot: Snapshot | None = None
+        self._last: Evaluation | None = None
 
     # --- Saying ---------------------------------------------------------------------------
 
@@ -130,15 +152,26 @@ class Turn:
     def overrides(self) -> dict:
         return self.ctx.setdefault("overrides", {})
 
+    @property
+    def snapshot(self) -> Snapshot:
+        """What the database says, read once in a reply."""
+        if self._snapshot is None:
+            self._snapshot = decisions.read_snapshot(self.db, self.member)
+        return self._snapshot
+
+    def features(self) -> dict:
+        return profiles.profile_features(self.db, self.member, self.today, records=self.snapshot.records).features
+
     def evaluate(self, refer_reason: str | None = None) -> Evaluation:
         if not self.conv.consent_given:
             raise RuntimeError("nothing is evaluated without the member's consent")
         self.step.evaluated = True
         request = LoanRequest(self.ctx["amount_kes"], self.ctx["purpose"])
         reason = refer_reason or self.ctx.get("refer_reason")
-        ev = decisions.evaluate(self.db, self.member, request, self.overrides, today=self.today, refer_reason=reason)
-        self.step.explain = explain(ev)
-        return ev
+        self._last = decisions.evaluate(self.db, self.member, request, self.overrides, today=self.today, refer_reason=reason,
+                                        snapshot=self.snapshot, reuse=self._last)
+        self.step.explain = explain(self._last)
+        return self._last
 
     def decide(self, refer_reason: str | None = None) -> None:
         self.route(self.evaluate(refer_reason))
@@ -169,55 +202,63 @@ class Turn:
             self.ask("C3", purpose=self.ctx["purpose"])
         elif question == "C6":
             self.ctx["offer_kes"] = ev.worked.offer_kes
+            # Turned down, an offer their guarantors limit still leaves them short of a guarantor.
+            self.ctx["if_declined"] = "offer_declined" if ev.worked.capacity_passes else "guarantors_short"
             self.ask("C6", max_amount=ev.worked.offer_kes)
         else:
             self.ask(question)
 
     def commit_and_tell(self, ev: Evaluation) -> None:
+        """Choose the words for this decision and leave it to be written. A reduced offer the
+        member has said yes to is taken at once: what they hear is how that comes out."""
         cid = self.conv.id
-        try:
-            reply = self_service.commit(self.db, ev, COMMIT_KEY.format(cid), self.actor)
-            if reply["outcome"] == "approve_reduced":
-                app = self.db.get(LoanApplication, reply["application_id"])
-                # On a retry a stored reply says offered: the acceptance has its own key, and its own stored reply.
-                reply = self_service.accept_offer(self.db, app, ACCEPT_KEY.format(cid), self.actor)
-        except self_service.DecisionChanged as e:
-            # Something moved in the moment before: once, tell them what is true now.
-            if self.ctx.get("changed"):
-                self.officer_can_help()
-            else:
-                self.ctx["changed"] = True
-                self.step.explain = explain(e.fresh)
-                self.route(e.fresh)
-            return
-        except self_service.CannotCommit:
-            self.officer_can_help()
-            return
-        self.tell(reply, ev)
+        accepted = None
+        if ev.outcome == "approve_reduced":
+            accepted = self_service.accepted_as_well(self.db, self.member, ev, self.snapshot)
+        self.step.to_record = ToRecord(ev, accepted, COMMIT_KEY.format(cid), ACCEPT_KEY.format(cid), len(self.step.lines),
+                                       len(self.step.actions), self.step.state, self.step.status)
+        self.tell(accepted or ev)
 
-    def tell(self, reply: dict, ev: Evaluation) -> None:
-        app_id = reply["application_id"]
-        self.step.application_id = app_id
-        self.step.run_id = self.db.scalar(select(SelfServiceRun.id).where(SelfServiceRun.application_id == app_id)
-                                          .order_by(SelfServiceRun.id.desc()).limit(1))
-        outcome = reply["outcome"]
+    def tell(self, ev: Evaluation) -> None:
+        outcome = ev.outcome
         if outcome == "approve":
-            if reply["amount_kes"] < self.ctx["amount_kes"]:
-                self.say("O2", amount=reply["amount_kes"], term=reply["term_months"],
-                         instalment=reply["monthly_instalment_kes"])
+            if ev.amount_kes < self.ctx["amount_kes"]:
+                self.say("O2", amount=ev.amount_kes, term=ev.facts.term_months or self_service.TERM_FOR_THE_RECORD,
+                         instalment=ev.instalment_kes)
             else:
-                self.say("O1", first_name=first_name(self.member), amount=reply["amount_kes"])
-            self.finish((REVIEW, app_id))
+                self.say("O1", first_name=first_name(self.member), amount=ev.amount_kes)
+            self.finish((REVIEW, THIS_APPLICATION))
         elif outcome == "not_now":
             if ev.settled.months_left:
                 self.say("O4", months=ev.settled.months_left)
             else:
                 self.say("O4_GUARANTORS", min_guarantors=decisions.comparator.MIN_GUARANTORS)
-            self.finish((REVIEW, app_id), (BOOK, app_id))
+            self.finish((REVIEW, THIS_APPLICATION), (BOOK, THIS_APPLICATION))
         else:
             # A referral is already with an officer: there is nothing further to ask for.
             self.say("O3")
-            self.finish((BOOK, app_id))
+            self.finish((BOOK, THIS_APPLICATION))
+
+    def _take_back(self) -> None:
+        """The lines announcing a decision that was not written."""
+        record = self.step.to_record
+        del self.step.lines[record.said:], self.step.actions[record.acted:]
+        self.step.state, self.step.status, self.step.to_record = record.state, record.status, None
+
+    def changed(self, fresh: Evaluation) -> None:
+        """Something moved in the moment before: once, tell them what is true now."""
+        self._take_back()
+        if self.ctx.get("changed"):
+            self.officer_can_help()
+            return
+        self.ctx["changed"] = True
+        self.step.explain = explain(fresh)
+        self._snapshot, self._last = fresh.snapshot, fresh
+        self.route(fresh)
+
+    def cannot_record(self) -> None:
+        self._take_back()
+        self.officer_can_help()
 
     # --- Applying answers -----------------------------------------------------------------
 
@@ -282,12 +323,12 @@ def _no_consent(t: Turn) -> None:
 def _ask_profile_check(t: Turn) -> None:
     """The summary from profile_features. A member whose profile cannot fill it has nothing
     to check: the engine will ask what it needs."""
-    features = profiles.profile_features(t.db, t.member, t.today).features
+    features = t.features()
     wanted = {"household_size": features["household_size"], "children": features["children"],
               "monthly_income": features["monthly_income_kes"]}
     if any(v is None for v in wanted.values()):
         t.ask("R1")
-    elif decisions.income_is_stale(t.db, t.member, t.today):
+    elif decisions.income_is_stale(t.db, t.member, t.today, seen=t.snapshot.confirmed):
         # Left out rather than read back as fact: C2 asks about it, once, if it comes to that.
         t.ctx["read_out"] = ["household"]
         wanted.pop("monthly_income")
@@ -356,7 +397,7 @@ def _term(t: Turn, a: Extracted) -> None:
 def _income(t: Turn, a: Extracted) -> None:
     income = a.fields.get("monthly_income_kes")
     if income is None and a.fields.get("answer") == "yes":
-        income = profiles.profile_features(t.db, t.member, t.today).features["monthly_income_kes"]
+        income = t.features()["monthly_income_kes"]
     if income is None:
         t.reask_or(lambda: t.give_up_on("C2"))
     else:
@@ -379,20 +420,8 @@ def _chama(t: Turn, a: Extracted) -> None:
         t.check_amount_or_take("C4", {"chama_loan_use": 2, "chama_instalment_kes": instalment}, a)
     else:
         # Not now: what the profile says of before stands, except that a current loan is now a past one.
-        before = profiles.profile_features(t.db, t.member, t.today).features["chama_loan_use"]
+        before = t.features()["chama_loan_use"]
         t.take("C4", {"chama_loan_use": 1 if before in (1, 2) else 0})
-
-
-def _guarantor(t: Turn, a: Extracted) -> None:
-    name, number = a.fields.get("full_name"), a.fields.get("member_no")
-    if a.fields.get("nobody"):
-        t.overrides["extra_guarantor"] = None
-        t.decide()
-    elif name and number:
-        t.overrides["extra_guarantor"] = {"full_name": name, "member_no": number}
-        t.decide()
-    else:
-        t.reask_or(lambda: t.give_up_on("C5"))
 
 
 def _smaller_amount(t: Turn, a: Extracted) -> None:
@@ -403,7 +432,7 @@ def _smaller_amount(t: Turn, a: Extracted) -> None:
     elif answer == "no":
         # They have said no to this figure: a person, rather than offering it again.
         t.overrides["accepted_amount_kes"] = None
-        t.ctx["refer_reason"] = "offer_declined"
+        t.ctx["refer_reason"] = t.ctx.get("if_declined", "offer_declined")
         t.decide()
     else:
         t.reask_or(lambda: t.give_up_on("C6"))
@@ -425,7 +454,7 @@ def _confirm(t: Turn, a: Extracted) -> None:
 
 
 HANDLERS = {"CONSENT": _consent, "G2": _profile_check, "R1": _request, "CHECK_AMOUNT": _check_amount, "C1": _term,
-            "C2": _income, "C3": _expected_return, "C4": _chama, "C5": _guarantor, "C6": _smaller_amount,
+            "C2": _income, "C3": _expected_return, "C4": _chama, "C6": _smaller_amount,
             "CONFIRM": _confirm}
 
 

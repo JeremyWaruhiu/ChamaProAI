@@ -7,6 +7,8 @@ from __future__ import annotations
 import json
 import logging
 import math
+import os
+import sys
 import time
 import uuid
 from contextlib import asynccontextmanager
@@ -20,7 +22,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import (FileResponse, JSONResponse, RedirectResponse,
                                Response as HTTPResponse)
 from sqlalchemy import case, delete, func, select
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.orm import Session, contains_eager, joinedload, selectinload
 
 from chamapro import config
@@ -33,7 +35,7 @@ from . import schemas as s
 from .auth import require_admin, require_member, require_officer
 from .comparator import RECOMMENDED_DECISION
 from .db import (Applicant, Assessment, AuthSession, Decision, Interview, LoanApplication,
-                 Member, Response, User, get_db, init_db, query_count, utcnow)
+                 Member, Response, User, engine, get_db, init_db, query_count, utcnow)
 from .questions import CURRENT_SET, QUESTION_SETS, question
 
 if not logging.getLogger().handlers:
@@ -47,9 +49,24 @@ ERRORS = {code: {"model": s.Error} for code in (401, 403, 404, 409, 413, 415, 42
 OFFICER = [Depends(require_officer)]
 
 
+def database_or_exit() -> None:
+    """A server with no database can do nothing for anybody. Say so in one line and stop, before
+    uvicorn turns it into a traceback. os._exit, since uvicorn logs a SystemExit from here in full."""
+    try:
+        init_db()
+    except OperationalError as e:
+        where = engine.url.render_as_string(hide_password=True)
+        print(f"ChamaPro cannot reach its database at {where} ({type(e.orig).__name__}); check the network and DATABASE_URL, "
+              f"then start it again.", file=sys.stderr, flush=True)
+        os._exit(1)
+    except RuntimeError as e:   # the schema is behind: init_db says what to run
+        print(f"ChamaPro cannot start: {e}", file=sys.stderr, flush=True)
+        os._exit(1)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    init_db()
+    database_or_exit()
     config.UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
     storage.backend()      # fail at startup, not on the first upload, if misconfigured
     pl.load_asr()

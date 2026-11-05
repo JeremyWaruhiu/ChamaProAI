@@ -25,13 +25,14 @@ import threading
 from dataclasses import dataclass, field
 from datetime import date, datetime
 
-from sqlalchemy import func, select
-from sqlalchemy.orm import Session, joinedload
+from sqlalchemy import Date, Integer, String, and_, cast, func, literal, null, or_, select, union_all
+from sqlalchemy.orm import Session
 
 from chamapro import config
 
 from . import comparator, ledger, member_text, profiles
-from .db import (GuarantorPledge, LoanAccount, Member, MemberProfile, MemberProfileHistory, nairobi_today)
+from .db import (SYSTEM_USERNAME, AccountEntry, Guarantor, GuarantorPledge, IdempotencyKey, LoanAccount, LoanApplication,
+                 Member, MemberAccount, MemberProfile, MemberProfileHistory, User, UTCDateTime, nairobi_today)
 from .pipeline import score_interview
 
 log = logging.getLogger("chamapro.api")
@@ -40,12 +41,14 @@ MAX_QUESTIONS = 2
 # SHAP contributions kept on each evaluation: the presenter view charts ten.
 SHAP_KEPT = 10
 OVERRIDE_KEYS = ("term_months", "monthly_income_kes", "expected_monthly_return_kes", "chama_loan_use",
-                 "chama_instalment_kes", "extra_guarantor", "accepted_amount_kes", "household_size", "children")
+                 "chama_instalment_kes", "accepted_amount_kes", "household_size", "children")
 # Answers that replace a profile value the classifier reads.
 FEATURE_OVERRIDES = ("monthly_income_kes", "chama_loan_use", "household_size", "children")
 # What can clear a Medium score: an answer about the person. A term says nothing about them.
 CLEARS_MEDIUM = frozenset({"C2", "C3", "C4"})
 INCOME_FEATURES = ("log_monthly_income", "income_missing")
+# Where a self-service application is finished with, once any loan has been paid out.
+FINISHED = ("declined", "reversed")
 # Words in a purpose that mean the loan earns money. The member's own words decide
 # nothing but whether C3 is worth asking, and an answer only ever adds to affordability.
 INCOME_GENERATING = ("business", "shop", "stock", "kiosk", "capital", "trade", "dairy", "cow", "goat", "sheep",
@@ -96,15 +99,13 @@ class GuarantorOption:
     full_name: str
     phone: str
     free_kes: int
-    pledge_id: int | None = None        # None: named in the conversation, has not pledged
+    pledge_id: int
 
 
 def choose_guarantors(options: tuple[GuarantorOption, ...], need_kes: int) -> tuple[GuarantorOption, ...]:
-    """Standing pledges first, most capacity first; at least the minimum number,
-    then as many more as it takes to cover the need. A guarantor with no free
-    capacity is not one."""
-    able = sorted((g for g in options if g.free_kes > 0),
-                  key=lambda g: (g.pledge_id is None, -g.free_kes, g.member_id))
+    """Most capacity first; at least the minimum number, then as many more as it takes
+    to cover the need. A guarantor with no free capacity is not one."""
+    able = sorted((g for g in options if g.free_kes > 0), key=lambda g: (-g.free_kes, g.member_id))
     chosen = able[:comparator.MIN_GUARANTORS]
     for g in able[comparator.MIN_GUARANTORS:]:
         if sum(c.free_kes for c in chosen) >= need_kes:
@@ -146,7 +147,7 @@ class Facts:
     loan_instalments_kes: int = 0
     chama_instalment_kes: int = 0
     guarantors: tuple[GuarantorOption, ...] = ()
-    any_guarantor: bool = False         # a pledge or a named member, with capacity or not
+    any_guarantor: bool = False         # a pledge, with capacity or not
     income_age_days: int | None = 0     # None: no date, so older than anything
     income_verified: bool = True
     chama_use_known: bool = True
@@ -171,16 +172,14 @@ class Worked:
     disposable_kes: int | None
     limit_kes: float | None             # the most a month's instalment may be
     affordable_max_kes: int | None
-    offer_kes: int | None               # the lower of the two maximums
+    lendable_kes: int                   # the lower of those two
+    capacity_max_kes: int               # what their deposits and pledges can stand behind
+    offer_kes: int                      # the lower of those two
     affordability_passes: bool | None
     affordability_near: bool
     capacity_need_kes: int
     chosen: tuple[GuarantorOption, ...]
     capacity_passes: bool
-
-    @property
-    def needs_named(self) -> bool:
-        return any(g.pledge_id is None for g in self.chosen)
 
 
 def income_ceiling(profile_income_kes: int | None) -> int | None:
@@ -220,14 +219,17 @@ def work_out(f: Facts) -> Worked:
             affordable = ledger.largest_principal(limit, f.term_months)
             passes = instalment <= limit
             near = limit > 0 and abs(instalment - limit) <= config.AFFORDABILITY_NEAR_BAND * limit
-    offer = rule_max if affordable is None else min(rule_max, affordable)
+    lendable = rule_max if affordable is None else min(rule_max, affordable)
+    # Short of the minimum number of guarantors, the pledges stand behind nothing at all.
+    able = [g for g in f.guarantors if g.free_kes > 0]
+    most = f.own_free_kes + sum(g.free_kes for g in able) if len(able) >= comparator.MIN_GUARANTORS else 0
     # Capacity is needed for what could be lent, not for what cannot.
-    backing = min(f.amount_kes, offer) if offer > 0 else f.amount_kes
+    backing = min(f.amount_kes, lendable) if lendable > 0 else f.amount_kes
     need = max(backing - f.own_free_kes, 0)
     chosen = choose_guarantors(f.guarantors, need)
     covered = len(chosen) >= comparator.MIN_GUARANTORS and sum(g.free_kes for g in chosen) >= need
-    return Worked(rule_max, instalment, obligations, disposable, limit, affordable, offer, passes, near, need, chosen,
-                  covered)
+    return Worked(rule_max, instalment, obligations, disposable, limit, affordable, lendable, most, min(lendable, most),
+                  passes, near, need, chosen, covered)
 
 
 def check_rows(f: Facts, w: Worked) -> list[dict]:
@@ -243,7 +245,7 @@ def check_rows(f: Facts, w: Worked) -> list[dict]:
             multiplier=comparator.SAVINGS_MULTIPLIER, outstanding_principal_kes=f.outstanding_principal_kes),
         row("guarantors", len(w.chosen) >= comparator.MIN_GUARANTORS, usable=len(w.chosen),
             minimum=comparator.MIN_GUARANTORS, any_at_all=f.any_guarantor),
-        row("guarantor_capacity", w.capacity_passes, need_kes=w.capacity_need_kes, own_free_kes=f.own_free_kes,
+        row("guarantor_capacity", w.capacity_passes, need_kes=w.capacity_need_kes, most_kes=w.capacity_max_kes, own_free_kes=f.own_free_kes,
             guarantors=[{"member_no": g.member_no, "free_kes": g.free_kes, "pledged": g.pledge_id is not None}
                         for g in f.guarantors], chosen=[g.member_no for g in w.chosen]),
         row("affordability", w.affordability_passes, instalment_kes=w.instalment_kes,
@@ -267,6 +269,14 @@ def stale(age_days: int | None) -> bool:
     return age_days is None or age_days > config.PROFILE_STALE_DAYS
 
 
+def guarantors_limit_an_offer(f: Facts, w: Worked) -> bool:
+    """Their pledges cannot cover the amount, and what they can cover is worth offering: at least
+    half the request, and no more than can be decided here, to someone the model lets through.
+    offer_kes is already within the other maximums. It waits for the affordability figure, like any offer."""
+    return (not w.capacity_passes and w.affordable_max_kes is not None and w.offer_kes > 0 and model_allows(f)
+            and w.offer_kes * 2 >= f.requested_kes and w.offer_kes <= config.AUTO_APPROVE_LIMIT_KES)
+
+
 def question_triggers(f: Facts, w: Worked) -> dict[str, bool]:
     """Whether each question's condition holds, regardless of whether it can be asked."""
     above_both = (w.affordable_max_kes is not None and f.amount_kes > w.rule_max_kes
@@ -277,8 +287,7 @@ def question_triggers(f: Facts, w: Worked) -> dict[str, bool]:
               or (not f.income_verified and income_is_top_driver(f.contributions)),
         "C3": w.affordability_near and income_generating(f.purpose),
         "C4": not f.chama_use_known or stale(f.credit_age_days),
-        "C5": not w.capacity_passes,
-        "C6": above_both,
+        "C6": guarantors_limit_an_offer(f, w) or (above_both and w.capacity_passes),
     }
 
 
@@ -293,8 +302,8 @@ def clarifications(f: Facts, w: Worked, fired: dict[str, bool]) -> list[str]:
         return []
     elif f.risk_class == "High":
         ask = {"C1", "C2", "C4"}    # only what can move the score: nothing else changes a referral
-    elif f.amount_kes > config.AUTO_APPROVE_LIMIT_KES and (w.offer_kes >= f.amount_kes
-                                                            or w.offer_kes > config.AUTO_APPROVE_LIMIT_KES):
+    elif f.amount_kes > config.AUTO_APPROVE_LIMIT_KES and (w.lendable_kes >= f.amount_kes
+                                                            or w.lendable_kes > config.AUTO_APPROVE_LIMIT_KES):
         ask = {"C1", "C6"}      # an officer decides this amount; only a lower one changes that
     else:
         ask = set(fired)
@@ -341,23 +350,19 @@ def settle(f: Facts, w: Worked, questions: list[str]) -> Settled:
         return Settled("refer", "details_missing")
     if not model_allows(f):
         return Settled("refer", "officer_review")
-    if f.amount_kes > min(w.rule_max_kes, w.affordable_max_kes):
-        if w.offer_kes * 2 < f.requested_kes:
-            return Settled("refer", "offer_too_small")
+    if f.amount_kes > w.lendable_kes:
+        if w.lendable_kes * 2 < f.requested_kes:
+            return Settled("refer", "offer_too_small")     # no guarantor would change that
         if w.offer_kes > config.AUTO_APPROVE_LIMIT_KES:
             return Settled("refer", "above_limit")
         if not w.capacity_passes:
             return Settled("refer", "guarantors_short")
-        if w.needs_named:
-            return Settled("refer", "named_guarantor")
         return Settled("approve_reduced", "reduced_rule" if w.rule_max_kes <= w.affordable_max_kes
                        else "reduced_affordability", amount_kes=w.offer_kes)
     if f.amount_kes > config.AUTO_APPROVE_LIMIT_KES:
         return Settled("refer", "above_limit")
     if not w.capacity_passes:
         return Settled("refer", "guarantors_short")
-    if w.needs_named:
-        return Settled("refer", "named_guarantor")
     return Settled("approve", "approve", amount_kes=f.amount_kes)
 
 
@@ -391,9 +396,10 @@ class Evaluation:
     features_total: int
     model_file: str
     model_sha256: str
-    extra_guarantor_found: bool | None
     policy_version: str
     trace: dict
+    scored: score_interview.Scored | None = None
+    snapshot: Snapshot | None = None
 
     @property
     def outcome(self) -> str:
@@ -460,11 +466,11 @@ def last_confirmed(seen: list[tuple[datetime, list]], group: str) -> datetime | 
     return max((at for at, groups in seen if not groups or group in groups), default=None)
 
 
-def income_is_stale(db: Session, member: Member, today: date | None = None) -> bool:
+def income_is_stale(db: Session, member: Member, today: date | None = None,
+                    seen: list[tuple[datetime, list]] | None = None) -> bool:
     """Whether the income on record is too old to read back to the member as fact."""
-    age = group_age_days(member.profile, "income", last_confirmed(confirmations(db, member.id), "income"),
-                         today or nairobi_today())
-    return stale(age)
+    seen = confirmations(db, member.id) if seen is None else seen
+    return stale(group_age_days(member.profile, "income", last_confirmed(seen, "income"), today or nairobi_today()))
 
 
 def group_age_days(p: MemberProfile | None, group: str, confirmed: datetime | None, today: date) -> int | None:
@@ -477,65 +483,183 @@ def group_age_days(p: MemberProfile | None, group: str, confirmed: datetime | No
     return max((today - max(dates).astimezone(config.NAIROBI).date()).days, 0)
 
 
-def loan_standing(db: Session, member_id: int, today: date) -> tuple[int, bool, int]:
+# --- Everything an evaluation reads ---------------------------------------------------------
+
+@dataclass(frozen=True)
+class LoanFigures:
+    """A loan's columns, enough for ledger.outstanding_principal and days_in_arrears."""
+    id: int
+    status: str
+    principal_kes: int
+    monthly_instalment_kes: int
+    term_months: int
+    disbursed_on: date
+
+
+@dataclass
+class Snapshot:
+    """What the database says about a member, read in one statement, so that an evaluation
+    costs one round trip: ~200 ms from Nairobi, where its queries one by one cost two seconds."""
+    loans: list[LoanFigures] = field(default_factory=list)
+    paid: dict[int, int] = field(default_factory=dict)
+    entries: int = 0
+    recoveries: int = 0
+    pledges: list[tuple] = field(default_factory=list)      # pledge id, guarantor id, ceiling, number, name, phone
+    deposits: dict[int, int] = field(default_factory=dict)
+    guaranteed: dict[int, int] = field(default_factory=dict)
+    committed: dict[int, int] = field(default_factory=dict)
+    held: dict[int, int] = field(default_factory=dict)
+    confirmed: list[tuple[datetime, list]] = field(default_factory=list)
+    open_application: bool = False
+    system_user_id: int | None = None
+    transactional_kes: int = 0
+    keys_used: set[str] = field(default_factory=set)
+
+    @property
+    def records(self) -> tuple[list[str], bool, bool]:
+        """ledger.known_to_the_sacco's answer."""
+        return [x.status for x in self.loans], self.entries > 0, self.recoveries > 0
+
+    def capacity(self, member_id: int) -> ledger.Capacity:
+        return ledger.Capacity(self.deposits.get(member_id, 0), self.guaranteed.get(member_id, 0),
+                               self.committed.get(member_id, 0))
+
+
+def _row(what: str, k=None, a=None, b=None, c=None, t1=None, t2=None, t3=None, at=None, day=None):
+    """One SELECT of the snapshot, every part with the same columns. The first part's types
+    are the result's, so each NULL says what it stands for."""
+    def col(value, kind):
+        return cast(null(), kind) if value is None else value
+    return select(literal(what, String).label("what"), col(k, Integer).label("k"), col(a, Integer).label("a"),
+                  col(b, Integer).label("b"), col(c, Integer).label("c"), col(t1, String).label("t1"),
+                  col(t2, String).label("t2"), col(t3, String).label("t3"), col(at, UTCDateTime).label("at"),
+                  col(day, Date).label("day"))
+
+
+def read_snapshot(db: Session, member: Member, keys: tuple[str, ...] = (), key_owner_id: int | None = None) -> Snapshot:
+    """Reads nothing it cannot put in one statement. The same figures as ledger's functions, which
+    the pages that show one of them at a time go on using; test_query_counts compares the two."""
+    mid = member.id
+    pledged = select(GuarantorPledge.guarantor_member_id).where(GuarantorPledge.borrower_member_id == mid,
+                                                                GuarantorPledge.status == "active")
+    people_ids = select(Member.id).where(or_(Member.id == mid, Member.id.in_(pledged)))
+    theirs = select(LoanAccount.id).where(LoanAccount.member_id == mid, LoanAccount.status.in_(ledger.STILL_OWED))
+    parts = [
+        _row("loan", k=LoanAccount.id, a=LoanAccount.principal_kes, b=LoanAccount.monthly_instalment_kes,
+             c=LoanAccount.term_months, t1=LoanAccount.status, day=LoanAccount.disbursed_on)
+        .where(LoanAccount.member_id == mid),
+        _row("paid", k=AccountEntry.loan_account_id, a=-func.sum(AccountEntry.amount_kes))
+        .where(AccountEntry.loan_account_id.in_(theirs), AccountEntry.entry_type.in_(ledger.PAID_INTO_LOAN))
+        .group_by(AccountEntry.loan_account_id),
+        _row("entries", a=func.count(AccountEntry.id),
+             b=func.count(AccountEntry.id).filter(AccountEntry.entry_type == "guarantee_recovery"))
+        .select_from(AccountEntry).join(MemberAccount, MemberAccount.id == AccountEntry.account_id)
+        .where(MemberAccount.member_id == mid),
+        _row("pledge", k=GuarantorPledge.id, a=GuarantorPledge.guarantor_member_id, b=GuarantorPledge.max_amount_kes,
+             t1=Member.member_no, t2=Member.full_name, t3=Member.phone)
+        .select_from(GuarantorPledge).join(Member, Member.id == GuarantorPledge.guarantor_member_id)
+        .where(GuarantorPledge.borrower_member_id == mid, GuarantorPledge.status == "active"),
+        _row("deposits", k=MemberAccount.member_id, a=func.sum(AccountEntry.amount_kes))
+        .select_from(MemberAccount).join(AccountEntry, AccountEntry.account_id == MemberAccount.id)
+        .where(MemberAccount.member_id.in_(people_ids), MemberAccount.kind == "deposits").group_by(MemberAccount.member_id),
+        _row("guaranteed", k=Guarantor.member_id, a=func.sum(Guarantor.amount_guaranteed_kes))
+        .select_from(Guarantor).join(LoanAccount, LoanAccount.id == Guarantor.loan_account_id)
+        .where(Guarantor.member_id.in_(people_ids), Guarantor.status == "verified", LoanAccount.status == "active")
+        .group_by(Guarantor.member_id),
+        _row("committed", k=Guarantor.member_id, a=func.sum(Guarantor.amount_guaranteed_kes))
+        .select_from(Guarantor).join(LoanApplication, LoanApplication.id == Guarantor.application_id)
+        .where(Guarantor.member_id.in_(people_ids), Guarantor.loan_account_id.is_(None),
+               or_(Guarantor.status == "verified", and_(Guarantor.status == "pending", Guarantor.pledge_id.is_not(None))),
+               LoanApplication.status.in_(ledger.OPEN_APPLICATION)).group_by(Guarantor.member_id),
+        _row("held", k=Guarantor.pledge_id, a=func.sum(Guarantor.amount_guaranteed_kes))
+        .select_from(Guarantor).outerjoin(LoanAccount, LoanAccount.id == Guarantor.loan_account_id)
+        .outerjoin(LoanApplication, LoanApplication.id == Guarantor.application_id)
+        .where(Guarantor.pledge_id.in_(select(GuarantorPledge.id).where(GuarantorPledge.borrower_member_id == mid,
+                                                                        GuarantorPledge.status == "active")),
+               Guarantor.status != "rejected",
+               or_(LoanAccount.status.in_(ledger.STILL_OWED),
+                   and_(Guarantor.loan_account_id.is_(None), LoanApplication.status.in_(ledger.OPEN_APPLICATION))))
+        .group_by(Guarantor.pledge_id),
+        _row("confirmed", at=MemberProfileHistory.created_at, t1=cast(MemberProfileHistory.groups, String))
+        .where(MemberProfileHistory.member_id == mid, MemberProfileHistory.change == "confirm"),
+        _row("open", k=LoanApplication.id).select_from(LoanApplication)
+        .outerjoin(LoanAccount, LoanAccount.application_id == LoanApplication.id)
+        .where(LoanApplication.member_id == mid, LoanApplication.channel == "self_service",
+               LoanApplication.status.not_in(FINISHED), LoanAccount.id.is_(None)),
+        _row("system", k=User.id).where(User.username == SYSTEM_USERNAME),
+        _row("transactional", a=func.coalesce(func.sum(AccountEntry.amount_kes), 0)).select_from(AccountEntry)
+        .join(MemberAccount, MemberAccount.id == AccountEntry.account_id)
+        .where(MemberAccount.member_id == mid, MemberAccount.kind == "transactional"),
+    ]
+    if keys:
+        parts.append(_row("key", k=IdempotencyKey.id, t1=IdempotencyKey.key)
+                     .where(IdempotencyKey.actor_user_id == key_owner_id, IdempotencyKey.key.in_(keys)))
+    snap = Snapshot()
+    for r in db.execute(union_all(*parts)):
+        if r.what == "loan":
+            snap.loans.append(LoanFigures(r.k, r.t1, r.a, r.b, r.c, r.day))
+        elif r.what == "paid":
+            snap.paid[r.k] = r.a
+        elif r.what == "entries":
+            snap.entries, snap.recoveries = r.a, r.b
+        elif r.what == "pledge":
+            snap.pledges.append((r.k, r.a, r.b, r.t1, r.t2, r.t3))
+        elif r.what in ("deposits", "guaranteed", "committed", "held"):
+            getattr(snap, r.what)[r.k] = r.a
+        elif r.what == "confirmed":
+            snap.confirmed.append((r.at, json.loads(r.t1) if r.t1 else []))
+        elif r.what == "open":
+            snap.open_application = True
+        elif r.what == "system":
+            snap.system_user_id = r.k
+        elif r.what == "transactional":
+            snap.transactional_kes = r.a
+        elif r.what == "key":
+            snap.keys_used.add(r.t1)
+    snap.pledges.sort()
+    return snap
+
+
+def loan_standing(snap: Snapshot, today: date) -> tuple[int, bool, int]:
     """(the instalments of their active loans, whether any loan is behind or defaulted,
     the principal still outstanding on their active loans)."""
-    rows = db.scalars(select(LoanAccount).where(LoanAccount.member_id == member_id,
-                                                LoanAccount.status.in_(ledger.STILL_OWED))).all()
-    paid = ledger.paid_on_loans(db, [x.id for x in rows])
+    rows = [x for x in snap.loans if x.status in ledger.STILL_OWED]
     active = [x for x in rows if x.status == "active"]
-    behind = any(x.status == "defaulted" or ledger.days_in_arrears(x, paid.get(x.id, 0), today) > 0 for x in rows)
-    outstanding = sum(ledger.outstanding_principal(x, paid.get(x.id, 0)) for x in active)
+    behind = any(x.status == "defaulted" or ledger.days_in_arrears(x, snap.paid.get(x.id, 0), today) > 0 for x in rows)
+    outstanding = sum(ledger.outstanding_principal(x, snap.paid.get(x.id, 0)) for x in active)
     return sum(x.monthly_instalment_kes for x in active), behind, outstanding
 
 
-def named_member(db: Session, m: Member, named: dict | None) -> Member | None:
-    """The member a C5 answer names, if both their number and their name match. Asking
-    for both, and saying only found or not found, keeps this from telling anyone who
-    holds a member number."""
-    if not named:
-        return None
-    no, name = (named.get("member_no") or "").strip().upper(), (named.get("full_name") or "")
-    other = db.scalar(select(Member).where(func.upper(Member.member_no) == no))
-    if other is None or other.id == m.id or " ".join(name.split()).casefold() != " ".join(other.full_name.split()).casefold():
-        return None
-    return other
-
-
-def guarantor_options(db: Session, m: Member, named: Member | None) -> tuple[tuple[GuarantorOption, ...], bool, int]:
-    """(usable guarantors, whether there is any at all, the member's own free deposits).
-    A pledge from someone with no phone cannot be used, as in sacco.offers_for. A pledge
-    backs no more than its guarantor agreed to: with no ceiling set, nothing automatically."""
-    pledges = db.scalars(select(GuarantorPledge).where(GuarantorPledge.borrower_member_id == m.id,
-                                                       GuarantorPledge.status == "active")
-                         .options(joinedload(GuarantorPledge.guarantor)).order_by(GuarantorPledge.id)).all()
-    pledged = {p.guarantor_member_id for p in pledges}
-    extra = named if named is not None and named.id not in pledged else None
-    caps = ledger.capacities(db, {m.id, *pledged, *([extra.id] if extra else [])})
-    held = ledger.held_under_pledges(db, [p.id for p in pledges])
-    options = [GuarantorOption(p.guarantor_member_id, p.guarantor.member_no, p.guarantor.full_name, p.guarantor.phone,
-                               min(caps[p.guarantor_member_id].available_kes,
-                                   max((p.max_amount_kes or 0) - held.get(p.id, 0), 0)), p.id)
-               for p in pledges if p.guarantor.phone]
-    if extra is not None:
-        options.append(GuarantorOption(extra.id, extra.member_no, extra.full_name, extra.phone or "",
-                                       caps[extra.id].available_kes))
-    return tuple(options), bool(pledges) or named is not None, caps[m.id].available_kes
+def guarantor_options(m: Member, snap: Snapshot) -> tuple[tuple[GuarantorOption, ...], bool, int]:
+    """(usable guarantors, whether there is any at all, the member's own free deposits). Guarantors
+    come only from standing pledges. A pledge from someone with no phone cannot be used, as in
+    sacco.offers_for. A pledge backs no more than its guarantor agreed to: with no ceiling set,
+    nothing automatically."""
+    options = [GuarantorOption(guarantor, number, name, phone,
+                               min(snap.capacity(guarantor).available_kes, max((ceiling or 0) - snap.held.get(pledge, 0), 0)),
+                               pledge)
+               for pledge, guarantor, ceiling, number, name, phone in snap.pledges if phone]
+    return tuple(options), bool(snap.pledges), snap.capacity(m.id).available_kes
 
 
 ANSWER_KEY = {"C1": "term_months", "C2": "monthly_income_kes", "C3": "expected_monthly_return_kes",
-              "C4": "chama_loan_use", "C5": "extra_guarantor", "C6": "accepted_amount_kes"}
+              "C4": "chama_loan_use", "C6": "accepted_amount_kes"}
 
 
 def evaluate(db: Session, member: Member, request: LoanRequest, overrides: dict | None = None,
-             final: bool = False, today: date | None = None, refer_reason: str | None = None) -> Evaluation:
+             final: bool = False, today: date | None = None, refer_reason: str | None = None,
+             snapshot: Snapshot | None = None, reuse: Evaluation | None = None) -> Evaluation:
     """Read everything, score, settle. Writes nothing, and the profile stays as it is.
     final: settle on what is known, with no more questions (accepting an offer).
     refer_reason: the caller is stopping here and a person decides (a reason code);
-    the rules a member has not met yet still come first."""
+    the rules a member has not met yet still come first.
+    snapshot: what to read, if it has been read already. reuse: an earlier evaluation in this
+    reply, whose score stands if the features are the same, so that the model does not run
+    again while the row locks are held."""
     today = today or nairobi_today()
     overrides = clean_overrides(overrides, request)
-    known = profiles.profile_features(db, member, today)
+    snap = snapshot if snapshot is not None else read_snapshot(db, member)
+    known = profiles.profile_features(db, member, today, records=snap.records)
     p = member.profile
     features = {**known.features}
     provenance = {**known.provenance}
@@ -547,20 +671,16 @@ def evaluate(db: Session, member: Member, request: LoanRequest, overrides: dict 
         if overrides.get(key) is not None:
             provenance[key] = "conversation"
 
-    scored = score_features(features)
+    scored = reuse.scored if reuse is not None and reuse.features == features else score_features(features)
     out = scored.assessment
     vector = {c: None if math.isnan(v := float(x)) else v for c, x in scored.vector.iloc[0].items()}
 
-    named = named_member(db, member, overrides.get("extra_guarantor"))
-    options, any_guarantor, own_free = guarantor_options(db, member, named)
-    deposits = ledger.deposits_balance(db, member.id)
-    instalments, behind, outstanding = loan_standing(db, member.id, today)
-    confirmed = confirmations(db, member.id)
+    options, any_guarantor, own_free = guarantor_options(member, snap)
+    deposits = snap.deposits.get(member.id)
+    instalments, behind, outstanding = loan_standing(snap, today)
+    confirmed = snap.confirmed
     asked = {q for q, key in ANSWER_KEY.items() if key in overrides}
     answered = {q for q in asked if overrides[ANSWER_KEY[q]] is not None}
-    # C5 is answered only by a member who is found: anyone can be named.
-    if named is None:
-        answered.discard("C5")
 
     facts = Facts(
         requested_kes=request.amount_kes, purpose=request.purpose,
@@ -592,7 +712,8 @@ def evaluate(db: Session, member: Member, request: LoanRequest, overrides: dict 
         "request": {"amount_kes": request.amount_kes, "purpose": request.purpose, "term_months": request.term_months},
         "effective": {"amount_kes": facts.amount_kes, "term_months": facts.term_months},
         "checks": check_rows(facts, worked),
-        "maximums": {"rule_kes": worked.rule_max_kes, "affordable_kes": worked.affordable_max_kes},
+        "maximums": {"rule_kes": worked.rule_max_kes, "affordable_kes": worked.affordable_max_kes,
+                     "capacity_kes": worked.capacity_max_kes},
         "refer_reason": refer_reason,
         "clarifications": {"conditions": fired, "asked": sorted(asked), "answered": sorted(answered),
                            "returned": questions,
@@ -605,16 +726,15 @@ def evaluate(db: Session, member: Member, request: LoanRequest, overrides: dict 
     }
     return Evaluation(
         member_id=member.id, request=request, overrides=overrides, facts=facts, worked=worked, settled=settled,
-        questions=questions, reason=member_text.decision_reason(settled.reason_code, _reason_values(facts, worked, settled)),
+        questions=questions, reason=member_text.decision_reason(settled.reason_code, reason_values(facts, worked, settled)),
         risk_class=out["risk_class"], probabilities=out["probabilities"], contributions=out["top_contributions"],
         feature_vector=vector, features=features, provenance=provenance,
         extraction_completeness=out["extraction_completeness"], features_populated=out["features_populated"],
         features_total=out["features_total"], model_file=scored.model_file, model_sha256=scored.model_sha256,
-        extra_guarantor_found=None if "extra_guarantor" not in overrides else named is not None,
-        policy_version=policy_version(), trace=trace)
+        policy_version=policy_version(), trace=trace, scored=scored, snapshot=snap)
 
 
-def _reason_values(f: Facts, w: Worked, s: Settled) -> dict:
+def reason_values(f: Facts, w: Worked, s: Settled) -> dict:
     amount = s.amount_kes or f.amount_kes
     term = f.term_months
     return {"amount": amount, "requested": f.requested_kes, "term": term,

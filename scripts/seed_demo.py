@@ -47,6 +47,15 @@ Lucy Nduta and Anne Wairimu, whose decisions are on the officers' page already.
     python scripts/seed_demo.py --demo-db data/demo.db
     python scripts/seed_demo.py --demo-db data/demo.db --replace
 
+--demo-postgres builds the same demo into the database DATABASE_URL names, which has to be
+PostgreSQL at the latest migration: Supabase, for a presentation. It empties every application
+table first, so it needs --replace-everything-in-this-database, refuses if any user is not one
+this script made, and prints the host and waits for it to be typed back. The 40 Kikuyu clips
+go through the configured storage backend, under a folder of their own for this build. README,
+"Supabase demo", has the whole sequence. All new passwords, printed once.
+
+    python scripts/seed_demo.py --demo-postgres --replace-everything-in-this-database
+
 Idempotent: it ensures one open Kikuyu interview holds every row of the CSV,
 and one open practice interview holds every typed answer.
 A second run changes nothing; a run after a response was deleted restores
@@ -73,15 +82,15 @@ if __name__ == "__main__":
         os.environ["DATABASE_URL"] = f"sqlite:///{_demo_db.resolve()}"
 
 import soundfile as sf
-from sqlalchemy import event, select
+from sqlalchemy import event, select, text
 
 from chamapro import config
 from chamapro.api import audit, decisions, ledger, loans, self_service, storage
 from chamapro.api import schemas as s
 from chamapro.api.auth import hash_password
-from chamapro.api.db import (APPLICATION_STATUSES, SYSTEM_ROLE, Applicant, Assessment, Guarantor, Interview,
-                             LoanApplication, Member, Response, SessionLocal, User, engine, init_db,
-                             nairobi_today, utcnow, normalise_phone)
+from chamapro.api.db import (APPLICATION_STATUSES, SYSTEM_ROLE, SYSTEM_USERNAME, Applicant, Assessment, Base, Guarantor,
+                             Interview, LoanApplication, Member, Response, SessionLocal, User, engine, head_revision, init_db,
+                             nairobi_today, schema_revision, utcnow, normalise_phone)
 
 import score_interview  # scripts/, next to this file
 import seed_members
@@ -169,7 +178,8 @@ def open_interview(db, tag: str, name: str, *where) -> Interview | None:
 
 
 def seed(csv_path: Path, audio_dir: Path, name: str = KIKUYU_NAME, tag: str = KIKUYU_TAG,
-         asr_model: str = CSV_ASR_MODEL) -> Seeded:
+         asr_model: str = CSV_ASR_MODEL, folder: str | None = None) -> Seeded:
+    """folder: where in the storage backend the clips go, rather than under the interview's id."""
     rows = read_rows(csv_path, audio_dir)
     init_db()
     copied: list[str] = []
@@ -199,6 +209,7 @@ def seed(csv_path: Path, audio_dir: Path, name: str = KIKUYU_NAME, tag: str = KI
                 db.add(resp)
                 db.flush()
                 key = storage.clip_key(iv.id, resp.id, r["sentence_no"])
+                key = f"{folder}/{key}" if folder else key
                 dst = config.UPLOADS_DIR / key
                 dst.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copyfile(r["audio"], dst)
@@ -781,14 +792,18 @@ class Clock:
     def __init__(self, db):
         self.now = None
         event.listen(db, "before_flush", self._stamp)
+        db.info["clock"] = self     # rows a Batch writes do not pass through a flush
+
+    def stamp(self, obj):
+        for attr in ("created_at", "submitted_at"):
+            if hasattr(obj, attr) and getattr(obj, attr) is None:
+                setattr(obj, attr, self.now)
+        if isinstance(obj, LoanApplication):
+            obj.updated_at = self.now
 
     def _stamp(self, session, _ctx, _instances):
         for obj in session.new:
-            for attr in ("created_at", "submitted_at"):
-                if hasattr(obj, attr) and getattr(obj, attr) is None:
-                    setattr(obj, attr, self.now)
-            if isinstance(obj, LoanApplication):
-                obj.updated_at = self.now
+            self.stamp(obj)
         for obj in session.dirty:
             if isinstance(obj, LoanApplication):
                 obj.updated_at = self.now
@@ -995,6 +1010,83 @@ def build_demo_db(path: Path, replace: bool) -> None:
           f"({m['source']} profiles)")
 
 
+# --- The same demo on PostgreSQL (--demo-postgres) ----------------------------------------------
+
+def demo_postgres_refusal(replace: bool, csv_path: Path, audio_dir: Path) -> str | None:
+    """Why the demo must not be built into DATABASE_URL, or None. Reads only."""
+    if not replace:
+        return "it empties every application table, so it needs --replace-everything-in-this-database"
+    if engine.dialect.name != "postgresql":
+        return f"DATABASE_URL is {database_written()}, not PostgreSQL; a SQLite demo is --demo-db"
+    current, head = schema_revision(engine), head_revision()
+    if current != head:
+        return f"the database is at {current or 'no revision'} and this code needs {head}; run `alembic upgrade head` first"
+    if not (config.CLASSIFIER_PATH.exists() and config.CLASSIFIER_META_PATH.exists()):
+        return f"the demo is scored by the real classifier; {config.CLASSIFIER_PATH} is missing"
+    try:
+        read_rows(csv_path, audio_dir)
+    except (OSError, ValueError, KeyError) as e:
+        return f"the Kikuyu clips are not all here: {e}"
+    with SessionLocal() as db:
+        theirs = db.scalars(select(User.username).where(User.role != SYSTEM_ROLE, User.seed_tag.is_(None))
+                            .order_by(User.id)).all()
+    if theirs:
+        shown = ", ".join(theirs[:8]) + (f" and {len(theirs) - 8} more" if len(theirs) > 8 else "")
+        return f"{len(theirs)} user(s) here were not made by this script ({shown}); keeping or deleting them is your decision"
+    return None
+
+
+def typed_back(host: str) -> bool:
+    print(f"This replaces everything in the database on\n\n    {host}\n")
+    try:
+        return input("Type that host to go on: ").strip() == host
+    except EOFError:
+        return False
+
+
+def empty_application_tables() -> None:
+    """Every table the code knows, in one transaction, keeping the schema and alembic_version. The
+    append-only tables refuse TRUNCATE by trigger, so their triggers are off for exactly as long as
+    this takes; the table owner may do that, which needs no superuser on Supabase. The numbering
+    starts again, and the system user that migration 0006 made is put back as it was."""
+    tables = [t.name for t in Base.metadata.sorted_tables]
+    names = ", ".join(f'"{t}"' for t in tables)
+    with engine.begin() as c:
+        for t in tables:
+            c.execute(text(f'ALTER TABLE "{t}" DISABLE TRIGGER USER'))
+        c.execute(text(f"TRUNCATE {names} RESTART IDENTITY"))
+        for t in tables:
+            c.execute(text(f'ALTER TABLE "{t}" ENABLE TRIGGER USER'))
+        c.execute(text("INSERT INTO users (username, password_hash, role, display_name, is_active, created_at) "
+                       "VALUES (:name, '!', :role, 'Automatic decision', :no, CURRENT_TIMESTAMP)"),
+                  {"name": SYSTEM_USERNAME, "role": SYSTEM_ROLE, "no": False})
+
+
+def build_demo_postgres(replace: bool, csv_path: Path, audio_dir: Path) -> None:
+    if (why := demo_postgres_refusal(replace, csv_path, audio_dir)) is not None:
+        sys.exit(f"nothing changed: {why}")
+    host = engine.url.host or "localhost"
+    if not typed_back(host):
+        sys.exit("nothing changed: that is not the host")
+    empty_application_tables()
+    print("emptied the application tables; building the demo")
+    try:
+        res = seed_demo_db()
+        clips = seed(csv_path, audio_dir, KIKUYU_NAME, f"{DEMO_DB}:kikuyu", folder=f"demo-{utcnow():%Y%m%d%H%M%S}")
+    except (OSError, ValueError, KeyError) as e:
+        sys.exit(f"the demo is only part-built: {e}. Run this again to start over.")
+    print(f"built the demo in {database_written()}")
+    print(f"{clips.total} Kikuyu clips went to the {config.STORAGE_BACKEND} storage backend")
+    print("logins; passwords are shown once and not saved anywhere:")
+    for name, pw in res.passwords.items():
+        print(f"  {name:14} {pw}")
+    for app_id, member_no, risk, status in res.applications:
+        print(f"  application {app_id:>2} {member_no}  {risk:6}  {status}")
+    m = res.members
+    print(f"  {m['members']} members with profiles, {m['entries']:,} ledger entries, {m['loans']} loans "
+          f"({m['source']} profiles)")
+
+
 def report(kind: str, res: Seeded) -> None:
     if res.created:
         print(f"created {kind} interview {res.interview_id} with {res.added} responses")
@@ -1027,8 +1119,15 @@ def main():
                          "(e.g. data/demo.db); nothing else is seeded")
     ap.add_argument("--replace", action="store_true",
                     help="with --demo-db: rebuild an existing demo database")
+    ap.add_argument("--demo-postgres", action="store_true",
+                    help="build the same demo into the PostgreSQL database at DATABASE_URL; see README, 'Supabase demo'")
+    ap.add_argument("--replace-everything-in-this-database", action="store_true", dest="replace_everything",
+                    help="with --demo-postgres: yes, empty every application table first")
     a = ap.parse_args()
 
+    if a.demo_postgres:
+        build_demo_postgres(a.replace_everything, a.csv, a.audio)
+        return
     if a.demo_db is not None:
         build_demo_db(a.demo_db, a.replace)
         return

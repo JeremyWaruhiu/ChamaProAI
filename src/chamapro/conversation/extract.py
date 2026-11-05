@@ -25,9 +25,6 @@ MIN_CONFIDENCE = 0.5
 CONSEQUENTIAL = ("CONSENT", "CONFIRM")
 CONSEQUENTIAL_CONFIDENCE = 0.8
 SMALLEST_LOAN_KES = 100
-MEMBER_NO = re.compile(r"\b([a-z]{1,3})\s*-?\s*(\d{3,})\b", re.I)
-NAME_NOISE = {"member", "number", "no", "is", "my", "guarantor", "could", "can", "guarantee", "the", "and", "of", "mr", "mrs",
-              "ms", "it", "will", "would", "with", "ni", "na"}
 PURPOSE_AFTER = re.compile(r"\b(?:to pay for|to pay|to buy|for|buy|to)\s+(.+)$", re.I)
 ARTICLE = re.compile(r"^(?:a|an|the|my|some)\s+", re.I)
 YEAR = {"en": re.compile(r"\byears?\b", re.I), "kik": re.compile(r"\b(?:mwaka|miaka)\b", re.I)}
@@ -106,17 +103,6 @@ def parse_corrections(text: str, language: str, answer: str | None) -> dict:
     return {"monthly_income_kes": n} if answer == "no" and n >= SMALLEST_LOAN_KES else {}
 
 
-def parse_guarantor(text: str, language: str) -> dict:
-    if lexicon.says_nobody(text, language):
-        return {"nobody": True}
-    m = MEMBER_NO.search(text)
-    if m is None:
-        return {}
-    rest = (text[:m.start()] + " " + text[m.end():])
-    words = [w for w in re.findall(r"[^\W\d_]+(?:'[^\W\d_]+)?", rest) if w.lower() not in NAME_NOISE]
-    return {"member_no": f"{m[1].upper()}-{m[2]}", **({"full_name": " ".join(words)} if words else {})}
-
-
 def parsers(question_id: str, text: str, language: str) -> dict:
     """What the deterministic parsers can read for this question, in its schema's fields."""
     answer = lexicon.yes_no(text, language)
@@ -137,8 +123,6 @@ def parsers(question_id: str, text: str, language: str) -> dict:
         out = {"expected_monthly_return_kes": 0 if number is None and lexicon.says_nobody(text, language) else number}
     elif question_id == "C4":
         out = {"chama_loan_active": None if answer is None else answer == "yes", "chama_instalment_kes": number}
-    elif question_id == "C5":
-        out = parse_guarantor(text, language)
     elif question_id == "CHECK_AMOUNT":
         out = {"answer": answer, "amount_kes": number}
     return _in_range(question_id, {k: v for k, v in out.items() if v not in (None, {})})

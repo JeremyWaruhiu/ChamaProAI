@@ -14,6 +14,7 @@ from datetime import timedelta
 import numpy as np
 import pytest
 import soundfile as sf
+import yaml
 from sqlalchemy import event, func, select, text
 from sqlalchemy.exc import IntegrityError
 
@@ -30,7 +31,6 @@ from chamapro.conversation import (english_numbers, extract, kikuyu_numbers, lex
 from conftest import BASE_URL, FakeASR, add_user, fresh_phone, loaded, needs_classifier, needs_ffmpeg, new_member, signed_in
 from test_decisions import age_income, borrower, key, model, post_entry  # noqa: F401  (model is a fixture)
 from test_pilot import free_slot
-from test_query_counts import queries  # noqa: F401  (a fixture)
 
 
 # --- Kikuyu numbers -------------------------------------------------------------------------
@@ -122,13 +122,13 @@ def test_the_yes_no_lexicon(text, language, want):
 
 # --- Templates ------------------------------------------------------------------------------
 
-SPEC_IDS = ("G1 CONSENT G2 R1 C1 C2 C3 C4 C5 C6 CHECK_AMOUNT REASK CONFIRM O1 O2 O3 O4 END").split()
+SPEC_IDS = ("G1 CONSENT G2 R1 C1 C2 C3 C4 C6 CHECK_AMOUNT REASK CONFIRM O1 O2 O3 O4 END").split()
 
 
-def test_every_id_has_english_and_an_empty_kikuyu_entry_to_fill():
-    loaded_templates = templates.load()
-    assert set(SPEC_IDS) <= set(loaded_templates)
-    assert all(e["en"] and e["kik"] == "" for e in loaded_templates.values())
+def test_every_id_has_english_and_a_kikuyu_entry_to_fill():
+    table = templates.check(yaml.safe_load(templates.PATH.read_text(encoding="utf-8")))
+    assert set(SPEC_IDS) <= set(table)
+    assert all(e["en"] and isinstance(e["kik"], str) for e in table.values())
 
 
 @pytest.mark.parametrize("template_id, slots, want", [
@@ -194,7 +194,7 @@ def test_every_question_can_be_worded_to_be_answered_in_a_few_words():
     natural = {"CONSENT": "Yes, I agree to that today", "G2": "Yes, that is all still correct",
                "R1": "Forty thousand for a dairy cow", "C1": "Over twelve months would suit me",
                "C2": "Yes, that is still my income", "C3": "It will bring five thousand shillings",
-               "C4": "No, I am not repaying one", "C5": "Mary Wambui, member number M-1234",
+               "C4": "No, I am not repaying one", 
                "C6": "Yes, that amount would work fine", "CHECK_AMOUNT": "Yes, forty thousand is right",
                "CONFIRM": "Yes please, you can go ahead"}
     for question, answer in natural.items():
@@ -342,8 +342,6 @@ def test_a_yes_that_matters_needs_a_sure_reading_when_the_lexicon_found_nothing(
     ("C3", "Nothing at first", "en", {"expected_monthly_return_kes": 0}),
     ("C4", "Yes, I pay two thousand a month", "en", {"chama_loan_active": True, "chama_instalment_kes": 2000}),
     ("C4", "aca", "kik", {"chama_loan_active": False}),
-    ("C5", "Mary Wambui, M-1234", "en", {"member_no": "M-1234", "full_name": "Mary Wambui"}),
-    ("C5", "Nobody", "en", {"nobody": True}),
     ("G2", "No, we are 6 people at home now", "en", {"answer": "no", "corrections": {"household_size": 6}}),
     ("G2", "No, I earn 30,000 now", "en", {"answer": "no", "corrections": {"monthly_income_kes": 30000}}),
     ("G2", "No, 4", "en", {"answer": "no"}),
@@ -761,6 +759,102 @@ def test_an_unclear_confirmation_moves_no_money(client, model):
     assert out["conversation"]["application_id"] is None
 
 
+# --- Guarantors come only from standing pledges ---------------------------------------------------
+
+NEEDS_ANOTHER = "This loan needs another guarantor; an officer will add one."
+
+
+def test_short_of_capacity_the_engine_offers_what_the_pledges_can_cover(client, model):
+    """30,000 of their own and 2,000 from each of two guarantors: 34,000 of the 40,000 asked."""
+    mid, member, gs = borrower(free=2000)
+    cid, out = conversation_with(member, *TO_C1, "twelve months")
+    assert said(out) == ["C6"] and out["bot_turns"][0]["text"] == "We can offer up to 34,000 shillings. Would that amount work for you?"
+    assert transactional(mid) == 0
+    out = say(member, cid, "yes")
+    assert said(out) == ["CONFIRM"] and out["bot_turns"][0]["text"].startswith("You qualify for 34,000 shillings")
+    out = say(member, cid, "yes")
+    assert said(out) == ["O2", "END"], out["bot_turns"]
+    assert "34,000" in out["bot_turns"][0]["text"] and transactional(mid) == 34000
+    assert out["outcome"]["decision"] == "approved" and out["outcome"]["amount_kes"] == 34000 and out["outcome"]["requested_kes"] == 40000
+    with SessionLocal() as db:
+        app = db.get(LoanApplication, out["conversation"]["application_id"])
+        assert app.amount_requested_kes == 40000 and app.interview.decision.approved_amount_kes == 34000
+        held = {g.member_id: g.amount_guaranteed_kes for g in app.guarantors}
+        assert held == {gs[0]: 2000, gs[1]: 2000} and all(g.pledge_id is not None for g in app.guarantors)
+
+
+def test_turning_that_offer_down_goes_to_an_officer_who_will_add_a_guarantor(client, model):
+    mid, member, _ = borrower(free=2000)
+    cid, out = conversation_with(member, *TO_C1, "twelve months")
+    assert said(out) == ["C6"]
+    out = say(member, cid, "no")
+    assert said(out) == ["O3", "END"], out["bot_turns"]
+    explain = recorded(out)
+    assert (explain["outcome"], explain["reason_code"]) == ("refer", "guarantors_short")
+    assert NEEDS_ANOTHER in explain["reason"] and NEEDS_ANOTHER in out["explain"]["reason"]
+    assert transactional(mid) == 0
+    with SessionLocal() as db:
+        app = db.get(LoanApplication, out["conversation"]["application_id"])
+        assert app.status == "decided" and app.interview.decision.member_message == explain["reason"]
+
+
+@pytest.mark.parametrize("deposits, free, why", [(5000, 1000, "under half: 7,000 of 40,000"), (30000, 0, "nothing free at all")])
+def test_what_they_can_cover_under_half_is_not_offered(client, model, deposits, free, why):
+    mid, member, _ = borrower(deposits=deposits, free=free)
+    _, out = conversation_with(member, *TO_R1, "Thirty thousand for school fees" if deposits == 30000 else "Fifteen thousand for school fees", "twelve months")
+    assert said(out) == ["O3", "END"], (why, out["bot_turns"])
+    assert recorded(out)["reason_code"] == "guarantors_short" and NEEDS_ANOTHER in out["explain"]["reason"]
+    assert transactional(mid) == 0
+
+
+def test_one_pledge_alone_is_a_referral_and_no_question(client, model):
+    mid, member, _ = borrower(guarantors=1)
+    _, out = conversation_with(member, *TO_C1, "twelve months")
+    assert said(out) == ["O3", "END"] and recorded(out)["reason_code"] == "guarantors_short"
+
+
+def test_the_offer_stays_within_the_other_maximums(client, model):
+    """18,000 of deposits allow 54,000, the pledges cover 22,000 of the 30,000 asked: C6 at 22,000."""
+    mid, member, _ = borrower(deposits=18000, free=2000)
+    _, out = conversation_with(member, *TO_R1, "Thirty thousand for school fees", "twelve months")
+    assert said(out) == ["C6"] and "22,000 shillings" in out["bot_turns"][0]["text"]
+    assert recorded(out)["trace"]["maximums"]["capacity_kes"] == 22000
+
+
+def test_an_offer_the_deposits_or_income_limit_is_still_its_own_refusal(client, model):
+    """Nothing to do with guarantors: above both maximums, the old C6 and its old reason."""
+    mid, member, _ = borrower(deposits=5000, monthly_income_kes=6000)
+    cid, out = conversation_with(member, *TO_R1, "Forty thousand for school fees", "six months")
+    assert said(out) == ["C6"] and recorded(out)["trace"]["checks"][4]["passed"] is True
+    out = say(member, cid, "no")
+    assert said(out) == ["O3", "END"] and recorded(out)["reason_code"] == "offer_declined"
+
+
+def test_a_conversation_left_waiting_on_c5_is_closed_at_startup(client, model):
+    _, member, _ = borrower()
+    cid = begin(member)["conversation"]["id"]
+    with SessionLocal() as db:
+        db.get(Conversation, cid).state = "C5"
+        db.commit()
+    service.abandon_idle_at_startup()
+    assert get_conv(cid).status == "abandoned"
+
+
+def test_a_decision_that_named_a_guarantor_can_still_be_reviewed(client, model):
+    """That answer stays on the immutable record, and is no longer one the engine takes."""
+    mid, member, _ = borrower(joined="2026-09-01")
+    _, out = conversation_with(member, *TO_R1, "Forty thousand for school fees")
+    app = out["conversation"]["application_id"]
+    named = {"extra_guarantor": {"full_name": "A Person", "member_no": "M-1"}}
+    with engine.begin() as c:       # as an older version wrote it: the table's triggers refuse an UPDATE now
+        c.execute(text("DROP TRIGGER assessments_no_update"))
+        interview = c.execute(text("SELECT interview_id FROM loan_applications WHERE id = :a"), {"a": app}).scalar()
+        c.execute(text("UPDATE assessments SET overrides = :o WHERE interview_id = :i"), {"o": json.dumps(named), "i": interview})
+        c.execute(text("CREATE TRIGGER assessments_no_update BEFORE UPDATE ON assessments "
+                       "BEGIN SELECT RAISE(ABORT, 'assessments are immutable'); END"))
+    assert review(member, app)["status"] == "decided"
+
+
 def test_no_at_confirm_records_nothing_and_offers_the_booking(client, model):
     mid, member, _ = borrower()
     cid, _ = conversation_with(member, *TO_C1, "twelve months")
@@ -779,6 +873,56 @@ def test_a_change_before_confirm_is_told_not_committed(client, model):
     out = say(member, cid, "yes")
     assert said(out) == ["CONFIRM"], out["bot_turns"]
     assert "24,000 shillings" in out["bot_turns"][0]["text"] and transactional(mid) == 0
+
+
+def moved_under_the_locks(monkeypatch, mid, *amounts):
+    """Each time the locks are about to be taken, someone else's commit gets in first: the deposits
+    fall, so the engine's answer under the locks is not what the member just said yes to."""
+    real, left = ledger.lock_for_decision, list(amounts)
+
+    def first_something_moves(*a, **k):
+        if left:
+            with SessionLocal() as other:
+                ledger.post_entry(other, mid, "deposits", "deposit_refund", -left.pop(0), f"T-{secrets.token_hex(3)}")
+                other.commit()
+        return real(*a, **k)
+    monkeypatch.setattr(ledger, "lock_for_decision", first_something_moves)
+
+
+def test_a_change_in_the_moment_before_the_locks_is_told_not_paid(client, model, monkeypatch):
+    mid, member, _ = borrower()
+    cid, out = conversation_with(member, *TO_C1, "twelve months")
+    moved_under_the_locks(monkeypatch, mid, 22000)
+    out = say(member, cid, "yes")
+    assert said(out) == ["CONFIRM"], out["bot_turns"]
+    assert "24,000 shillings" in out["bot_turns"][0]["text"] and transactional(mid) == 0
+    assert out["outcome"] is None and out["conversation"]["status"] == "open"
+    out = say(member, cid, "yes")       # nothing moves this time
+    assert said(out) == ["O2", "END"] and transactional(mid) == 24000
+
+
+def test_two_changes_in_a_row_go_to_a_person_with_nothing_paid(client, model, monkeypatch):
+    mid, member, _ = borrower()
+    cid, _ = conversation_with(member, *TO_C1, "twelve months")
+    moved_under_the_locks(monkeypatch, mid, 22000, 3000)
+    assert said(say(member, cid, "yes")) == ["CONFIRM"]
+    out = say(member, cid, "yes")
+    assert said(out) == ["OFFICER_HELP", "END"] and transactional(mid) == 0 and out["conversation"]["application_id"] is None
+
+
+def test_an_application_opened_in_the_moment_before_goes_to_a_person(client, model, monkeypatch):
+    mid, member, _ = borrower()
+    cid, _ = conversation_with(member, *TO_C1, "twelve months")
+    real = decisions.read_snapshot
+
+    def already_open(*a, **k):
+        snap = real(*a, **k)
+        snap.open_application = True
+        return snap
+    monkeypatch.setattr(decisions, "read_snapshot", already_open)
+    out = say(member, cid, "yes")
+    assert said(out) == ["OFFICER_HELP", "END"] and transactional(mid) == 0
+    assert out["bot_turns"][-1]["actions"][0]["application_id"] is None
 
 
 def test_check_amount_when_the_model_and_the_parser_differ(client, model, gemini):
@@ -847,6 +991,38 @@ def test_a_conversation_carries_on_when_gemini_times_out(client, model, gemini, 
     _, out = conversation_with(member, *TO_C1, "twelve months", "yes")
     assert said(out) == ["O1", "END"] and transactional(mid) == 40000
     assert out["member_turn"]["extraction"]["model_error"] == "timeout"
+
+
+def run_script(member, language, script):
+    cid = begin(member, language)["conversation"]["id"]
+    out = None
+    for words, want in script:
+        out = say(member, cid, words)
+        assert said(out) == want, (words, out["bot_turns"])
+    return out
+
+
+@needs_classifier
+@pytest.mark.parametrize("name, language", [("wanjiru", "en"), ("wanjiru", "kik"), ("njeri", "en"), ("njeri", "kik")])
+@pytest.mark.parametrize("break_it", ["down", "garbage", "hung"])
+def test_both_demo_conversations_come_out_the_same_when_gemini_fails_mid_demo(people, gemini, monkeypatch, name, language, break_it):
+    """Works for every turn; then gone, and the parsers alone carry it to the same line and the same money."""
+    from demo_scripts import SCRIPTS
+    script = SCRIPTS[("Wanjiru Kamau" if name == "wanjiru" else "Njeri Mwangi"), language]
+    ids, clients = people
+    member = clients[name]
+    if break_it == "hung":
+        monkeypatch.setattr(config, "CONVERSATION_GEMINI_SECONDS", 0.05)
+        gemini.hang = threading.Event()
+    elif break_it == "down":
+        gemini.fail = True
+    else:
+        gemini.raw = "sorry, I cannot help with that"
+    out = run_script(member, language, script)
+    assert out["conversation"]["status"] == "completed" and out["outcome"]["decision"] == "approved"
+    assert transactional(ids[name]) == (40000 if name == "wanjiru" else 45000)
+    assert out["member_turn"]["extraction"]["model_error"]
+    assert out["member_turn"]["extraction"]["model"] is None
 
 
 def test_kikuyu_with_gemini_timed_out_still_understands_numbers(client, model, gemini, monkeypatch):
@@ -1007,7 +1183,7 @@ def test_a_second_reply_while_one_is_being_worked_on_is_refused(client, model):
     assert said(say(member, cid, "yes")) == ["G2"]
 
 
-def test_a_failure_after_the_payout_pays_out_nothing_more_on_a_retry(client, model, monkeypatch):
+def test_a_failure_while_writing_the_reply_leaves_no_money_moved_and_a_retry_pays_once(client, model, monkeypatch):
     mid, member, _ = borrower()
     cid, _ = conversation_with(member, *TO_C1, "twelve months")
     real, broken = service.bot_turn, [True]
@@ -1020,11 +1196,27 @@ def test_a_failure_after_the_payout_pays_out_nothing_more_on_a_retry(client, mod
     monkeypatch.setattr(service, "bot_turn", fails_once)
     with pytest.raises(RuntimeError):
         say(member, cid, "yes")
-    assert transactional(mid) == 40000                   # the decision was already in
+    assert transactional(mid) == 0                       # the money and the words go in together, or neither
     conv = get_conv(cid)
     assert conv.state == "CONFIRM" and conv.busy_until is None
     out = say(member, cid, "yes")
     assert said(out) == ["O1", "END"] and transactional(mid) == 40000
+    with SessionLocal() as db:
+        assert db.scalar(select(func.count(LoanAccount.id)).where(LoanAccount.member_id == mid)) == 1
+
+
+def test_a_reply_that_outlived_its_lease_finds_the_key_used_and_pays_nothing(client, model):
+    """Another reply got the payout in while this one was still deciding: no second loan, and no turns."""
+    mid, member, _ = borrower()
+    cid, _ = conversation_with(member, *TO_C1, "twelve months")
+    with SessionLocal() as db:
+        m = db.get(Member, mid)
+        ev = decisions.evaluate(db, m, decisions.LoanRequest(40000, "school fees"), {"term_months": 12})
+        self_service.commit(db, ev, machine.COMMIT_KEY.format(cid), db.get(User, m.user_id))
+    assert transactional(mid) == 40000
+    turns_before = get_conv(cid).turn_count
+    assert say(member, cid, "yes", status=409)["detail"] == "This conversation has ended."
+    assert transactional(mid) == 40000 and get_conv(cid).turn_count == turns_before and get_conv(cid).busy_until is None
     with SessionLocal() as db:
         assert db.scalar(select(func.count(LoanAccount.id)).where(LoanAccount.member_id == mid)) == 1
 
@@ -1101,9 +1293,11 @@ def test_a_member_gets_plain_language_and_nothing_else(client, model):
         assert hidden not in words, hidden
 
 
-def test_c5_gives_no_figure(client, model):
-    assert templates.render("C5", "en").text == "You need one more guarantor for this loan. Who else could guarantee it?"
-    assert templates.slots_of(templates.load()["C5"]["en"]) == set()
+def test_c5_is_gone_as_a_question_everywhere(client):
+    table = yaml.safe_load(templates.PATH.read_text(encoding="utf-8"))
+    assert "C5" not in table and "C5" not in schemas.QUESTIONS and "C5" not in machine.HANDLERS
+    assert not hasattr(extract, "parse_guarantor") and not hasattr(decisions, "named_member")
+    assert "C5" not in member_text.QUESTION_REASONS and "named_guarantor" not in member_text.DECISION_REASONS
 
 
 def test_replies_and_starts_are_rate_limited(client, model, monkeypatch):
@@ -1449,7 +1643,7 @@ def test_a_pledge_with_no_ceiling_backs_nothing_automatic(client, model):
     ceiling(mid, gs[0], None)
     ceiling(mid, gs[1], None)
     ev = decisions_for(mid)
-    assert ev.outcome == "clarify" and ev.questions == ["C5"] and all(g.free_kes == 0 for g in ev.facts.guarantors)
+    assert (ev.outcome, ev.settled.reason_code) == ("refer", "guarantors_short") and all(g.free_kes == 0 for g in ev.facts.guarantors)
 
 
 def test_a_ceiling_counts_what_the_pledge_already_holds_across_loans(client, model):

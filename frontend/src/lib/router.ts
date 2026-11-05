@@ -34,6 +34,7 @@ import { useEffect, useState } from 'react'
 //   #/my/apply                         apply for a loan and book the interview
 //   #/my/chat                          request a loan by talking: carry on, or choose a language
 //   #/my/chat/:id                      that conversation, and how it came out
+//     ...?stage=1                      either of those in a phone-sized frame, large enough for a shared screen
 //   #/my/sacco                         my profile, balances, guarantors and loans
 //   #/my/registration                  the registration profile form, once after sign-up
 //   #/my/practice/:id[/:n]             my practice interview, question n
@@ -181,7 +182,7 @@ export const paths = {
   my: () => '#/my',
   myApplication: (id: number) => `#/my/applications/${id}`,
   apply: () => '#/my/apply',
-  chat: (id?: number) => `#/my/chat${id ? `/${id}` : ''}`,
+  chat: (id?: number, stage = false) => `#/my/chat${id ? `/${id}` : ''}${stage ? '?stage=1' : ''}`,
   mySacco: () => '#/my/sacco',
   registration: () => '#/my/registration',
   practice: (id: number, n?: number) => `#/my/practice/${id}${n ? `/${n}` : ''}`,
@@ -210,3 +211,6 @@ export function useRoute(): Route {
   }, [])
   return route
 }
+
+/** Whether this page was opened with ?stage=1. */
+export const chatOnStage = () => new URLSearchParams(window.location.hash.split('?')[1] ?? '').get('stage') === '1'

@@ -654,6 +654,9 @@ English and Kikuyu numbers, and a yes/no lexicon.
     GET  /api/present/conversations[/{id}]            officers and admins: the whole record, live
     GET|POST /api/admin/demo-reset                    admins: rehearse again (see "Phone demo")
 
+`GET /api/present/conversations/{id}` carries an `ETag`, so that a poll of a conversation
+that has not moved is a 304 and one round trip. A browser does this by itself.
+
 A member sees only their own, and starts and replies are rate limited. A reply returns
 what was understood (transcript, translation, extraction, per-stage latency), the next
 bot turns, an `explain` object once the engine has run, and an `outcome` once it has ended.
@@ -818,7 +821,149 @@ The test suite stays on SQLite and never touches the network.
 `tests/test_postgres.py` checks the migrations, triggers and row-level
 security on a real PostgreSQL server you point it at with
 `CHAMAPRO_TEST_POSTGRES_URL` (it creates and drops its own scratch database,
-so never point it at production).
+so never point it at production). `tests/test_latency.py` runs both demo
+conversations there too, and refuses a Supabase host:
+
+    docker run -d --name pg16 -e POSTGRES_PASSWORD=pw -p 127.0.0.1:55432:5432 postgres:16-alpine
+    CHAMAPRO_TEST_POSTGRES_URL=postgresql://postgres:pw@localhost:55432/postgres \
+        pytest tests/test_postgres.py tests/test_latency.py -s
+
+### Supabase demo
+
+The demo dataset on Supabase, for the presentation. Run these yourself, in this order, from the
+project folder with `.env` pointing at Supabase (the plain `postgresql://` session pooler URL) and no
+server running. Every person in it is invented. Steps 1, 2, 4 and 6 change nothing there.
+
+**1. Back up.** Find the server's major version, then dump with the image that matches it, so that
+`pg_dump` is not older than the server. The URL stays in `.env`, off the command line and out of
+your history, and has to be there unquoted for `--env-file`; `data/` is not committable.
+
+    docker run --rm --env-file .env postgres:17 sh -c 'psql "$DATABASE_URL" -Atc "SHOW server_version"'
+    mkdir -p data/backups
+    docker run --rm --env-file .env -v "$PWD/data/backups:/backups" postgres:<major> \
+        sh -c 'pg_dump "$DATABASE_URL" --schema=public --no-owner --no-privileges -Fc -f /backups/supabase-pre-demo.dump'
+
+**2. Pre-flight, reading only.** The database is at `0003`, and three things can stop what follows:
+
+    docker run --rm -i --env-file .env postgres:<major> sh -c 'psql "$DATABASE_URL"' <<'SQL'
+    -- 0004 stops if two members share a number.
+    SELECT regexp_replace(regexp_replace(phone, '[ ()-]', '', 'g'), '^(\+?254|0)', '') AS number,
+           array_agg(id ORDER BY id) AS members
+    FROM members WHERE phone IS NOT NULL AND phone <> '' GROUP BY 1 HAVING count(*) > 1;
+    -- 0006 stops if a user is already called system.
+    SELECT id FROM users WHERE username = 'system';
+    -- The seeder stops if any user is not one it made.
+    SELECT id, username, role FROM users WHERE seed_tag IS NULL;
+    SQL
+
+The seeder's TRUNCATE does **not** make the phone query unnecessary: the seeder needs the schema at
+head, so `0004` runs first, on the rows there now. The test run of 2 November may have left members
+sharing a fixture number.
+
+What to do with what it finds is yours to decide, and with the backup taken nothing is lost. Since step 5
+replaces every row anyway, the short way is to clear the numbers, rename a `system` user, and mark the
+listed users as yours to throw away (look at the list first: anyone real on it stays out of this
+path, because step 5 would delete them):
+
+    UPDATE members SET phone = NULL WHERE id IN (<the ids it listed>);
+    UPDATE users SET username = 'system-old' WHERE username = 'system';
+    UPDATE users SET seed_tag = 'seed:discard' WHERE seed_tag IS NULL;
+
+**3. Migrate.** `0003` to `0007`:
+
+    alembic upgrade head
+    alembic current                 # 0007 (head)
+
+**4. Check that the publishable key reads nothing.**
+
+    python scripts/check_rls.py
+
+**5. Seed.** It empties every application table (TRUNCATE, keeping the schema and `alembic_version`,
+and putting back the system user), builds the same demo as `--demo-db`, and uploads the 40 Kikuyu clips
+through the storage backend, in a folder of their own for this build, so nothing already in the bucket
+is overwritten. Nothing removes clips from earlier builds: delete those in the dashboard if you want
+them gone. It prints the host and waits for you to type it back. The classifier in `models/`, `data/asr_paza.csv` and `data/audio_16k/`
+must be here. It makes about 2,700 statements, so allow **about 10 minutes** from Nairobi. **Copy the
+passwords it prints; they are not shown again.** If it stops part-way, run it again: everything it
+finds is its own, and it starts over.
+
+    python scripts/seed_demo.py --demo-postgres --replace-everything-in-this-database
+
+**6. Warm the speech.** On a temporary SQLite database built from the same seed, whatever `.env` says, so
+it never writes to Supabase. The cache is keyed by the words and the voice, so the lines are the ones the
+server will ask for.
+
+    python scripts/warm_demo.py
+
+**7. Start the server.** `.env` already names the database and the bucket.
+
+    cd frontend && npm run build && cd ..
+    CONVERSATION_GEMINI_LIVE=1 ASR_WARM_ENGLISH=1 uvicorn chamapro.api.main:app --port 8000
+
+If it cannot reach Supabase it says so in one line and exits; if the schema is behind, it says what to
+run. While `/present` says *Kikuyu speech model warming*, wait.
+
+**Rehearsing again.** `Reset demo members`, at the bottom of `/present` as `s.achieng`, works on this
+database as on a `--demo-db` file: it closes the demo members' conversations and reverses what they
+paid out with compensating entries. Run steps 5 and 6 again only to begin from nothing.
+
+**If something is wrong**, restore what step 1 took:
+
+    docker run --rm --env-file .env -v "$PWD/data/backups:/backups" postgres:<major> \
+        sh -c 'pg_restore --clean --if-exists --no-owner --no-privileges -d "$DATABASE_URL" /backups/supabase-pre-demo.dump'
+
+### Online presentation
+
+Screen-shared from a laptop, with the member chat beside the working. Nothing needs a tunnel: the
+browser treats `http://localhost` as secure, so the microphone works there, and the session cookie needs
+nothing set. Supabase holds the data, and the laptop does the listening, the deciding and the speaking.
+
+**The windows.** Two Chrome profiles, so that each keeps its own sign-in: *Add profile*, one called Member
+and one called Presenter. Sign in to both before the day. Chrome on Windows reaches a server in WSL at
+`localhost` by itself.
+
+| Window | Profile | Address | Size |
+|---|---|---|---|
+| Left | Member, as `w.kamau` | `http://localhost:8000/#/my/chat?stage=1` | As narrow as Chrome allows, as tall as the screen |
+| Right | Presenter, as `s.achieng` | `http://localhost:8000/#/present`, then *Presentation mode* | The rest: half of a 1920 screen, or 1366x768 alone |
+
+`?stage=1` draws a 390 px phone centred in its window, with the stage indicator and the member's bubbles
+large enough to read on a shared screen. Chrome will not make an ordinary window narrower than about
+500 px; the frame stays 390 px in the middle of it, and fills the window if it is ever narrower. Presentation
+mode is remembered per profile. It fits 1366x768 and 960 px wide, and a panel taller than the window scrolls
+inside itself.
+
+Njeri needs a sign-in of her own, and signing out and in on a shared screen shows her password as you type.
+Add a third profile for her, in the same place as the first, and bring it to the front when you reach her.
+
+**Sharing.** In the meeting, share the *entire screen*, so both windows are in it, and turn on *Share sound* or
+*Also share system audio*. Chrome-based meetings can only do that on Windows and ChromeOS. Your voice reaches
+the chat through the laptop's microphone, on localhost, and reaches the audience through the meeting; the bot's
+voice reaches them through the shared sound. Use headphones, or the bot's voice comes back through the
+microphone while you are holding the button. In the Member profile, allow the microphone once before the day.
+
+**The order, with timings.** Each answer costs about 1 s of database, or 1.7 s for the one that pays out, on the
+estimate in `docs/design_changes.md`, which has never been run on Supabase: rehearse there, and write down your own.
+Add Gemini, which has not been measured, since no test may call it, and on a spoken answer about 2 to 3 s of Paza
+and the clip's upload to Supabase Storage.
+
+| When | What | Takes |
+|---|---|---|
+| The day before | Steps 1 to 7 of "Supabase demo", with one rehearsal of each person, then reset | Allow 45 min |
+| 30 min before | Close everything heavy. Start the server | About 30 s to warm Paza and the classifier |
+| 20 min before | Open the windows, press *Tap to start* in the chat, and check `/present` says speech is ready | 1 min |
+| 15 min before | Run one conversation to the end, then *Reset demo members* | 3 min. It proves the path, and opens the connections the demo will reuse |
+| 2 min before | Open the meeting, share the screen with sound, and ask someone whether both windows can be read | 1 min |
+| Wanjiru | By voice, five answers to a payout | About 2 min |
+| | The outcome card, *Why?*, and on `/present` the ledger entry and the balance moving | 1 min |
+| Njeri | Her window, six answers. Her income on record is too old to read out, so C2 asks, and her answer moves the risk on `/present`; her deposits then cap the loan at 45,000 | About 3 min |
+| After | *Reset demo members* if you are going again, then stop sharing | |
+
+Speak each answer as written in `scripts/demo_scripts.py`. Allow 10 s for the very first voice turn, which was
+once that slow for no reason found. Typing is always there if the microphone fails. If Gemini fails, the parsers
+carry both conversations to the same outcome: `/present` then shows that the parsers read the answer, and a Kikuyu
+answer has no English under it. My SACCO takes 14 round trips, about 3 s, and nothing else on these screens does.
+
 
 ### Known limitations
 
@@ -1077,10 +1222,9 @@ believes cloudflared's `X-Forwarded-Proto` because cloudflared connects from 127
         python scripts/seed_demo.py --demo-db data/demo.db --replace    # note the passwords it prints
     python scripts/warm_demo.py                                         # with the server stopped
 
-`warm_demo.py` runs both demo conversations in both languages on a temporary copy, so every
-line the bot will say is in `data/tts_cache`, and prints the time each turn takes. It stops
-with an instruction if the demo database is older than the code. Rehearse once with Gemini on:
-the automated runs use a stand-in for it.
+`warm_demo.py` runs both demo conversations in both languages on a temporary database built from
+the same seed, so every line the bot will say is in `data/tts_cache`, and prints the time each
+turn takes. Rehearse once with Gemini on: the automated runs use a stand-in for it.
 
 **On the day**, in two terminals on the laptop. Name the database and storage explicitly:
 `.env` may point at Supabase, and an explicit variable wins over it.

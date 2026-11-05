@@ -21,7 +21,7 @@ from chamapro import config
 from chamapro.api import auth
 from chamapro.api import self_service
 from chamapro.api.db import (APPLICATION_STATUSES, Applicant, AuditLog, Interview, LoanApplication,
-                             Member, SessionLocal, User)
+                             Member, Response, SessionLocal, User)
 from chamapro.api.main import app
 
 from conftest import BASE_URL, fresh_phone, needs_classifier, uploads
@@ -520,3 +520,23 @@ def test_demo_db_covers_every_status_and_outcome(tmp_path):
     assert set(fresh) == set(logins) and not set(fresh.values()) & set(logins.values())
     assert sqlite3.connect(path).execute("SELECT count(*) FROM loan_applications").fetchone() \
         == (len(seed_demo.DEMO_APPLICATIONS) + len(seed_demo.SEEDED_DECISIONS),)
+
+
+def test_the_kikuyu_clips_go_through_a_supabase_backend_in_a_folder_of_their_own(client, corpus, name, monkeypatch, tmp_path):
+    """--demo-postgres, as far as the bucket: every clip uploaded, under the build's own folder, so
+    that the numbering starting again cannot collide with what is already there (uploads never overwrite)."""
+    from chamapro.api import storage
+    from test_storage import FakeSupabase
+    csv_path, audio, rows = corpus
+    fake = FakeSupabase()
+    store = storage.SupabaseStorage(fake, "interview-audio", tmp_path / "cache", signed_url_seconds=60)
+    monkeypatch.setitem(storage._backends, "supabase", store)
+    monkeypatch.setattr(config, "STORAGE_BACKEND", "supabase")
+    monkeypatch.setattr(config, "UPLOADS_DIR", tmp_path / "uploads")
+    res = seed_demo.seed(csv_path, audio, name, tag=name, folder="demo-20261105")
+    monkeypatch.setattr(config, "STORAGE_BACKEND", "local")
+    assert res.total == len(rows)
+    with SessionLocal() as db:
+        refs = db.scalars(select(Response.audio_path).where(Response.interview_id == res.interview_id)).all()
+    assert len(refs) == len(rows) and all(r.startswith("supabase://interview-audio/demo-20261105/") for r in refs)
+    assert sorted(path for _, path in fake.objects) == sorted(r.split("supabase://interview-audio/")[1] for r in refs)

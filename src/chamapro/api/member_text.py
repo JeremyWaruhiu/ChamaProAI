@@ -4,6 +4,10 @@ the reasons drawn from the assessment's top SHAP contributions.
 A member never sees a probability, a risk class, a feature name or an
 officer's note. Reasons say what counted for or against them, in words.
 
+What a conversation shows comes in Kikuyu too, once it has been translated: each sentence has an
+id, catalogue() lists them for scripts/translations.py, and member_text_kik.json, which that script
+writes, holds the Kikuyu. A sentence not translated yet stays in English.
+
 Direction: SHAP values are stored for the predicted class. For Low, a
 positive value pushed towards Low (in the member's favour). For Medium and
 High, a positive value pushed towards that higher-risk class (against), and a
@@ -15,6 +19,12 @@ applicant form, the member cannot act on them, and naming one as counting
 against someone reads as discrimination whatever the model's arithmetic.
 """
 from __future__ import annotations
+
+import json
+from functools import lru_cache
+from pathlib import Path
+
+KIKUYU_PATH = Path(__file__).with_name("member_text_kik.json")
 
 PERSONAL = {"age", "is_female", "marital_married", "marital_single", "marital_widowed",
             "marital_divorced"}
@@ -100,9 +110,7 @@ DECISION_REASONS = {"en": {
     "offer_too_small": "What we could offer is less than half of what you asked for, so a loan officer will look at "
                        "this application with you." + BOOK,
     "above_limit": "Loans above KSh {limit:,} are looked at by a loan officer." + BOOK,
-    "guarantors_short": "Your guarantors do not yet cover this loan, so a loan officer will look at it with you." + BOOK,
-    "named_guarantor": "The guarantor you named has not pledged to back you yet, so a loan officer needs to confirm "
-                       "them with you." + BOOK,
+    "guarantors_short": "This loan needs another guarantor; an officer will add one." + BOOK,
     "membership": "You can apply once you have been a member for {min_months} months. You have "
                   "{months_left} more {months_word} to go.",
     "no_guarantors": "You need at least {min_guarantors} members who have pledged to guarantee you before you can "
@@ -113,18 +121,30 @@ QUESTION_REASONS = {"en": {
     "C2": "We need your current monthly income to work out this loan.",
     "C3": "This loan is close to what your income allows. What you expect it to bring in each month would count.",
     "C4": "We need to know whether you are borrowing from a chama now, and what you pay each month.",
-    "C5": "Your guarantors do not yet cover this loan. Another member could guarantee you.",
-    "C6": "This is more than both your deposits and your income allow. You could accept a smaller amount.",
+    "C6": "This is more than we can cover. You could accept a smaller amount.",
 }}
 QUESTION_SETS_FEATURE = {
     "C1": ["term_months"], "C2": ["monthly_income_kes"], "C3": ["expected_monthly_return_kes"],
-    "C4": ["chama_loan_use", "chama_instalment_kes"], "C5": ["extra_guarantor"], "C6": ["accepted_amount_kes"],
+    "C4": ["chama_loan_use", "chama_instalment_kes"], "C6": ["accepted_amount_kes"],
 }
+
+
+@lru_cache(maxsize=1)
+def kikuyu() -> dict[str, str]:
+    try:
+        return json.loads(KIKUYU_PATH.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return {}
+
+
+def in_language(sentence_id: str, english: str, language: str) -> str:
+    return (kikuyu().get(sentence_id) or english) if language == "kik" else english
 
 
 def decision_reason(code: str, values: dict, language: str = "en") -> str:
     left = values.get("months_left") or 0
-    return DECISION_REASONS[language][code].format(**values, months_word="month" if left == 1 else "months")
+    wording = in_language(f"why.reason.{code}", DECISION_REASONS["en"][code], language)
+    return wording.format(**values, months_word="month" if left == 1 else "months")
 
 
 def question_reason(question: str, language: str = "en") -> str:
@@ -139,8 +159,8 @@ INCOME_SOURCES = ["farming", "employment", "casual work", "your own business",
 ASSETS = ["land or buildings", "livestock", "jewellery", "digital assets", "trees"]
 PURCHASES = ["land", "a new house", "building materials", "business equipment",
              "farm equipment", "livestock"]
-LOAN_USE = {0: "Not having borrowed from a {0} before", 1: "Your past borrowing from a {0}",
-            2: "Your current {0} loan"}
+LOAN_USE = {0: "Not having borrowed from a {kind} before", 1: "Your past borrowing from a {kind}",
+            2: "Your current {kind} loan"}
 
 PHRASES: dict[str, tuple[str, str] | str] = {
     "household_size": "The size of your household",
@@ -166,96 +186,147 @@ for _i, _p in enumerate(PURCHASES, 1):
     PHRASES[f"B1L__{_i}"] = (f"Buying {_p} in the last year", f"Not buying {_p} in the last year")
 
 
-def subject(feature: str, value: float | None) -> str | None:
+NOT_KNOWN = "Not having details of {what}"
+NOT_KNOWN_BORROWING = "Not having details of your {kind} borrowing"
+SENTENCE = {"counted": ("{what} counted in your favour.", "{what} counted against your application."),
+            "counts": ("{what} counts in your favour.", "{what} counts against your application.")}
+
+
+def subject(feature: str, value: float | None, language: str = "en") -> str | None:
     """What the feature says about the member, as the start of a sentence."""
     if feature in ("sacco_loan_use", "chama_loan_use"):
         kind = "SACCO" if feature == "sacco_loan_use" else "chama"
         if value is None:
-            return f"Not having details of your {kind} borrowing"
-        return LOAN_USE.get(round(value), LOAN_USE[1]).format(kind)
+            return in_language("why.not_known_borrowing", NOT_KNOWN_BORROWING, language).format(kind=kind)
+        use = round(value) if round(value) in LOAN_USE else 1
+        return in_language(f"why.loan_use.{use}", LOAN_USE[use], language).format(kind=kind)
     phrase = PHRASES.get(feature)
     if phrase is None:
         return None
     if value is None:
         what = phrase if isinstance(phrase, str) else phrase[0]
-        return f"Not having details of {what[0].lower() + what[1:]}"
+        said = in_language(f"why.phrase.{feature}" if isinstance(phrase, str) else f"why.phrase.{feature}.yes", what, language)
+        # In English the phrase begins a sentence of its own, and here it no longer does.
+        return in_language("why.not_known", NOT_KNOWN, language).format(what=said[0].lower() + said[1:] if language == "en" else said)
     if isinstance(phrase, str):
-        return phrase
-    return phrase[0] if value >= 0.5 else phrase[1]
+        return in_language(f"why.phrase.{feature}", phrase, language)
+    return in_language(f"why.phrase.{feature}.yes", phrase[0], language) if value >= 0.5 \
+        else in_language(f"why.phrase.{feature}.no", phrase[1], language)
 
 
 def in_favour(risk_class: str, shap: float) -> bool:
     return shap > 0 if risk_class == "Low" else shap < 0
 
 
-def reasons(risk_class: str, contributions: list[dict] | str, n: int = 3, verb: str = "counted") -> list[str]:
+def reasons(risk_class: str, contributions: list[dict] | str, n: int = 3, verb: str = "counted", language: str = "en") -> list[str]:
     """Up to n sentences from the largest contributions; none if SHAP was unavailable."""
     if not isinstance(contributions, list):
         return []
+    favour, against = SENTENCE[verb]
+    if verb == "counts":
+        favour, against = in_language("why.driver.favour", favour, language), in_language("why.driver.against", against, language)
     out = []
     for c in sorted(contributions, key=lambda c: abs(c.get("shap") or 0), reverse=True):
         if c.get("feature") in PERSONAL or not c.get("shap"):
             continue
-        what = subject(c["feature"], c.get("value"))
+        what = subject(c["feature"], c.get("value"), language)
         if what is None:
             continue
-        out.append(f"{what} {verb} in your favour." if in_favour(risk_class, c["shap"])
-                   else f"{what} {verb} against your application.")
+        out.append((favour if in_favour(risk_class, c["shap"]) else against).format(what=what))
         if len(out) == n:
             break
     return out
 
 
-def _kes(n: float | None) -> str:
-    return f"KSh {int(n):,}"
+# Each check in the member's own figures. Nothing about a guarantor beyond how many, and the risk
+# check in the same words for Medium and High: a referral must not give the class away.
+CHECK_SENTENCES = {
+    "deposits_on_record.met": "Your deposits on record are KSh {deposits:,}.",
+    "deposits_on_record.not_met": "Your savings of KSh {declared:,} are not on the SACCO's records yet.",
+    "membership": "You have been a member for {months} months. The minimum is {minimum}.",
+    "savings_multiple.met": "KSh {amount:,} is within what your deposits allow, KSh {maximum:,}.",
+    "savings_multiple.not_met": "KSh {amount:,} is more than what your deposits allow, KSh {maximum:,}.",
+    "guarantors": "You have {usable} who can guarantee you. At least {minimum} are needed.",
+    "guarantor_capacity.met": "KSh {free:,} of your own deposits is free. With your guarantors, that covers this loan.",
+    "guarantor_capacity.not_met": "KSh {free:,} of your own deposits is free. With your guarantors, that does not yet cover this loan.",
+    "affordability.unknown": "We could not yet work out what you can afford.",
+    "affordability.met": "The instalment of KSh {instalment:,} a month is within the KSh {limit:,} a month your income allows.",
+    "affordability.not_met": "The instalment of KSh {instalment:,} a month is more than the KSh {limit:,} a month your income allows.",
+    "auto_limit.met": "KSh {amount:,} is within the KSh {limit:,} we can decide here.",
+    "auto_limit.not_met": "Loans above KSh {limit:,} are looked at by a loan officer.",
+    "income_increase.from_record": "We used the income on your record.",
+    "income_increase.none": "There is no income on your record.",
+    "income_increase.met": "The income you gave, KSh {income:,}, is close enough to your record to use.",
+    "income_increase.not_met": "The income you gave, KSh {income:,}, needs an officer to confirm it.",
+    "risk.met": "Your details fit what we can decide here.",
+    "risk.not_met": "A loan officer should look at your details with you.",
+    "no_arrears.met": "You have no loan payment outstanding.",
+    "no_arrears.not_met": "You have a loan payment outstanding.",
+}
 
 
-def _check_sentence(check: str, passed: bool | None, v: dict) -> str | None:
-    """One check in the member's own figures. Nothing about a guarantor beyond how many,
-    and the risk check in the same words for Medium and High: a referral must not give the
-    class away. None for a check this version does not know: left out, never shown raw."""
+def _check_sentence(check: str, passed: bool | None, v: dict, language: str = "en") -> str | None:
+    """One check, or None for a check this version does not know: left out, never shown raw."""
+    money = lambda key: int(v.get(key) or 0)      # noqa: E731
+    met = ".met" if passed else ".not_met"
     if check == "deposits_on_record":
-        return f"Your deposits on record are {_kes(v['deposits_kes'])}." if passed else \
-            f"Your savings of {_kes(v['declared_savings_kes'] or 0)} are not on the SACCO's records yet."
-    if check == "membership":
-        return f"You have been a member for {v['months']} months. The minimum is {v['minimum']}."
-    if check == "savings_multiple":
-        return f"{_kes(v['amount_kes'])} is {'within' if passed else 'more than'} what your deposits allow, " \
-               f"{_kes(v['maximum_kes'])}."
-    if check == "guarantors":
-        return f"You have {v['usable']} who can guarantee you. At least {v['minimum']} are needed."
-    if check == "guarantor_capacity":
-        return f"{_kes(v['own_free_kes'])} of your own deposits is free. With your guarantors, that " \
-               f"{'covers' if passed else 'does not yet cover'} this loan."
-    if check == "affordability":
-        if passed is None:
-            return "We could not yet work out what you can afford."
-        return f"The instalment of {_kes(v['instalment_kes'])} a month is {'within' if passed else 'more than'} " \
-               f"the {_kes(v['limit_kes'])} a month your income allows."
-    if check == "auto_limit":
-        return f"{_kes(v['amount_kes'])} is within the {_kes(v['limit_kes'])} we can decide here." if passed else \
-            f"Loans above {_kes(v['limit_kes'])} are looked at by a loan officer."
-    if check == "income_increase":
-        if not v["stated"]:
-            return "We used the income on your record." if v["monthly_income_kes"] is not None else \
-                "There is no income on your record."
-        return f"The income you gave, {_kes(v['monthly_income_kes'])}, " + \
-            ("is close enough to your record to use." if passed else "needs an officer to confirm it.")
-    if check == "risk":
-        return "Your details fit what we can decide here." if passed else "A loan officer should look at your details with you."
-    if check == "no_arrears":
-        return "You have no loan payment outstanding." if passed else "You have a loan payment outstanding."
-    return None
+        chosen, values = check + met, dict(deposits=money("deposits_kes"), declared=money("declared_savings_kes"))
+    elif check == "membership":
+        chosen, values = check, dict(months=v["months"], minimum=v["minimum"])
+    elif check == "savings_multiple":
+        chosen, values = check + met, dict(amount=money("amount_kes"), maximum=money("maximum_kes"))
+    elif check == "guarantors":
+        chosen, values = check, dict(usable=v["usable"], minimum=v["minimum"])
+    elif check == "guarantor_capacity":
+        chosen, values = check + met, dict(free=money("own_free_kes"))
+    elif check == "affordability":
+        chosen = "affordability.unknown" if passed is None else check + met
+        values = dict(instalment=money("instalment_kes"), limit=money("limit_kes"))
+    elif check == "auto_limit":
+        chosen, values = check + met, dict(amount=money("amount_kes"), limit=money("limit_kes"))
+    elif check == "income_increase":
+        chosen = check + met if v["stated"] else ("income_increase.from_record" if v["monthly_income_kes"] is not None
+                                                  else "income_increase.none")
+        values = dict(income=money("monthly_income_kes"))
+    elif check in ("risk", "no_arrears"):
+        chosen, values = check + met, {}
+    else:
+        return None
+    return in_language(f"why.check.{chosen}", CHECK_SENTENCES[chosen], language).format(**values)
 
 
-def plain_explain(full: dict) -> dict:
+def reason_of(full: dict, language: str) -> str:
+    """The reason as it was recorded, in English, unless it has been translated and the record
+    holds the figures to fill it in with."""
+    code, values = full.get("reason_code"), full.get("reason_values")
+    if language == "kik" and code and values is not None and kikuyu().get(f"why.reason.{code}"):
+        return decision_reason(code, values, language)
+    return full["reason"]
+
+
+def plain_explain(full: dict, language: str = "en") -> dict:
     """All a member gets of how a decision was worked out, built field by field from the
     turn's record: the reason, each check passed or not in their own figures, and the three
     largest drivers as sentences. No class, probability, SHAP value or other member's figure."""
     checks = []
     for c in (full.get("trace") or full).get("checks") or []:
-        text = _check_sentence(c["check"], c["passed"], c["values"])
+        text = _check_sentence(c["check"], c["passed"], c["values"], language)
         if text is not None:
             checks.append({"passed": c["passed"], "text": text})
-    return {"reason": full["reason"], "checks": checks,
-            "drivers": reasons(full["risk_class"], full.get("contributions") or [], verb="counts")}
+    return {"reason": reason_of(full, language), "checks": checks,
+            "drivers": reasons(full["risk_class"], full.get("contributions") or [], verb="counts", language=language)}
+
+
+def catalogue() -> list[tuple[str, str]]:
+    """(id, the English) of every sentence a member can read in a conversation's Why sheet."""
+    out = [(f"why.reason.{code}", text) for code, text in DECISION_REASONS["en"].items()]
+    out += [(f"why.check.{key}", text) for key, text in CHECK_SENTENCES.items()]
+    out += [("why.driver.favour", SENTENCE["counts"][0]), ("why.driver.against", SENTENCE["counts"][1]),
+            ("why.not_known", NOT_KNOWN), ("why.not_known_borrowing", NOT_KNOWN_BORROWING)]
+    out += [(f"why.loan_use.{k}", text) for k, text in LOAN_USE.items()]
+    for feature, phrase in PHRASES.items():
+        if isinstance(phrase, str):
+            out.append((f"why.phrase.{feature}", phrase))
+        else:
+            out += [(f"why.phrase.{feature}.yes", phrase[0]), (f"why.phrase.{feature}.no", phrase[1])]
+    return out

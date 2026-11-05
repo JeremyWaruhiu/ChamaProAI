@@ -3,24 +3,27 @@ a member is never shown: the risk class, the probabilities, the SHAP values and 
 trace. Also the reset that lets a demonstration be rehearsed again.
 
 Staff read any conversation. The reset acts only on the demo's two members, found by the
-seed tag only scripts/seed_demo.py --demo-db writes, so on any other database it has nobody
-to act on.
+seed tag only scripts/seed_demo.py writes for --demo-db and --demo-postgres, so on any other
+database it has nobody to act on.
 """
 from __future__ import annotations
 
+import hashlib
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from fastapi.responses import FileResponse, RedirectResponse
-from sqlalchemy import case, select
+from sqlalchemy import case, func, select
 from sqlalchemy.orm import Session, joinedload
+from sqlalchemy.orm.attributes import set_committed_value
 
 from chamapro.conversation import service, tts
 
 from . import audit, conversations, ledger, ledger_api, loans, storage
 from . import schemas as s
-from .auth import require_admin, require_officer
-from .db import (Conversation, ConversationTurn, InterviewBooking, LoanAccount, LoanApplication, Member, User, get_db, utcnow)
+from .auth import COOKIE, refuse_unless_staff, require_admin, require_officer, token_hash
+from .db import (AuthSession, Conversation, ConversationTurn, InterviewBooking, LoanAccount, LoanApplication, Member,
+                 SelfServiceRun, User, get_db, utcnow)
 from .self_service import FINISHED
 
 log = logging.getLogger("chamapro.api")
@@ -63,18 +66,61 @@ def present_list(limit: int = Query(30, ge=1, le=200), db: Session = Depends(get
     return [row_out(c) for c in rows]
 
 
-def present_conv(db: Session, conversation_id: int) -> Conversation:
-    conv = db.scalar(select(Conversation).where(Conversation.id == conversation_id).options(joinedload(Conversation.member)))
-    if conv is None:
+# 304s must be asked about every time, and kept from anyone else's cache.
+REVALIDATE = {"Cache-Control": "private, no-cache"}
+
+
+def poll_row(db: Session, request: Request, conversation_id: int):
+    """In one statement: who is asking, the conversation, and whatever else can change how it
+    came out. A poll of a conversation that has not moved costs this one round trip and no more,
+    so the same refusals as require_officer are made here."""
+    token = request.cookies.get(COOKIE)
+    if not token:
+        raise HTTPException(401, "not signed in")
+    runs = select(func.count(SelfServiceRun.id)).where(SelfServiceRun.application_id == Conversation.application_id).scalar_subquery()
+    row = db.execute(select(AuthSession.expires_at, User.role, User.is_active, Conversation, Member,
+                            LoanApplication.status.label("application_status"),
+                            LoanApplication.updated_at.label("application_updated"), LoanAccount.status.label("loan_status"),
+                            runs.label("runs"))
+                     .select_from(AuthSession).join(User, User.id == AuthSession.user_id)
+                     .outerjoin(Conversation, Conversation.id == conversation_id)
+                     .outerjoin(Member, Member.id == Conversation.member_id)
+                     .outerjoin(LoanApplication, LoanApplication.id == Conversation.application_id)
+                     .outerjoin(LoanAccount, LoanAccount.application_id == LoanApplication.id)
+                     .where(AuthSession.token_hash == token_hash(token))).first()
+    if row is None or not row.is_active:
+        raise HTTPException(401, "not signed in")
+    if row.expires_at <= utcnow():
+        raise HTTPException(401, "session expired; sign in again")
+    refuse_unless_staff(row.role)
+    if row.Conversation is None:
         raise HTTPException(404, f"conversation {conversation_id} not found")
-    return conv
+    set_committed_value(row.Conversation, "member", row.Member)
+    return row
 
 
-@router.get("/present/conversations/{conversation_id}", response_model=s.PresentDetail)
-def present_detail(conversation_id: int, db: Session = Depends(get_db), _: User = Depends(require_officer)):
-    """Everything recorded so far, polled while the conversation is followed."""
-    conv = present_conv(db, conversation_id)
-    service.abandon_if_idle(db, conv)
+def etag_of(row) -> str:
+    conv = row.Conversation
+    seen = (conv.id, conv.status, conv.state, conv.turn_count, service.is_busy(conv), service.stage_of(conv.id),
+            row.application_status, row.application_updated, row.loan_status, row.runs)
+    return '"' + hashlib.sha256(repr(seen).encode()).hexdigest()[:24] + '"'
+
+
+@router.get("/present/conversations/{conversation_id}", response_model=s.PresentDetail,
+            responses={304: {"description": "Nothing has changed since the ETag sent in If-None-Match"}})
+def present_detail(conversation_id: int, request: Request, response: Response, db: Session = Depends(get_db)):
+    """Everything recorded so far, polled while the conversation is followed. One round trip
+    if nothing has moved since the If-None-Match, which a browser sends by itself; three if it has."""
+    row = poll_row(db, request, conversation_id)
+    service.abandon_if_idle(db, row.Conversation)
+    etag = etag_of(row)
+    if request.headers.get("if-none-match") == etag:
+        return Response(status_code=304, headers={"ETag": etag, **REVALIDATE})
+    response.headers.update({"ETag": etag, **REVALIDATE})
+    return detail_of(db, row.Conversation)
+
+
+def detail_of(db: Session, conv: Conversation) -> s.PresentDetail:
     return s.PresentDetail(row=row_out(conv), consent_given=conv.consent_given, consent_version=conv.consent_version,
                            policy_version=conv.policy_version, application_id=conv.application_id,
                            turns=[turn_out(t) for t in service.turns_of(db, conv)], outcome=service.outcome_of(db, conv))
@@ -143,7 +189,7 @@ def demo_reset(db: Session = Depends(get_db), user: User = Depends(require_admin
     automatic reversal window is not applied: a rehearsal may be days old."""
     people = demo_members(db)
     if not people:
-        raise HTTPException(404, "this database has no demo members; only a seed_demo.py --demo-db build has")
+        raise HTTPException(404, "this database has no demo members; only a seed_demo.py --demo-db or --demo-postgres build has")
     now, closed, reversed_, finished, problems = utcnow(), 0, 0, 0, []
     ledger.lock_members(db, [m.id for m in people])
     for member in people:

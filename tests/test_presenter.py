@@ -16,7 +16,7 @@ from sqlalchemy import select
 from chamapro import config
 from chamapro.api import auth, ledger
 from chamapro.api import pipeline as pl
-from chamapro.api.db import AuditLog, LoanAccount, Member, SessionLocal
+from chamapro.api.db import AuditLog, LoanAccount, Member, SessionLocal, User
 from chamapro.api.main import app
 from chamapro.conversation import service
 from conftest import needs_classifier, needs_ffmpeg
@@ -383,8 +383,117 @@ def test_warm_demo_runs_the_exact_answers_on_a_copy_and_leaves_the_source_alone(
     assert hashlib.sha256(source.read_bytes()).hexdigest() == before
 
 
+def test_warm_demo_builds_its_own_database_and_never_opens_the_one_in_the_environment(tmp_path):
+    """DATABASE_URL here is what .env holds on the day: nothing is listening at it, and it must not matter."""
+    scripts = Path(__file__).resolve().parents[1] / "scripts"
+    env = {**os.environ, "DATABASE_URL": "postgresql://nobody:secret@127.0.0.1:1/supabase", "STORAGE_BACKEND": "supabase",
+           "TTS_CACHE_DIR": str(tmp_path / "tts")}
+    done = subprocess.run([sys.executable, str(scripts / "warm_demo.py"), "--no-speech", "--no-asr"], env=env, capture_output=True,
+                          text=True, timeout=300)
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert "built from the seed" in done.stdout
+    for line in ("Wanjiru Kamau, en", "Wanjiru Kamau, kik", "Njeri Mwangi, en", "Njeri Mwangi, kik"):
+        assert line in done.stdout
+
+
 def test_warm_demo_stops_with_an_instruction_on_a_missing_database(tmp_path):
     scripts = Path(__file__).resolve().parents[1] / "scripts"
     done = subprocess.run([sys.executable, str(scripts / "warm_demo.py"), "--source", str(tmp_path / "none.db")],
                           capture_output=True, text=True, timeout=120)
     assert done.returncode != 0 and "seed_demo.py --demo-db" in done.stderr
+
+
+# --- The poll, and its tag -------------------------------------------------------------------
+
+def test_the_presenter_poll_makes_the_refusals_it_always_made(client, anon_client, model):
+    _, member, _ = borrower()
+    cid = begin(member)["conversation"]["id"]
+    url = f"/api/present/conversations/{cid}"
+    assert anon_client.get(url).status_code == 401
+    assert member.get(url).status_code == 403
+    assert client.get("/api/present/conversations/999999").status_code == 404
+    r = client.get(url)
+    assert r.status_code == 200 and r.headers["etag"] and "no-cache" in r.headers["cache-control"]
+    assert member.get(url, headers={"If-None-Match": r.headers["etag"]}).status_code == 403
+    assert anon_client.get(url, headers={"If-None-Match": r.headers["etag"]}).status_code == 401
+
+
+def test_an_expired_session_gets_no_poll(client, model):
+    from chamapro.api.db import AuthSession
+    from chamapro.api.db import utcnow as now
+    _, member, _ = borrower()
+    cid = begin(member)["conversation"]["id"]
+    from conftest import add_user, signed_in, PASSWORDS
+    PASSWORDS["expiring"] = "x" * 20
+    add_user("expiring", PASSWORDS["expiring"])
+    who = signed_in("expiring")
+    with SessionLocal() as db:
+        for row in db.scalars(select(AuthSession).where(AuthSession.user_id == db.scalar(select(User.id).where(User.username == "expiring")))):
+            row.expires_at = now()
+        db.commit()
+    assert who.get(f"/api/present/conversations/{cid}").status_code == 401
+
+
+def test_the_tag_moves_with_anything_that_changes_what_the_screen_shows(client, model):
+    mid, member, _ = borrower()
+    cid = begin(member)["conversation"]["id"]
+    url = f"/api/present/conversations/{cid}"
+    tag = lambda: client.get(url).headers["etag"]     # noqa: E731
+    first = tag()
+    assert tag() == first
+    for words in ("yes", "yes", "Forty thousand for school fees", "twelve months", "yes"):
+        say(member, cid, words)
+        assert tag() != first
+        first = tag()
+    done = client.get(url).json()
+    assert done["outcome"]["decision"] == "approved" and not done["outcome"]["review_requested"]
+    from test_decisions import key
+    r = member.post(f"/api/self-service/applications/{done['application_id']}/review", headers=key())
+    assert r.status_code == 201, r.text
+    assert tag() != first               # asked for a review: the card says so, and nothing else about it moved
+    first = tag()
+    assert client.get(url).json()["outcome"]["review_requested"] is True
+    with SessionLocal() as db:
+        loan = db.scalar(select(LoanAccount).where(LoanAccount.member_id == mid))
+    r = client.post(f"/api/loans/{loan.id}/reverse", headers=key(), json={"reason": "asked by the member"})
+    assert r.status_code == 200, r.text
+    assert tag() != first
+    assert client.get(url).json()["outcome"]["decision"] == "reversed"
+
+
+def test_the_tag_moves_while_a_reply_is_worked_on(client, model, monkeypatch):
+    _, member, _ = borrower()
+    cid = begin(member)["conversation"]["id"]
+    url = f"/api/present/conversations/{cid}"
+    before = client.get(url).headers["etag"]
+    entered, go_on = threading.Event(), threading.Event()
+    real = service.machine.advance
+
+    def waits(*a, **k):
+        entered.set()
+        assert go_on.wait(10)
+        return real(*a, **k)
+    monkeypatch.setattr(service.machine, "advance", waits)
+    worker = threading.Thread(target=say, args=(member, cid, "yes"))
+    worker.start()
+    try:
+        assert entered.wait(10)
+        during = client.get(url, headers={"If-None-Match": before})
+        assert during.status_code == 200 and during.json()["row"]["busy"] is True and during.json()["row"]["stage"] == "deciding"
+    finally:
+        go_on.set()
+        worker.join(10)
+
+
+# --- If the database is not there ---------------------------------------------------------------
+
+@pytest.mark.parametrize("url, words", [("postgresql://u:secret@127.0.0.1:1/x", "cannot reach its database")])
+def test_a_server_with_no_database_says_so_in_one_line_and_stops(url, words, tmp_path):
+    env = {**os.environ, "DATABASE_URL": url, "STORAGE_BACKEND": "local", "CHAMAPRO_UPLOADS": str(tmp_path), "TTS_ENABLED": "0",
+           "ASR_WARM": "0", "PYTHONPATH": str(Path(__file__).resolve().parents[1] / "src")}
+    done = subprocess.run([sys.executable, "-m", "uvicorn", "chamapro.api.main:app", "--port", "0"], env=env, capture_output=True,
+                          text=True, timeout=120)
+    assert done.returncode == 1
+    assert "Traceback" not in done.stderr and "Traceback" not in done.stdout
+    lines = [line for line in done.stderr.splitlines() if words in line]
+    assert len(lines) == 1 and "127.0.0.1" in lines[0] and "secret" not in done.stderr + done.stdout

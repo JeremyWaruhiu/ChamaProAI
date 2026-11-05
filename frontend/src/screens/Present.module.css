@@ -130,3 +130,16 @@ main .page { height: calc(100vh - var(--topbar)); margin: calc(-1 * var(--space-
 .checks li { display: grid; gap: 0.05em; min-width: 0; }
 .checkHead { display: flex; align-items: center; gap: 0.5em; }
 .checkValues { font-family: var(--font-mono); font-size: 0.85em; color: var(--ink-2); overflow-wrap: anywhere; }
+
+/* 1366x768: the driver's name matters more than the length of its bar. */
+@media (max-width: 1500px) {
+  .shapRow { grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr) 3.4em; }
+}
+/* Half of a 1920 screen, beside the phone: the two columns of the working stack up rather than squeeze. */
+@media (max-width: 1100px) {
+  .columns { grid-template-columns: minmax(0, 2fr) minmax(0, 5fr); }
+  .grid { grid-template-columns: minmax(0, 1fr); }
+  .verdict { grid-template-columns: minmax(0, 1fr); }
+  .latency { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .latency small { overflow-wrap: anywhere; }
+}

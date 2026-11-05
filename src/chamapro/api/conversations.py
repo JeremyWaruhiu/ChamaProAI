@@ -15,6 +15,7 @@ from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from chamapro import config
@@ -37,19 +38,19 @@ starts = LoginLimiter(config.CONVERSATION_STARTS_PER_HOUR, 3600)
 replies = LoginLimiter(config.CONVERSATION_REPLIES_PER_HOUR, 3600)
 
 
-def own(db: Session, member: Member, conversation_id: int) -> Conversation:
-    conv = db.get(Conversation, conversation_id)
+def own(db: Session, member: Member, conversation_id: int, with_turns: bool = False) -> Conversation:
+    conv = service.with_turns(db, conversation_id) if with_turns else db.get(Conversation, conversation_id)
     if conv is None or conv.member_id != member.id:
         raise HTTPException(404, f"conversation {conversation_id} not found")
     return conv
 
 
-def turn_out(t: ConversationTurn) -> s.TurnOut:
+def turn_out(t: ConversationTurn, language: str = "en") -> s.TurnOut:
     return s.TurnOut(
         seq=t.seq, speaker=t.speaker, template_id=t.template_id, text=t.text, text_en=t.text_en, kik_pending=t.kik_pending,
         audio_url=f"/api/conversations/{t.conversation_id}/turns/{t.seq}/audio" if t.speaker == "bot" and t.audio_ref else None,
         input_mode=t.input_mode, asr_transcript=t.asr_transcript, asr_model=t.asr_model, translation=t.translation,
-        extraction=t.extraction, explain=member_text.plain_explain(t.explain) if t.explain else None, actions=t.actions or [],
+        extraction=t.extraction, explain=member_text.plain_explain(t.explain, language) if t.explain else None, actions=t.actions or [],
         latency_ms=s.TurnLatency(asr=t.asr_ms, translate_extract=t.extract_ms, evaluate=t.evaluate_ms, tts=t.tts_ms),
         created_at=t.created_at)
 
@@ -95,8 +96,7 @@ def current_conversation(db: Session = Depends(get_db), user: User = Depends(req
     conv = service.open_conversation(db, member)
     if conv is None:
         return None
-    return s.ConversationDetail(conversation=conversation_out(conv), turns=[turn_out(t) for t in service.turns_of(db, conv)],
-                                outcome=None)
+    return s.ConversationDetail(conversation=conversation_out(conv), turns=[turn_out(t, conv.language) for t in conv.turns], outcome=None)
 
 
 @router.post("/conversations", status_code=201, response_model=s.ConversationStarted)
@@ -109,7 +109,7 @@ def start_conversation(body: s.ConversationCreate, db: Session = Depends(get_db)
     except service.ConversationClosed as e:
         raise HTTPException(409, str(e)) from None
     return s.ConversationStarted(conversation=conversation_out(conv), resumed=resumed,
-                                 turns=[turn_out(t) for t in service.turns_of(db, conv)])
+                                 turns=[turn_out(t, conv.language) for t in conv.turns])
 
 
 @router.post("/conversations/{conversation_id}/reply", response_model=s.ConversationReply)
@@ -119,7 +119,6 @@ def reply_to_conversation(conversation_id: int, text: str | None = Form(None, ma
     """Text or an audio upload, not both. Comes back with what was understood, the next
     bot turns, and how it was worked out if this reply was evaluated."""
     member = required_member(db, user)
-    conv = own(db, member, conversation_id)
     has_text = text is not None and bool(text.strip())
     if has_text == (audio is not None):
         raise HTTPException(422, "send either text or audio")
@@ -127,7 +126,9 @@ def reply_to_conversation(conversation_id: int, text: str | None = Form(None, ma
     folder = Path(tempfile.mkdtemp(prefix="chamapro-reply-"))
     try:
         voice = received_voice(audio, folder) if audio is not None else None
-        spoken, bots, explain = service.reply(db, conv, member, user, text.strip() if has_text else None, voice)
+        done = service.reply_to(db, conversation_id, member, user, text.strip() if has_text else None, voice)
+    except service.ConversationMissing as e:
+        raise HTTPException(404, str(e)) from None
     except (service.ConversationClosed, service.ConversationBusy) as e:
         raise HTTPException(409, str(e)) from None
     except service.SpeechUnavailable as e:
@@ -136,18 +137,20 @@ def reply_to_conversation(conversation_id: int, text: str | None = Form(None, ma
         raise HTTPException(503, "We could not look at this just now. Please try again later.") from None
     finally:
         shutil.rmtree(folder, ignore_errors=True)
-    return s.ConversationReply(conversation=conversation_out(conv), member_turn=turn_out(spoken),
-                               bot_turns=[turn_out(t) for t in bots], explain=member_text.plain_explain(explain) if explain else None,
-                               outcome=service.outcome_of(db, conv))
+    language = done.conversation.language
+    return s.ConversationReply(conversation=conversation_out(done.conversation), member_turn=turn_out(done.member_turn, language),
+                               bot_turns=[turn_out(t, language) for t in done.bot_turns],
+                               explain=member_text.plain_explain(done.explain, language) if done.explain else None,
+                               outcome=done.outcome)
 
 
 @router.get("/conversations/{conversation_id}", response_model=s.ConversationDetail)
 def get_conversation(conversation_id: int, db: Session = Depends(get_db), user: User = Depends(require_member)):
-    """The whole transcript, in the detail each turn came back with. Two queries however long."""
+    """The whole transcript, in the detail each turn came back with. Three queries however long."""
     member = required_member(db, user)
-    conv = own(db, member, conversation_id)
+    conv = own(db, member, conversation_id, with_turns=True)
     service.abandon_if_idle(db, conv)
-    return s.ConversationDetail(conversation=conversation_out(conv), turns=[turn_out(t) for t in service.turns_of(db, conv)],
+    return s.ConversationDetail(conversation=conversation_out(conv), turns=[turn_out(t, conv.language) for t in conv.turns],
                                 outcome=service.outcome_of(db, conv))
 
 
@@ -163,8 +166,9 @@ def conversation_stage(conversation_id: int, db: Session = Depends(get_db), user
 def conversation_audio(conversation_id: int, seq: int, db: Session = Depends(get_db), user: User = Depends(require_member)):
     """What a bot turn said. If the cache has lost it, it is made again from the turn's record."""
     member = required_member(db, user)
-    conv = own(db, member, conversation_id)
-    turn = next((t for t in service.turns_of(db, conv, seq - 1) if t.seq == seq), None)
+    turn = db.scalar(select(ConversationTurn).join(Conversation, Conversation.id == ConversationTurn.conversation_id)
+                     .where(ConversationTurn.conversation_id == conversation_id, ConversationTurn.seq == seq,
+                            Conversation.member_id == member.id))
     if turn is None or turn.speaker != "bot" or not turn.audio_ref:
         raise HTTPException(404, "there is no audio for this turn")
     speech = tts.audio_for(turn.tts_model, turn.spoken_text or "")

@@ -7,14 +7,20 @@ create and drop a scratch database on (never Supabase production):
 
 The rest of the suite runs on SQLite.
 """
+import csv
 import os
 import secrets
+import subprocess
+import sys
 import threading
 import time
 from contextlib import contextmanager
 from datetime import date
+from pathlib import Path
 
+import numpy as np
 import pytest
+import soundfile as sf
 from alembic import command
 from sqlalchemy import create_engine, event, func, inspect, select, text
 from sqlalchemy.engine import make_url
@@ -22,11 +28,13 @@ from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.orm import Session
 
 from chamapro import config
-from chamapro.api import decisions, ledger, profiles, self_service
-from chamapro.api.db import (Applicant, AuditLog, Conversation, ConversationTurn, Decision, Guarantor, Interview,
-                             LoanAccount, LoanApplication, Member, MemberNotice, User, alembic_config, head_revision, init_db)
+from chamapro.api import batch, decisions, ledger, presenter, profiles, self_service
+from chamapro.api import db as db_module
+from chamapro.api.db import (Applicant, AuditLog, Conversation, ConversationTurn, Decision, Guarantor, GuarantorPledge, Interview,
+                             LoanAccount, LoanApplication, Member, MemberNotice, User, alembic_config, head_revision, init_db, make_engine)
 from chamapro.conversation import service
 
+ROOT = Path(__file__).resolve().parents[1]
 SERVER = os.getenv("CHAMAPRO_TEST_POSTGRES_URL")
 pytestmark = pytest.mark.skipif(not SERVER, reason="set CHAMAPRO_TEST_POSTGRES_URL to run")
 GUARDED = {"assessments": "assessments are immutable", "decisions": "decisions are immutable",
@@ -569,6 +577,58 @@ def test_two_replies_at_the_same_moment_only_one_is_worked_on(engine, stand_in_m
     assert sum(isinstance(r, service.ConversationBusy) for r in out) >= 1 and sum(isinstance(r, str) for r in out) >= 1, out
 
 
+def test_a_change_under_the_locks_on_postgres(engine, stand_in_model, monkeypatch):
+    """What only the conversation's path does: a decision the locks refuse, on a session that goes
+    from autocommit to a transaction and back."""
+    with Session(engine, expire_on_commit=False) as db:
+        member_id, user_id = conversing(db, f"named-{secrets.token_hex(2)}", deposits=30000)
+        member, user = db.get(Member, member_id), db.get(User, user_id)
+        conv, _ = service.start(db, member, "en")
+        for words in ("yes", "yes", "Forty thousand for a dairy cow", "twelve months"):
+            service.reply(db, conv, member, user, text=words)
+        assert conv.state == "CONFIRM"
+
+        real, moved = ledger.lock_for_decision, []
+
+        def first_something_moves(*a, **k):
+            if not moved:
+                moved.append(1)
+                with Session(engine) as other:
+                    ledger.post_entry(other, member.id, "deposits", "deposit_refund", -22000, f"PG-{secrets.token_hex(3)}")
+                    other.commit()
+            return real(*a, **k)
+        monkeypatch.setattr(ledger, "lock_for_decision", first_something_moves)
+        _, bots, _ = service.reply(db, conv, member, user, text="yes")
+        assert [t.template_id for t in bots] == ["CONFIRM"] and "24,000" in bots[0].text
+        assert conv.status == "open" and conv.busy_until is None and ledger.balances(db, member.id)["transactional"] == 0
+        _, bots, _ = service.reply(db, conv, member, user, text="yes")
+        assert [t.template_id for t in bots] == ["O2", "END"] and conv.status == "completed"
+        assert ledger.balances(db, member.id)["transactional"] == 24000
+        assert service.outcome_of(db, conv)["balance_after_kes"] == 24000
+
+
+
+def test_an_offer_the_guarantors_limit_on_postgres(engine, stand_in_model):
+    """C6 at what the pledges can cover, the payout at that amount, and the capacity it then holds."""
+    with Session(engine, expire_on_commit=False) as db:
+        member_id, user_id = conversing(db, f"short-{secrets.token_hex(2)}", deposits=30000)
+        member, user = db.get(Member, member_id), db.get(User, user_id)
+        for p in db.scalars(select(GuarantorPledge).where(GuarantorPledge.borrower_member_id == member_id)):
+            p.max_amount_kes = 2000
+        db.commit()
+        conv, _ = service.start(db, member, "en")
+        for words in ("yes", "yes", "Forty thousand for a dairy cow"):
+            service.reply(db, conv, member, user, text=words)
+        _, bots, _ = service.reply(db, conv, member, user, text="twelve months")
+        assert [t.template_id for t in bots] == ["C6"] and "34,000" in bots[0].text
+        _, bots, _ = service.reply(db, conv, member, user, text="yes")
+        assert [t.template_id for t in bots] == ["CONFIRM"]
+        _, bots, _ = service.reply(db, conv, member, user, text="yes")
+        assert [t.template_id for t in bots] == ["O2", "END"]
+        assert ledger.balances(db, member_id)["transactional"] == 34000
+        assert service.outcome_of(db, conv)["guarantors"] and decisions.read_snapshot(db, member).held
+
+
 def test_0007_downgrades_only_without_conversations(engine):
     with Session(engine) as db:
         assert db.scalar(select(func.count(Conversation.id))) > 0
@@ -600,7 +660,7 @@ def test_the_presenter_view_and_the_demo_reset_on_postgres(engine, stand_in_mode
         outcome = service.outcome_of(db, conv)
         assert outcome["decision"] == "approved" and outcome["balance_after_kes"] - outcome["balance_before_kes"] == 40000
         assert any(r.id == conv.id for r in presenter.present_list(limit=200, db=db, _=admin))
-        detail = presenter.present_detail(conv.id, db=db, _=admin)
+        detail = presenter.detail_of(db, conv)
         assert detail.outcome.ledger.amount_kes == 40000 and any(t.explain for t in detail.turns)
         result = presenter.demo_reset(db=db, user=admin)
         assert result.loans_reversed == 1 and result.problems == []
@@ -608,3 +668,217 @@ def test_the_presenter_view_and_the_demo_reset_on_postgres(engine, stand_in_mode
         assert presenter.demo_reset(db=db, user=admin).loans_reversed == 0
         member.seed_tag = None
         db.commit()
+
+
+# --- What Supabase's Data API can see ---------------------------------------------------------
+
+def test_the_publishable_key_reads_nothing_and_check_rls_says_so(pg_url, engine, rows):
+    """Run as a role like anon, with SELECT granted on everything as Supabase grants it."""
+    import check_rls
+    with engine.connect() as c:
+        tables = c.execute(text("SELECT tablename FROM pg_tables WHERE schemaname = 'public' ORDER BY 1")).scalars().all()
+        c.execute(text("DO $$ BEGIN IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'anon') THEN CREATE ROLE anon; END IF; "
+                       "IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'authenticated') THEN CREATE ROLE authenticated; "
+                       "END IF; END $$"))
+        c.execute(text("GRANT USAGE ON SCHEMA public TO anon, authenticated"))
+        c.execute(text("GRANT SELECT ON ALL TABLES IN SCHEMA public TO anon, authenticated"))
+        c.commit()
+        for role in ("anon", "authenticated"):
+            c.execute(text(f"SET ROLE {role}"))
+            for table in tables:
+                assert c.execute(text(f'SELECT count(*) FROM "{table}"')).scalar() == 0, (role, table)
+            c.execute(text("RESET ROLE"))
+        c.rollback()
+    listed, off, letting_in = check_rls.findings(engine)
+    assert set(listed) == set(tables) and off == [] and letting_in == []
+    assert {"conversations", "conversation_turns", "member_notices", "account_entries", "alembic_version"} <= set(listed)
+
+
+def test_check_rls_finds_a_table_without_it_and_a_policy_that_lets_anon_in(engine):
+    import check_rls
+    with engine.begin() as c:
+        c.execute(text("CREATE TABLE rls_check_a (id int)"))
+        c.execute(text('CREATE POLICY open_to_anon ON "members" FOR SELECT TO anon USING (true)'))
+    try:
+        _, off, letting_in = check_rls.findings(engine)
+        assert "rls_check_a" in off and any("open_to_anon" in line for line in letting_in)
+    finally:
+        with engine.begin() as c:
+            c.execute(text("DROP TABLE rls_check_a"))
+            c.execute(text('DROP POLICY open_to_anon ON "members"'))
+
+
+# --- Round trips ------------------------------------------------------------------------------
+
+def test_an_id_can_be_reserved_for_every_table_a_decision_writes(engine):
+    with Session(engine) as db:
+        ids = batch.reserve(db, {t: 2 for t in ("applicants", "interviews", "assessments", "decisions", "self_service_runs",
+                                                "loan_applications", "loan_accounts", "account_entries", "guarantors",
+                                                "member_accounts", "conversations")})
+        assert all(len(v) == 2 for v in ids.values())
+
+
+def test_a_batch_is_one_statement_and_all_or_nothing(engine):
+    seen = []
+
+    def watch(conn, cursor, statement, *_):
+        seen.append(statement)
+    with Session(engine) as db:
+        tag = secrets.token_hex(4)
+        out = batch.Batch(db, batch.reserve(db, {"applicants": 1}))
+        who = Applicant(name=tag)
+        out.give_id(who)
+        out.add(who)
+        out.add(AuditLog(action=tag, entity="test", entity_id=who.id, details={"k": 1}))
+        out.add(AuditLog(action=tag, entity="test", entity_id=who.id, details={"k": 2}))
+        event.listen(engine, "before_cursor_execute", watch)
+        out.send()
+        event.remove(engine, "before_cursor_execute", watch)
+        db.commit()
+        assert len(seen) == 1 and "WITH" in seen[0]
+        assert db.scalar(select(func.count(AuditLog.id)).where(AuditLog.action == tag, AuditLog.entity_id == who.id)) == 2
+        assert who.created_at is not None
+
+        # A row the database refuses takes the others with it.
+        out = batch.Batch(db)
+        out.add(AuditLog(action=tag + "x", entity="test", details={}))
+        out.add(Applicant(id=who.id, name="the same id again"))
+        with pytest.raises(IntegrityError):
+            out.send()
+        db.rollback()
+        assert db.scalar(select(func.count(AuditLog.id)).where(AuditLog.action == tag + "x")) == 0
+
+
+def test_lock_for_decision_holds_the_borrower_guarantors_and_accounts(engine):
+    with Session(engine) as db:
+        a, b, c = (add_person(db, f"lock-{i}-{secrets.token_hex(2)}", deposits=100) for i in range(3))
+        ledger.add_pledge(db, a.id, b.id, 1000)
+        db.commit()
+        ids = a.id, b.id, c.id
+    with Session(engine) as db:
+        locked = ledger.lock_for_decision(db, ids[0], {"interviews": 2})
+        assert locked.members == {ids[0], ids[1]} and len(locked.ids["interviews"]) == 2 and (ids[0], "deposits") in locked.accounts
+        with engine.connect() as other:
+            other.execute(text("SET lock_timeout = '100ms'"))
+            for table, where in (("members", f"id = {ids[1]}"), ("member_accounts", f"id = {locked.accounts[ids[0], 'deposits']}")):
+                with pytest.raises(OperationalError, match="lock timeout"):
+                    other.execute(text(f"SELECT id FROM {table} WHERE {where} FOR UPDATE"))
+                other.rollback()
+                other.execute(text("SET lock_timeout = '100ms'"))
+        db.rollback()
+
+
+def test_a_connection_idle_for_long_is_pinged_and_a_dead_one_replaced(pg_url, monkeypatch):
+    eng = make_engine(pg_url)
+    try:
+        with eng.connect() as c:
+            pid = c.execute(text("SELECT pg_backend_pid()")).scalar()
+        monkeypatch.setattr(db_module, "PING_AFTER_IDLE_SECONDS", -1)    # everything counts as idle
+        with create_engine(pg_url, isolation_level="AUTOCOMMIT").connect() as killer:
+            killer.execute(text(f"SELECT pg_terminate_backend({pid})"))
+        with eng.connect() as c:
+            assert c.execute(text("SELECT pg_backend_pid()")).scalar() != pid
+    finally:
+        eng.dispose()
+
+
+# --- The demo on PostgreSQL --------------------------------------------------------------------
+
+def seeder(url, *args, answer="", cwd=None, extra_env=None, uploads=None):
+    env = {**os.environ, "DATABASE_URL": url, "STORAGE_BACKEND": "local", "CHAMAPRO_UPLOADS": str(uploads or "/tmp/chamapro-seed-test"),
+           "TTS_ENABLED": "0", **(extra_env or {})}
+    return subprocess.run([sys.executable, str(ROOT / "scripts" / "seed_demo.py"), "--demo-postgres", *args], input=answer, env=env,
+                          capture_output=True, text=True, timeout=500, cwd=cwd)
+
+
+@pytest.fixture
+def corpus(tmp_path):
+    audio = tmp_path / "audio"
+    audio.mkdir()
+    rows = []
+    for n in range(1, 41):
+        cid = f"S01_clean_{n:03d}"
+        sf.write(str(audio / f"{cid}.wav"), np.zeros(800), 16000, subtype="PCM_16")
+        rows.append({"id": cid, "sentence_no": n, "domain": "household", "hypothesis": f"sentence {n}", "asr_seconds": 1.0})
+    path = tmp_path / "asr.csv"
+    with path.open("w", newline="", encoding="utf-8") as fh:
+        w = csv.DictWriter(fh, fieldnames=list(rows[0]))
+        w.writeheader()
+        w.writerows(rows)
+    return ["--csv", str(path), "--audio", str(audio)]
+
+
+FLAG = "--replace-everything-in-this-database"
+
+
+def test_demo_postgres_refuses_all_it_should_and_changes_nothing(corpus, tmp_path):
+    with scratch_database() as url:
+        # Not at head.
+        r = seeder(url, *corpus, FLAG)
+        assert r.returncode != 0 and "alembic upgrade head" in r.stderr
+        command.upgrade(alembic_config(url), "head")
+        # No flag.
+        r = seeder(url, *corpus)
+        assert r.returncode != 0 and FLAG in r.stderr
+        eng = create_engine(url)
+        try:
+            with Session(eng) as db:
+                db.add(User(username="someone_real", password_hash="x", role="officer"))
+                db.commit()
+            r = seeder(url, *corpus, FLAG, answer="localhost\n")
+            assert r.returncode != 0 and "someone_real" in r.stderr and "not made by this script" in r.stderr
+            with Session(eng) as db:
+                db.execute(text("UPDATE users SET seed_tag = 'seed:officer' WHERE username = 'someone_real'"))
+                db.commit()
+            # Tagged, so it may go on; but the wrong host typed back stops it.
+            r = seeder(url, *corpus, FLAG, answer="not-the-host\n")
+            assert r.returncode != 0 and "not the host" in r.stderr
+            r = seeder(url, *corpus, FLAG, answer="")
+            assert r.returncode != 0 and "not the host" in r.stderr
+            with Session(eng) as db:
+                assert db.scalar(select(User.id).where(User.username == "someone_real")) is not None
+        finally:
+            eng.dispose()
+    r = seeder("sqlite:///" + str(tmp_path / "x.db"), *corpus, FLAG)
+    assert r.returncode != 0 and "not PostgreSQL" in r.stderr
+    assert not (tmp_path / "x.db").exists() or (tmp_path / "x.db").stat().st_size == 0
+
+
+@pytest.mark.skipif(not config.CLASSIFIER_PATH.exists(), reason="needs models/classifier.joblib")
+def test_demo_postgres_builds_rebuilds_and_the_reset_works_on_it(corpus, tmp_path):
+    uploads = tmp_path / "uploads"
+    with scratch_database() as url:
+        command.upgrade(alembic_config(url), "head")
+        host = make_url(url).host
+        eng = create_engine(url)
+        try:
+            before = None
+            for attempt in (1, 2):      # the second finds the first's rows, every user tagged, and replaces them
+                r = seeder(url, *corpus, FLAG, answer=host + "\n", uploads=uploads)
+                assert r.returncode == 0, r.stdout[-2000:] + r.stderr[-2000:]
+                assert "shown once" in r.stdout and host in r.stdout and "40 Kikuyu clips" in r.stdout
+                with Session(eng) as db:
+                    counts = {t: db.execute(text(f"SELECT count(*) FROM {t}")).scalar()
+                              for t in ("users", "members", "loan_applications", "account_entries", "conversations", "responses")}
+                    assert db.execute(text("SELECT version_num FROM alembic_version")).scalar() == head_revision()
+                    system = db.scalar(select(User).where(User.username == "system"))
+                    assert system.role == "system" and system.is_active is False and system.seed_tag is None
+                    assert db.scalar(select(func.min(User.id))) == system.id == 1      # the numbering started again
+                    assert before in (None, counts), "a rebuild should come out the same"
+                    before = counts
+                    clips = db.execute(text("SELECT audio_path FROM responses WHERE audio_path <> ''")).scalars().all()
+                    assert len(clips) == 40 and all(Path(p).is_file() for p in clips)
+            assert counts["members"] > 100 and counts["conversations"] == 0 and counts["responses"] > 40
+
+            # The append-only tables are still guarded after it.
+            with Session(eng) as db:
+                with pytest.raises(IntegrityError, match="append-only"):
+                    db.execute(text("TRUNCATE audit_log"))
+                db.rollback()
+
+            # What presenter.py's reset acts on is there.
+            with Session(eng) as db:
+                tags = set(db.scalars(select(Member.seed_tag).where(Member.seed_tag.in_(presenter.DEMO_TAGS))))
+                assert tags == set(presenter.DEMO_TAGS)
+        finally:
+            eng.dispose()

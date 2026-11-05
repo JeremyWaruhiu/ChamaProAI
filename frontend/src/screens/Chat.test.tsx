@@ -331,3 +331,39 @@ describe('the Why? sheet', () => {
     expect(document.body.textContent).not.toMatch(/\b(Low|Medium|High|risk|probabilit|SHAP)\b/i)
   })
 })
+
+describe('on the stage', () => {
+  it('reads ?stage=1 from the hash, and keeps it when it goes on to a conversation', async () => {
+    const { chatOnStage, paths } = await import('../lib/router')
+    window.location.hash = '#/my/chat?stage=1'
+    expect(chatOnStage()).toBe(true)
+    window.location.hash = '#/my/chat/4'
+    expect(chatOnStage()).toBe(false)
+    expect(paths.chat(4, true)).toBe('#/my/chat/4?stage=1')
+    expect(paths.chat(4)).toBe('#/my/chat/4')
+  })
+})
+
+describe('the Kikuyu strings', () => {
+  it('are English until they are translated', async () => {
+    const { chatStrings } = await import('../lib/chatStrings')
+    const { t } = await import('../strings')
+    expect(chatStrings('en')).toBe(t.chat)
+    expect(chatStrings('kik').outcome.why).toBeTruthy()
+    expect(chatStrings('kik').months(2)).toContain('2')
+  })
+
+  it('every leaf of t.chat is on the translator\'s sheet, or is shown before a language is chosen', async () => {
+    const { t } = await import('../strings')
+    // @ts-expect-error node's own, with no @types/node here: this runs under node, from frontend/
+    const { readFileSync } = await import('node:fs')
+    const sheet: string = readFileSync('../translations/kikuyu.csv', 'utf8')
+    const ids = new Set(sheet.split('\n').map((line) => line.split(',')[0]))
+    const before = new Set(['chat.chooseLanguage', 'chat.chooseLead', 'chat.kikuyu', 'chat.english', 'chat.starting', 'chat.startFailed'])
+    const leaves = (o: object, path: string): string[] => Object.entries(o).flatMap(([k, v]) =>
+      (typeof v === 'object' ? leaves(v, `${path}.${k}`) : typeof v === 'string' ? [`${path}.${k}`] : []))
+    const wanted = leaves(t.chat, 'chat').filter((k) => !before.has(k) && !/^chat\.(yes|no)\./.test(k))
+    expect(wanted.filter((k) => !ids.has(k))).toEqual([])
+    for (const id of ['button.yes', 'button.no', 'chat.months.one', 'chat.months.many', 'template.CONSENT']) expect(ids.has(id)).toBe(true)
+  })
+})

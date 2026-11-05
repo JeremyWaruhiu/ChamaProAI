@@ -213,12 +213,13 @@ def cookie_secure(request: Request) -> bool:
 
 def current_user(request: Request, db: Session = Depends(get_db)) -> User:
     """The signed-in user, or 401. FastAPI hands this and the route the same
-    get_db session, so a request checks out one connection, and the session
-    and its user are one query."""
+    get_db session, so a request checks out one connection, and the session,
+    its user, and a member's record and profile are one query."""
     token = request.cookies.get(COOKIE)
     if not token:
         raise HTTPException(401, "not signed in")
-    s = db.get(AuthSession, token_hash(token), options=[joinedload(AuthSession.user)])
+    s = db.get(AuthSession, token_hash(token), options=[joinedload(AuthSession.user).joinedload(User.member)
+                                                        .joinedload(Member.profile)])
     if s is None:
         raise HTTPException(401, "not signed in")
     if s.expires_at <= utcnow():
@@ -230,10 +231,14 @@ def current_user(request: Request, db: Session = Depends(get_db)) -> User:
     return s.user
 
 
+def refuse_unless_staff(user_role: str) -> None:
+    if user_role not in STAFF_ROLES:
+        raise HTTPException(403, "your account has no role that allows this")
+
+
 def require_officer(user: User = Depends(current_user)) -> User:
     """Officers and admins: every staff endpoint. Members are refused."""
-    if user.role not in STAFF_ROLES:
-        raise HTTPException(403, "your account has no role that allows this")
+    refuse_unless_staff(user.role)
     return user
 
 

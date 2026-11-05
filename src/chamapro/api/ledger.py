@@ -34,14 +34,14 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import date, datetime, time, timezone
 
-from sqlalchemy import and_, func, or_, select
+from sqlalchemy import Integer, String, and_, cast, func, literal, null, or_, select, text, union_all
 from sqlalchemy.orm import Session
 
 from chamapro import config
 
-from . import audit
+from . import audit, batch
 from .db import (AccountEntry, Decision, Guarantor, GuarantorPledge, LoanAccount, LoanApplication,
-                 Member, MemberAccount, User, nairobi_today, utcnow)
+                 Member, MemberAccount, User, nairobi_today, one_round_trip, utcnow)
 
 ENTRIES_SHOWN = 10
 # A guarantee stops holding capacity when its application ends without a loan.
@@ -73,6 +73,57 @@ def lock_members(db: Session, member_ids: Iterable[int]) -> None:
     db.execute(select(Member.id).where(Member.id.in_(ids)).order_by(Member.id).with_for_update())
     db.execute(select(MemberAccount.id).where(MemberAccount.member_id.in_(ids))
                .order_by(MemberAccount.id).with_for_update())
+
+
+@dataclass
+class Locked:
+    members: set[int]
+    accounts: dict[tuple[int, str], int]    # (member id, kind) -> account id
+    ids: dict[str, list[int]]               # reserved for a Batch, by table
+
+
+def _everyone_behind(borrower_id: int):
+    """The borrower, and everyone with a standing pledge to them."""
+    return or_(Member.id == borrower_id,
+               Member.id.in_(select(GuarantorPledge.guarantor_member_id)
+                             .where(GuarantorPledge.borrower_member_id == borrower_id, GuarantorPledge.status == "active")))
+
+
+def lock_for_decision(db: Session, borrower_id: int, reserve: dict[str, int] | None = None) -> Locked:
+    """lock_members for a decision, in one round trip: the same order and the same rows, found in
+    the same statement that locks them, with its accounts and the ids it will write under.
+
+    A statement sees the database as it was when it began, whatever it waited for, so what is
+    read to decide on has to be read after this returns (decisions.read_snapshot)."""
+    reserve = {t: n for t, n in (reserve or {}).items() if n > 0}
+    if db.get_bind().dialect.name != "postgresql":
+        with one_round_trip():
+            # The write lock: SQLite's one writer at a time is what serialises these.
+            db.execute(text("UPDATE members SET id = id WHERE id = :m"), {"m": borrower_id})
+            members = set(db.scalars(select(Member.id).where(_everyone_behind(borrower_id))))
+            accounts = db.execute(select(MemberAccount.member_id, MemberAccount.kind, MemberAccount.id)
+                                  .where(MemberAccount.member_id.in_(members))).all()
+            ids = batch.reserve(db, reserve)
+        return Locked(members, {(m, kind): a for m, kind, a in accounts}, ids)
+    who = (select(Member.id.label("id")).where(_everyone_behind(borrower_id)).order_by(Member.id)
+           .with_for_update(of=Member).cte("who"))
+    theirs = (select(MemberAccount.id.label("id"), MemberAccount.member_id.label("member_id"), MemberAccount.kind.label("kind"))
+              .where(MemberAccount.member_id.in_(select(who.c.id))).order_by(MemberAccount.id)
+              .with_for_update(of=MemberAccount).cte("theirs"))
+    none_int, none_str = cast(null(), Integer), cast(null(), String)
+    parts = [select(literal("member").label("what"), who.c.id.label("id"), none_int.label("member_id"), none_str.label("name")),
+             select(literal("account"), theirs.c.id, theirs.c.member_id, theirs.c.kind)]
+    parts += [select(literal("id"), func.nextval(f"{table}_id_seq"), none_int, literal(table))
+              .select_from(func.generate_series(1, count)) for table, count in reserve.items()]
+    out = Locked(set(), {}, {table: [] for table in reserve})
+    for what, row_id, member_id, name in db.execute(union_all(*parts)):
+        if what == "member":
+            out.members.add(row_id)
+        elif what == "account":
+            out.accounts[member_id, name] = row_id
+        else:
+            out.ids[name].append(row_id)
+    return out
 
 
 # --- Balances --------------------------------------------------------------------------
@@ -238,6 +289,15 @@ def account_of(db: Session, member_id: int, kind: str) -> MemberAccount:
         db.add(account)
         db.flush()
     return account
+
+
+def account_id_in(out: batch.Batch, locked: Locked, member_id: int, kind: str) -> int:
+    """For a Batch: the account a lock_for_decision found, or a new one in the same batch."""
+    if (member_id, kind) not in locked.accounts:
+        account = MemberAccount(member_id=member_id, kind=kind)
+        locked.accounts[member_id, kind] = out.give_id(account)
+        out.add(account)
+    return locked.accounts[member_id, kind]
 
 
 def post_entry(db: Session, member_id: int, kind: str, entry_type: str, amount_kes: int, reference: str,

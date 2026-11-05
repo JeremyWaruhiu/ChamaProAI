@@ -21,6 +21,7 @@ from chamapro import config
 
 from . import audit, ledger
 from . import schemas as s
+from .batch import Batch
 from .db import (PROFILE_GROUPS, Member, MemberProfile, MemberProfileHistory, User, nairobi_today, utcnow)
 from .pipeline import score_interview
 
@@ -64,8 +65,10 @@ def _provenance(p: MemberProfile | None, group: str, value) -> str:
     return "verified" if p is not None and getattr(p, f"{group}_verified_at") is not None else "declared"
 
 
-def profile_features(db: Session, m: Member, today: date | None = None) -> ProfileFeatures:
-    """What the classifier needs about this member, and how far to trust it.
+def profile_features(db: Session, m: Member, today: date | None = None,
+                     records: tuple[list[str], bool, bool] | None = None) -> ProfileFeatures:
+    """What the classifier needs about this member, and how far to trust it. records:
+    ledger.known_to_the_sacco's answer, if the caller has already read it.
 
     The applicant form of 0004 on the member record fills in for a profile that
     lacks those four values. A member with neither a loan nor any ledger entry
@@ -73,7 +76,7 @@ def profile_features(db: Session, m: Member, today: date | None = None) -> Profi
     are missing, not a false "never"."""
     today = today or nairobi_today()
     p = m.profile
-    statuses, has_entries, lost = ledger.known_to_the_sacco(db, m.id)
+    statuses, has_entries, lost = records if records is not None else ledger.known_to_the_sacco(db, m.id)
     on_record = bool(statuses) or has_entries
 
     of = lambda field: None if p is None else getattr(p, field)     # noqa: E731
@@ -136,7 +139,7 @@ def snapshot(p: MemberProfile) -> dict:
     return out
 
 
-def record_change(db: Session, p: MemberProfile, change: str, groups: list[str], actor: User | None) -> None:
+def record_change(db: Session | Batch, p: MemberProfile, change: str, groups: list[str], actor: User | None) -> None:
     db.add(MemberProfileHistory(member_id=p.member_id, change=change, groups=groups,
                                 snapshot=snapshot(p), actor_user_id=actor.id if actor else None))
     audit.record(db, actor, f"profile.{change}", "member", p.member_id, groups=groups)
@@ -197,17 +200,16 @@ def confirm_profile(db: Session, m: Member, actor: User | None) -> MemberProfile
     return m.profile
 
 
-def confirm_groups(db: Session, m: Member, groups: list[str], actor: User | None) -> None:
+def confirm_groups(out: Batch, m: Member, groups: list[str], actor: User | None) -> None:
     """The member heard these groups read out and said they are still right: only these
     are fresh again, since nobody asked about the rest. No figure changes."""
     if m.profile is None or not groups:
         return
-    m.profile.confirmed_at = utcnow()
-    db.flush()
-    record_change(db, m.profile, "confirm", groups, actor)
+    out.update(m.profile, confirmed_at=utcnow())
+    record_change(out, m.profile, "confirm", groups, actor)
 
 
-def request_update(db: Session, m: Member, values: dict, conversation_id: int, actor: User | None) -> None:
+def request_update(db: Session | Batch, m: Member, values: dict, conversation_id: int, actor: User | None) -> None:
     """The member told the conversation something else. The profile stays as it is and
     its verification with it; the history keeps what they asked for, for an officer to
     act on, and the audit log, which cannot be erased, keeps the group names only."""

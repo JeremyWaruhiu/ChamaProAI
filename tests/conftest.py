@@ -11,6 +11,7 @@ not at all; new_member() makes a member record with its own signed-in login.
 Test passwords are random per run; none is stored anywhere.
 """
 import json
+import logging
 import os
 import re
 import secrets
@@ -245,6 +246,26 @@ def admin_client(client):
     return signed_in("admin1")
 
 
+# The request log's line: method, path, status, statements, what the round-trip tests read.
+QUERIES = re.compile(r"^(\w+) (\S+) (\d+): (\d+) queries, \d+ ms$")
+
+
+@pytest.fixture
+def queries(caplog):
+    """queries(client, path) -> (response, statements the request ran), from its log line."""
+    def run(client, path):
+        caplog.clear()
+        with caplog.at_level(logging.INFO, logger="chamapro.requests"):
+            r = client.get(path)
+        assert r.status_code == 200, r.text
+        lines = [m for rec in caplog.records if rec.name == "chamapro.requests"
+                 if (m := QUERIES.match(rec.getMessage())) and m[2] == path.split("?")[0]]
+        assert len(lines) == 1, caplog.text
+        assert (lines[0][1], lines[0][3]) == ("GET", "200")
+        return r, int(lines[0][4])
+    return run
+
+
 @pytest.fixture
 def anon_client(client):
     return TestClient(app, base_url=BASE_URL)
@@ -265,6 +286,19 @@ def _reset_login_limiter():
     yield
     auth.limiter.clear()
     auth.signup_limiter.clear()
+
+
+@pytest.fixture(autouse=True)
+def _words_as_in_the_code(monkeypatch):
+    """Tests of the words are about the words as the code has them, whatever a translator has put in
+    templates.yaml and member_text_kik.json since; those files have tests of their own (test_translations).
+    The name matters: autouse fixtures run in name order, and this one's monkeypatch has to be set up after
+    _still_on_scratch_storage, and undone before it looks."""
+    from chamapro.api import member_text
+    from chamapro.conversation import templates
+    blank = {tid: {"en": e["en"], "kik": ""} for tid, e in templates.load().items()}
+    monkeypatch.setattr(templates, "load", lambda: blank)
+    monkeypatch.setattr(member_text, "kikuyu", lambda: {})
 
 
 @pytest.fixture(autouse=True)
