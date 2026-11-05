@@ -40,6 +40,7 @@ os.environ["GOOGLE_CLIENT_ID"] = ""
 os.environ["TTS_ENABLED"] = "0"
 os.environ["TTS_CACHE_DIR"] = str(_TMP / "tts_cache")
 os.environ["CONVERSATION_GEMINI_LIVE"] = "0"
+os.environ["ASR_WARM"] = "0"
 
 import numpy as np  # noqa: E402
 import pytest  # noqa: E402

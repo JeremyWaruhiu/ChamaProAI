@@ -381,6 +381,13 @@ def said(reply):
     return [t["template_id"] for t in reply["bot_turns"]]
 
 
+def recorded(reply):
+    """What the turn's record holds of the evaluation behind this reply: more than the member gets."""
+    with SessionLocal() as db:
+        return db.scalar(select(ConversationTurn).where(ConversationTurn.conversation_id == reply["conversation"]["id"],
+                                                        ConversationTurn.seq == reply["bot_turns"][0]["seq"])).explain
+
+
 def get_conv(cid):
     with SessionLocal() as db:
         return db.get(Conversation, cid)
@@ -457,12 +464,12 @@ def test_wanjiru_is_approved(people, language, script):
     assert transactional(ids["wanjiru"]) == 40000
     assert [a["id"] for a in end["bot_turns"][-1]["actions"]] == ["request_review"]
 
-    explain = replies[3]["explain"]
+    explain = recorded(replies[3])
     assert explain["risk_class"] == "Low" and set(explain["probabilities"]) == {"Low", "Medium", "High"}
-    assert explain["outcome"] == "approve" and explain["top_shap"] and explain["top_shap"][0]["label"]
+    assert explain["outcome"] == "approve" and len(explain["contributions"]) == decisions.SHAP_KEPT
     assert "term_months" in explain["sources"]["conversation"] and "sacco_loan_use" in explain["sources"]["records"]
     assert "monthly_income_kes" in explain["sources"]["profile"]
-    afford = next(c for c in explain["checks"] if c["check"] == "affordability")
+    afford = next(c for c in explain["trace"]["checks"] if c["check"] == "affordability")
     assert afford["passed"] is True and afford["values"]["instalment_kes"] == 3554
 
     # Told once to each guarantor, on My SACCO, in these words.
@@ -477,14 +484,14 @@ def test_wanjiru_is_approved(people, language, script):
     assert [t["speaker"] for t in full["turns"][:3]] == ["bot", "bot", "member"]
     assert full["conversation"]["consent_given"] is True
     assert full["conversation"]["consent_version"] == templates.consent_version()
-    assert next(t for t in full["turns"] if t["template_id"] == "CONFIRM")["explain"]["risk_class"] == "Low"
+    assert next(t for t in full["turns"] if t["template_id"] == "CONFIRM")["explain"]["drivers"]
     assert full["turns"][2]["latency_ms"]["translate_extract"] is not None
     assert full["turns"][2]["latency_ms"]["asr"] is None
 
 
-NJERI_START = {"en": [("Yes I agree", ["G2"]), ("Yes it is", ["R1"]), ("Sixty thousand for school fees", ["C1"]),
+NJERI_START = {"en": [("Yes I agree", ["G2_NO_INCOME"]), ("Yes it is", ["R1"]), ("Sixty thousand for school fees", ["C1"]),
                       ("Twelve months", ["C2"])],
-               "kik": [("ĩĩ", ["G2"]), ("nĩ guo", ["R1"]), ("Ngũkwenda ngiri mĩrongo ĩtandatũ cia cukuru", ["C1"]),
+               "kik": [("ĩĩ", ["G2_NO_INCOME"]), ("nĩ guo", ["R1"]), ("Ngũkwenda ngiri mĩrongo ĩtandatũ cia cukuru", ["C1"]),
                        ("mĩeri ikũmi na igĩrĩ", ["C2"])]}
 NJERI_RAISE = {"en": "No, it is twenty two thousand now", "kik": "Aca, nĩ ngiri mĩrongo ĩĩrĩ na igĩrĩ"}
 NJERI_YES = {"en": "Yes, go ahead", "kik": "ĩĩ"}
@@ -500,14 +507,14 @@ def test_njeri_answers_c2_within_the_band_and_takes_the_reduced_offer(people, la
     for words, want in NJERI_START[language]:
         out = say(member, cid, words)
         assert said(out) == want, (words, out["bot_turns"])
-    assert out["explain"]["risk_class"] == "Medium"
+    assert recorded(out)["risk_class"] == "Medium"
     assert out["bot_turns"][0]["text"] == "Your income on record is 18,000 shillings a month. Is that still right?"
 
     offer = say(member, cid, NJERI_RAISE[language])
     assert said(offer) == ["CONFIRM"], offer["bot_turns"]
-    assert offer["explain"]["risk_class"] == "Low" and offer["explain"]["outcome"] == "approve_reduced"
+    assert recorded(offer)["risk_class"] == "Low" and recorded(offer)["outcome"] == "approve_reduced"
     assert "45,000 shillings over 12 months" in offer["bot_turns"][0]["text"]
-    assert "monthly_income_kes" in offer["explain"]["sources"]["conversation"]
+    assert "monthly_income_kes" in recorded(offer)["sources"]["conversation"]
 
     end = say(member, cid, NJERI_YES[language])
     assert said(end) == ["O2", "END"], end["bot_turns"]
@@ -531,10 +538,10 @@ def test_njeri_claiming_more_than_the_band_is_rescored_shown_and_referred(people
         say(member, cid, words)
     out = say(member, cid, NJERI_TOO_MUCH[language])
     assert said(out) == ["O3", "END"], out["bot_turns"]
-    explain = out["explain"]
+    explain = recorded(out)
     assert explain["risk_class"] == "Low" and explain["outcome"] == "refer"
     assert explain["reason_code"] == "income_unconfirmed" and "income needs officer confirmation" in explain["reason"]
-    check = next(c for c in explain["checks"] if c["check"] == "income_increase")
+    check = next(c for c in explain["trace"]["checks"] if c["check"] == "income_increase")
     assert check["passed"] is False and check["values"]["most_accepted_kes"] == 23400
     assert [a["id"] for a in out["bot_turns"][-1]["actions"]] == ["book_interview"]
     assert transactional(ids["njeri"]) == 0
@@ -601,7 +608,7 @@ def test_corrections_at_g2_override_and_ask_an_officer_without_changing_the_prof
     assert said(out) == ["R1"]
     out = say(member, cid, "Forty thousand for school fees")
     assert said(out) == ["C1"]
-    assert "household_size" in out["explain"]["sources"]["conversation"]
+    assert "household_size" in recorded(out)["sources"]["conversation"]
     assert model["seen"][-1]["household_size"] == 6
     with SessionLocal() as db:
         m = db.get(Member, mid)
@@ -617,25 +624,78 @@ def test_corrections_at_g2_override_and_ask_an_officer_without_changing_the_prof
     assert member.get("/api/me/sacco").json()["update_requests"] is None
 
 
-def test_a_yes_at_g2_is_not_an_answer_to_c2(client, model):
-    """The member still hears C2 for a stale income: G2 is a summary, not the question."""
+def test_g2_leaves_a_stale_income_out_and_c2_asks_about_it(client, model):
     mid, member, _ = borrower()
     age_income(mid, 300)
-    _, out = conversation_with(member, "yes", "yes", "Forty thousand for school fees", "twelve months")
-    assert said(out) == ["C2"]
+    cid, out = conversation_with(member, "yes")
+    assert said(out) == ["G2_NO_INCOME"]
+    assert out["bot_turns"][0]["text"] == ("First, let us check your details. You have 5 people at home and 3 children. "
+                                           "Is that still correct?")
+    assert "shillings" not in out["bot_turns"][0]["text"]
+    out = say(member, cid, "yes")
+    assert said(out) == ["R1"]
+    say(member, cid, "Forty thousand for school fees")
+    out = say(member, cid, "twelve months")
+    assert said(out) == ["C2"]     # nobody has confirmed the income, so it is still stale
+
+
+def test_g2_reads_out_a_fresh_income_and_a_yes_refreshes_what_it_read(client, model):
+    mid, member, _ = borrower()
+    age_income(mid, 170)
+    cid, out = conversation_with(member, "yes")
+    assert said(out) == ["G2"] and "shillings" in out["bot_turns"][0]["text"]
+    say(member, cid, "yes")
+    with SessionLocal() as db:
+        row = db.scalars(select(MemberProfileHistory).where(MemberProfileHistory.member_id == mid,
+                                                            MemberProfileHistory.change == "confirm")
+                         .order_by(MemberProfileHistory.id.desc())).first()
+        assert row.groups == ["household", "income"] and row.actor_user_id is not None
+        seen = decisions.confirmations(db, mid)
+        assert decisions.last_confirmed(seen, "income") == row.created_at
+        assert decisions.last_confirmed(seen, "credit") != row.created_at   # not read out, so not refreshed
+        assert decisions.income_is_stale(db, db.get(Member, mid)) is False
+
+
+def test_a_yes_at_g2_without_the_income_refreshes_only_the_household(client, model):
+    mid, member, _ = borrower()
+    age_income(mid, 300)
+    conversation_with(member, "yes", "yes")
+    with SessionLocal() as db:
+        row = db.scalars(select(MemberProfileHistory).where(MemberProfileHistory.member_id == mid,
+                                                            MemberProfileHistory.change == "confirm")
+                         .order_by(MemberProfileHistory.id.desc())).first()
+        assert row.groups == ["household"]
+        assert decisions.income_is_stale(db, db.get(Member, mid)) is True
+
+
+def test_a_correction_at_g2_refreshes_nothing(client, model):
+    mid, member, _ = borrower()
+    with SessionLocal() as db:
+        before = len(decisions.confirmations(db, mid))
+    conversation_with(member, "yes", "No, we are 6 people at home now")
+    with SessionLocal() as db:
+        assert len(decisions.confirmations(db, mid)) == before
+
+
+def test_a_whole_profile_confirmation_still_covers_every_group(client, model):
+    mid, member, _ = borrower()
+    age_income(mid, 300)
+    assert member.post("/api/me/profile/confirm").status_code == 200
+    with SessionLocal() as db:
+        assert decisions.income_is_stale(db, db.get(Member, mid)) is False
 
 
 def test_an_income_corrected_at_g2_is_held_to_the_tolerance(client, model):
     mid, member, _ = borrower(monthly_income_kes=20000)
     _, out = conversation_with(member, "yes", "No, I earn 90,000 now", "Forty thousand for school fees", "twelve months")
-    assert said(out) == ["O3", "END"] and out["explain"]["reason_code"] == "income_unconfirmed"
+    assert said(out) == ["O3", "END"] and recorded(out)["reason_code"] == "income_unconfirmed"
 
 
 def test_medium_with_only_a_term_answered_goes_to_an_officer(client, model):
     model["risk"] = "Medium"
     _, member, _ = borrower()
     _, out = conversation_with(member, *TO_C1, "twelve months")
-    assert said(out) == ["O3", "END"] and out["explain"]["reason_code"] == "officer_review"
+    assert said(out) == ["O3", "END"] and recorded(out)["reason_code"] == "officer_review"
 
 
 def test_at_most_three_questions_then_an_officer(client, model):
@@ -648,7 +708,7 @@ def test_at_most_three_questions_then_an_officer(client, model):
     assert said(say(member, cid, "Yes, that is right")) == ["C4"]
     out = say(member, cid, "No")
     assert said(out) == ["O3", "END"], out["bot_turns"]
-    assert out["explain"]["reason_code"] == "question_cap"
+    assert recorded(out)["reason_code"] == "question_cap"
     with SessionLocal() as db:
         d = db.get(LoanApplication, out["conversation"]["application_id"]).interview
         assert d.decision.outcome == "refer" and d.assessment.policy_trace["refer_reason"] == "question_cap"
@@ -666,7 +726,7 @@ def test_a_question_not_understood_is_asked_again_then_an_officer(client, model)
     cid, out = conversation_with(member, *TO_C1, "banana")
     assert said(out) == ["REASK"] and out["conversation"]["state"] == "C1"
     out = say(member, cid, "banana")
-    assert said(out) == ["O3", "END"] and out["explain"]["reason_code"] == "not_understood"
+    assert said(out) == ["O3", "END"] and recorded(out)["reason_code"] == "not_understood"
     with SessionLocal() as db:
         ov = db.get(LoanApplication, out["conversation"]["application_id"]).interview.assessment.overrides
         assert ov == {"term_months": None}
@@ -847,7 +907,7 @@ def test_a_new_conversation_after_a_loan_is_told_of_the_first(client, model):
         out = say(member, cid, words)
     # 3 x 30,000 less the 40,000 out: the rest of the first loan counts, not just its instalment.
     out = say(member, cid, "twelve months")
-    assert "maximums" in out["explain"] and out["explain"]["maximums"]["rule_kes"] == 50000
+    assert recorded(out)["trace"]["maximums"]["rule_kes"] == 50000
 
 
 # --- The record --------------------------------------------------------------------------------
@@ -1018,18 +1078,32 @@ def test_a_member_sees_only_their_own(client, admin_client, anon_client, model):
         assert c.get(f"/api/conversations/{cid}/turns/1/audio").status_code == status
 
 
-def test_the_explain_object_holds_no_other_members_figures(client, model):
+def test_a_member_gets_plain_language_and_nothing_else(client, model):
+    """Part of every reply and of the transcript: no class, probability, SHAP value, feature
+    name, policy trace or other member's figure; each check in their own figures."""
     mid, member, guarantors = borrower()
     with SessionLocal() as db:
         numbers = [db.get(Member, g).member_no for g in guarantors]
-    _, out = conversation_with(member, *TO_C1, "twelve months")
-    words = json.dumps(out["explain"])
-    assert out["explain"]["checks"] and not any(n in words for n in numbers)
-    capacity = next(c for c in out["explain"]["checks"] if c["check"] == "guarantor_capacity")
-    assert set(capacity["values"]) == {"need_kes", "own_free_kes"}
-    labelled = {s["feature"] for s in out["explain"]["top_shap"]}
-    assert not labelled & member_text.PERSONAL
-    assert isinstance(out["explain"]["personal_features_left_out"], int)
+    cid, out = conversation_with(member, *TO_C1, "twelve months")
+    assert said(out) == ["CONFIRM"]
+    plain = out["explain"]
+    assert set(plain) == {"reason", "checks", "drivers"}
+    assert all(set(c) == {"passed", "text"} for c in plain["checks"]) and len(plain["checks"]) >= 8
+    assert len(plain["drivers"]) == 3 and all(d.endswith(("counts in your favour.", "counts against your application."))
+                                              for d in plain["drivers"])
+    affordable = next(c for c in plain["checks"] if "instalment" in c["text"])
+    assert affordable["passed"] is True and "KSh 3,554 a month" in affordable["text"]
+    full = member.get(f"/api/conversations/{cid}").json()
+    explains = [out["explain"], *(t["explain"] for t in full["turns"] if t["explain"])]
+    assert len(explains) >= 3 and not any(n in json.dumps(explains) for n in numbers)
+    words = json.dumps([out["member_turn"], out["bot_turns"], explains]).lower()
+    for hidden in ("risk", "probabilit", "shap", "medium", "high", "log_monthly_income", "policy", "trace"):
+        assert hidden not in words, hidden
+
+
+def test_c5_gives_no_figure(client, model):
+    assert templates.render("C5", "en").text == "You need one more guarantor for this loan. Who else could guarantee it?"
+    assert templates.slots_of(templates.load()["C5"]["en"]) == set()
 
 
 def test_replies_and_starts_are_rate_limited(client, model, monkeypatch):

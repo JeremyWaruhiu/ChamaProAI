@@ -24,6 +24,7 @@ export interface AsrStatus {
   model: string | null
   language: string
   error: string | null
+  warmed?: boolean
 }
 
 /** GET /api/health: the speech engine actually in use, and what is configured. */
@@ -119,6 +120,162 @@ export interface ResponseOut {
   translation: string | null
   signals: string[] | null
   created_at: string
+}
+
+// --- A member's conversation --------------------------------------------------------------
+
+export interface ConversationBrief {
+  id: number
+  language: Language
+  status: 'open' | 'completed' | 'abandoned'
+  state: string // the question waiting for an answer; END when it is over
+  consent_given: boolean | null
+  consent_version: string | null
+  policy_version: string
+  application_id: number | null
+  self_service_run_id: number | null
+  started_at: string
+  ended_at: string | null
+  busy: boolean
+}
+
+export interface TurnLatency {
+  asr: number | null
+  translate_extract: number | null
+  evaluate: number | null
+  tts: number | null
+}
+
+export interface ConversationAction {
+  id: 'request_review' | 'book_interview'
+  label: string
+  kik_pending: boolean
+  application_id: number | null
+}
+
+/** What a member reads of a decision: plain language, never a class or a score. */
+export interface MemberExplain {
+  reason: string
+  checks: { passed: boolean | null; text: string }[]
+  drivers: string[]
+}
+
+export interface Extraction {
+  question_id: string
+  parser: Record<string, unknown>
+  model: { fields: Record<string, unknown>; confidence: number } | null
+  model_error: string | null
+  used: Record<string, unknown>
+  amount_conflict: { field: string; model: number; parser: number } | null
+}
+
+export interface Turn {
+  seq: number
+  speaker: 'bot' | 'member'
+  template_id: string | null
+  text: string
+  text_en: string | null
+  kik_pending: boolean
+  audio_url: string | null
+  input_mode: 'voice' | 'text' | null
+  asr_transcript: string | null
+  asr_model: string | null
+  translation: string | null
+  extraction: Extraction | null
+  explain: MemberExplain | null
+  actions: ConversationAction[]
+  latency_ms: TurnLatency
+  created_at: string
+}
+
+export type Decided = 'approved' | 'reversed' | 'referred' | 'not_now' | 'none'
+
+export interface ConversationOutcome {
+  decision: Decided
+  application_id: number | null
+  requested_kes: number | null
+  amount_kes: number | null
+  term_months: number | null
+  instalment_kes: number | null
+  guarantors: string[]
+  balance_before_kes: number | null
+  balance_after_kes: number | null
+  review_requested: boolean
+}
+
+export interface ConversationStarted { conversation: ConversationBrief; resumed: boolean; turns: Turn[] }
+export interface ConversationDetail { conversation: ConversationBrief; turns: Turn[]; outcome: ConversationOutcome | null }
+export interface ConversationReply {
+  conversation: ConversationBrief
+  member_turn: Turn
+  bot_turns: Turn[]
+  explain: MemberExplain | null
+  outcome: ConversationOutcome | null
+}
+export type ServerStage = 'transcribing' | 'understanding' | 'deciding' | 'speaking'
+export interface ConversationStage { stage: ServerStage | null; busy: boolean }
+
+// --- The presenter view (staff) ----------------------------------------------------------------
+
+export interface PresentRow {
+  id: number
+  member_id: number
+  member_no: string
+  member_name: string
+  language: Language
+  status: ConversationBrief['status']
+  state: string
+  turn_count: number
+  busy: boolean
+  stage: ServerStage | null
+  started_at: string
+  last_activity_at: string
+}
+
+export interface PresentContribution { feature: string; value: number | null; shap: number; in_favour: boolean }
+
+/** A turn's whole record of an evaluation. Staff only. */
+export interface StaffExplain {
+  outcome: 'approve' | 'approve_reduced' | 'refer' | 'not_now' | 'clarify'
+  reason_code: string
+  reason: string
+  risk_class: string
+  probabilities: Record<string, number>
+  contributions: PresentContribution[]
+  shap_error: string | null
+  features: Record<string, unknown>
+  provenance: Record<string, string>
+  overrides: Record<string, unknown>
+  questions: string[]
+  amount_kes: number | null
+  term_months: number | null
+  instalment_kes: number | null
+  policy_version: string
+  trace: { checks: PolicyCheck[] }
+}
+
+export interface PresentTurn extends Omit<Turn, 'explain' | 'actions'> { explain: StaffExplain | null }
+
+export interface PresentDetail {
+  row: PresentRow
+  consent_given: boolean | null
+  consent_version: string | null
+  policy_version: string
+  application_id: number | null
+  turns: PresentTurn[]
+  outcome: (ConversationOutcome & {
+    ledger: { entry_id: number; loan_id: number; reference: string; entry_type: string; amount_kes: number; posted_at: string } | null
+  }) | null
+}
+
+export interface DemoPerson { member_id: number; full_name: string; open_conversations: number; active_loans: number; open_applications: number }
+export interface DemoStatus { available: boolean; people: DemoPerson[] }
+export interface DemoResetResult {
+  conversations_closed: number
+  loans_reversed: number
+  applications_closed: number
+  problems: string[]
+  people: DemoPerson[]
 }
 
 export interface Contribution {

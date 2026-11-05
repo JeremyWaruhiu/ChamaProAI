@@ -197,6 +197,16 @@ def confirm_profile(db: Session, m: Member, actor: User | None) -> MemberProfile
     return m.profile
 
 
+def confirm_groups(db: Session, m: Member, groups: list[str], actor: User | None) -> None:
+    """The member heard these groups read out and said they are still right: only these
+    are fresh again, since nobody asked about the rest. No figure changes."""
+    if m.profile is None or not groups:
+        return
+    m.profile.confirmed_at = utcnow()
+    db.flush()
+    record_change(db, m.profile, "confirm", groups, actor)
+
+
 def request_update(db: Session, m: Member, values: dict, conversation_id: int, actor: User | None) -> None:
     """The member told the conversation something else. The profile stays as it is and
     its verification with it; the history keeps what they asked for, for an officer to

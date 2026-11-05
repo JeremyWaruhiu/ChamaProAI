@@ -5,6 +5,8 @@ import App from './App.tsx'
 
 // The address volunteers are given is /signup; the app itself routes on the hash.
 if (window.location.pathname.replace(/\/$/, '') === '/signup') window.location.replace('/#/signup')
+// The address the projector is pointed at.
+if (window.location.pathname.replace(/\/$/, '') === '/present') window.location.replace('/#/present')
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>

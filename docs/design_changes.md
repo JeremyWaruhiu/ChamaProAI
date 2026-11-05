@@ -499,7 +499,7 @@ accept. A referral or "not now" commits at once, with no CONFIRM.
 | Decision | Why |
 |---|---|
 | Phase 1 has no "profile update request", though the brief says "as phase 1 does". Added as a `member_profile_history` row, `change = update_request`, holding the unchanged snapshot and what was asked for | The nearest thing phase 1 has, and already append-only. The audit log gets group names only. Staff read them in `update_requests` on the member's SACCO page; no screen shows them yet. |
-| A yes at G2 is not a confirmation of the profile and does not answer C2 | A confirmation would reset the income's age, and Njeri would never reach C2. So a member with a stale income hears it twice. An income corrected at G2 does count as C2 and is held to the tolerance. |
+| A yes at G2 is not a confirmation of the profile and does not answer C2 (phase 4: it refreshes what was read out, and a stale income is not read out) | A confirmation would reset the income's age, and Njeri would never reach C2. An income corrected at G2 does count as C2 and is held to the tolerance. |
 | A stated income with no profile figure refers (`income_unconfirmed`) | There is nothing to compare it with, and it is the same hole the ruling closes. |
 | CHECK_AMOUNT guards every money figure (R1, C2, C3, C4), not only the loan amount | A wrong income moves the score as a wrong amount does. It does not count towards the 3 questions. |
 | Consent unclear twice is treated as not given | It must never be inferred. |
@@ -528,18 +528,12 @@ above 999,999 is left as a figure in Kikuyu text.
 
 ### Open questions
 
-- **The member sees the class and probabilities.** `explain` goes to the member as the brief asks.
-  Until now they were kept from members, and `member_text` was written to keep them out. Decide
-  whether phase 4 shows them to members, or only in a supervised demonstration.
-- **C5 shows a guarantor's figure.** "Your guarantors can cover {capacity} shillings" is as
-  written. With one pledge, it is that member's ceiling or free deposits. `explain` keeps every
-  such figure out; this template does not.
+- Settled in phase 4, which see: what a member sees in `explain`, C5's figure, a member hearing a
+  stale income twice, and the 3 x rule in the branch flow.
 - **Latency on Supabase.** On SQLite a reply is 9 to 21 queries, and the reply that pays out is
   about 53. At ~200 ms a round trip, that is 2 to 4 s and about 10 s respectively, before speech.
   Not measured there; the figures are queries x the round trip in `test_query_counts.py`.
 - **Speech with slots is slow on a CPU.** See below. Sentences with amounts cannot be pre-warmed.
-- **The 3 x rule in the branch flow.** `comparator.py` still reads deposits x 3 alone. Changing it
-  would change the agreement figures in the dissertation, so it is left for you to decide.
 - **Licence.** Both voices are CC-BY-NC 4.0. A real SACCO deployment would need other voices.
 - **"Good morning"** is fixed text, at any hour.
 - Still open from earlier phases: the capacity oracle, one-time codes for claiming a member,
@@ -574,3 +568,97 @@ Of that, 9.2 s was ASR, including loading the model, and 3.3 s was speech.
 | `not_now` applications can be booked directly; a cancelled booking returns them to `declined` | "Not now" offers the booking flow. |
 | Row-level security, with no policies, on the three new tables | As on every other table. |
 
+## The phone chat and the presenter view (phase 4 of 5)
+
+No migration. Policy version `2026.11.3`, because a yes at G2 now changes when C2 fires. A member
+applies by talking on a phone (`#/my/chat`), and a laptop follows on `/present`.
+
+### Rulings on the phase 3 questions
+
+| Ruling | How it is built |
+|---|---|
+| Members never see the class or probabilities | The turn's record keeps everything (`machine.explain`). A member gets `member_text.plain_explain` of it, built field by field: the reason, each check as a sentence in their own figures, the top three drivers as sentences. `reason_code` and the check ids stay out as well. Officers and admins read the record through `/api/present/...`. |
+| C5: "You need one more guarantor for this loan. Who else could guarantee it?" | No slot any more. |
+| `comparator.py` stays as it is | Unchanged. |
+| G2 leaves out a stale income; a yes refreshes the groups it read out | New template `G2_NO_INCOME`. The groups read out are held in the context, and a yes writes a `confirm` row in `member_profile_history` naming them. `decisions.last_confirmed` now takes a group; a `confirm` with no groups is the whole profile, as before. A correction refreshes nothing. |
+
+### Template ids that need a Kikuyu text
+
+All 24 are empty: `G1`, `CONSENT`, `G2`, `G2_NO_INCOME`, `R1`, `C1`, `C2`, `C2_NEW`, `C3`, `C4`, `C5`, `C6`, `CHECK_AMOUNT`,
+`REASK`, `CONFIRM`, `O1`, `O2`, `O3`, `O4`, `O4_GUARANTORS`, `OFFICER_HELP`, `END`, `ACTION_REVIEW`, `ACTION_BOOK`.
+Filling `CONSENT` changes the consent version. Also English only, and not templates: the reasons and
+check sentences in `member_text.py`, and the screen's own words in `strings.ts`. The quick replies
+`Ĩĩ` and `Aca` come from the lexicon, which no speaker has reviewed.
+
+### Decisions the brief left open
+
+| Decision | Why |
+|---|---|
+| A yes at G2 refreshes an income's age but does not answer C2 | An unverified income among the top three drivers is still asked at C2, right after the member said yes to it. Counting that yes as C2 would clear a Medium score with no new information. A policy change, left for you. |
+| Ten SHAP values kept on evaluations only: `score(top=)`, default 8 | The branch interview's stored assessments stay as they were. |
+| The SHAP chart's axis is "in the member's favour", not raw SHAP | Values are for the class predicted at that evaluation, so a raw +0.3 for Medium and +0.3 for Low point opposite ways. Comparing across C2 needs one direction. Say so if asked: for Medium it is the same approximation as `member_text`. |
+| The faint bars show the last evaluation that differs, not simply the one before | The yes at CONFIRM re-scores the same answers. The C2 movement would vanish at the end otherwise. A stepper shows any evaluation. |
+| Stages are held in memory, by conversation, and polled | The reply is one request, and the record is written only at its end. With more than one worker a screen sees no stage, and nothing else changes. |
+| The reply still waits for speech; audio is fetched after the text | Turns are append-only, so `audio_ref` cannot be filled in later. Warm, this costs nothing. An uncached sentence delays the text by about 3 s. |
+| One audio element plays everything, unlocked by playing silence inside the tap | iOS allows later play only on the element it saw tapped. If the browser refuses anyway, *Tap to start* comes back. Pressing the microphone stops the bot. |
+| Yes and No appear on exactly the three states asked for | C6 and G2 are also yes/no questions, but a bare "no" at G2 only gets REASK. |
+| The newest member bubble opens its details; older ones close | A phone screen holds about two turns. |
+| `#/my/chat/:id` keeps a finished conversation's outcome across a reload | "Current" finds only open ones. |
+| `/present` redirects to `#/present` | As `/signup` does: the address is easy to say. |
+| A referral can now be booked from the member's application page | The API allowed it since phase 2, but the screen offered it only on a draft. Found by following *Book a time* in the browser. |
+| Reset acts only on `seed_tag` `demo-db:wanjiru` and `demo-db:njeri` | Only a `--demo-db` build has them, so elsewhere it is a 404 and the button does not show. |
+| Reset ignores the reversal window and reports money already drawn instead of forcing it | A rehearsal may be days old. It uses the ordinary reversal: compensating entries, notices, audit. Their other applications go to `declined`, with bookings cancelled. It also clears those two members' conversation rate limits. |
+| Warm-up does more than Paza: the audio libraries (about 8 s on the first upload), the classifier and SHAP (about 7 s on the first evaluation), the English voice | Each was measured in front of a member in the browser run. `ASR_WARM=0` turns off the ASR and classifier warm-up; `ASR_WARM_ENGLISH=1` also warms Whisper. |
+| Njeri's script has "12 months" between the request and the income | R1 extracts no term, so she hears C1. The brief's list leaves it out. |
+
+### Things to know
+
+- **C5 needs a name and a member number.** The new wording asks only who. A name alone gets REASK,
+  then a referral, because `named_member` looks up both. Wanjiru and Njeri never reach C5.
+- **`data/demo.db` is at revision 0006, from before phase 3.** Its pledges have no ceilings and
+  Njeri's income is 10,000. The demonstration does not run on it until it is rebuilt, which
+  issues new passwords. `warm_demo.py` says so and stops.
+- **Reversed rehearsals stay in the ledger**, as they should. My SACCO shows them.
+
+### Timings on this machine (8 threads, Paza on the GPU, warm cache)
+
+`scripts/warm_demo.py`, typed answers through `service.reply`, no Gemini, English voice in both
+languages because the Kikuyu templates are empty. Milliseconds of server work:
+
+| Turn | Wanjiru en | Wanjiru kik | | Turn | Njeri en | Njeri kik |
+|---|---:|---:|---|---|---:|---:|
+| start | 5 | 9 | | start | 5 | 5 |
+| consent | 9 | 12 | | consent | 11 | 9 |
+| G2 | 10 | 9 | | G2_NO_INCOME | 10 | 8 |
+| request | 65 | 67 | | request | 70 | 77 |
+| term | 81 | 62 | | term | 516 | 360 |
+| yes, paid out | 123 | 159 | | income | 162 | 668 |
+| | | | | yes, paid out | 741 | 821 |
+| **Total** | **0.29 s** | **0.32 s** | | **Total** | **1.51 s** | **1.95 s** |
+
+| Voice, over HTTP | Time |
+|---|---|
+| Paza alone, standalone | 18 s to load, 7.4 s first clip, 2.9 s second |
+| A 2.6 s webm reply, straight after warm-up, nothing else running | 2.1 to 3.1 s per turn, five turns |
+| Through a real quick tunnel | 2.4 s, release to reply on screen |
+| The final browser run: two Chromium pages and a fake microphone on the same machine | 1.6 to 2.2 s, release to reply on screen, five turns |
+| One earlier browser run, same code path | 10, 10, 5, 3 and 4 s of ASR |
+
+The slow run was not explained: it did not come back in the runs after it, and nothing else in the
+run marked it out. So allow for a first voice turn of about 10 s on the day, and rehearse. Gemini
+would add to every line: it was not measured, since no test may call it.
+
+Screens are in `docs/screenshots/chat-*.png` and `present-*.png`. The voice turns come from
+Chromium's fake microphone playing one corpus clip, with a stand-in for Gemini, so under them the
+transcript is that clip and the English is scripted: they show the screen working, not what Paza
+heard of those answers.
+
+### API changes for this work
+
+| Change | Reason |
+|---|---|
+| `explain` on a member's turn and reply is now `MemberExplain` | The ruling. |
+| `outcome` on replies and details; `busy` on the brief; `GET .../current`; `GET .../stage` | The outcome card, carrying on after a reload, the stage indicator. |
+| `GET /api/present/conversations`, `/{id}`, `/{id}/turns/{seq}/audio` | Officers and admins. |
+| `GET` and `POST /api/admin/demo-reset` | Admins. |
+| `warmed` on each ASR in `/api/health` | So the presenter knows when to start. |

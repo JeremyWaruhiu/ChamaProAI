@@ -26,8 +26,8 @@ from sqlalchemy.orm import Session, contains_eager, joinedload, selectinload
 from chamapro import config
 from chamapro.conversation import service, tts
 
-from . import (admin, audit, auth, bookings, comparator, conversations, events, ledger, ledger_api, live_cache, loans,
-               pilot, sacco, self_service, storage)
+from . import (admin, audit, auth, bookings, comparator, conversations, decisions, events, ledger, ledger_api, live_cache,
+               loans, pilot, presenter, sacco, self_service, storage)
 from . import pipeline as pl
 from . import schemas as s
 from .auth import require_admin, require_member, require_officer
@@ -54,6 +54,8 @@ async def lifespan(app: FastAPI):
     storage.backend()      # fail at startup, not on the first upload, if misconfigured
     pl.load_asr()
     pl.start_worker()
+    pl.warm_asr_in_background()
+    decisions.warm_classifier_in_background()
     service.abandon_idle_at_startup()
     tts.prewarm_in_background()
     yield
@@ -103,6 +105,7 @@ app.include_router(sacco.router)
 app.include_router(ledger_api.router)
 app.include_router(self_service.router)
 app.include_router(conversations.router)
+app.include_router(presenter.router)
 
 
 # --- Errors: always {"detail": "<string>"} -----------------------------------

@@ -649,12 +649,19 @@ English and Kikuyu numbers, and a yes/no lexicon.
     GET  /api/conversations/{id}                      the whole transcript
     GET  /api/conversations/{id}/turns/{seq}/audio    what a bot turn said, as MP3
 
+    GET  /api/conversations/current                   the open one to carry on, or null
+    GET  /api/conversations/{id}/stage                what the reply in flight is doing
+    GET  /api/present/conversations[/{id}]            officers and admins: the whole record, live
+    GET|POST /api/admin/demo-reset                    admins: rehearse again (see "Phone demo")
+
 A member sees only their own, and starts and replies are rate limited. A reply returns
 what was understood (transcript, translation, extraction, per-stage latency), the next
-bot turns, and an `explain` object once the engine has run. That object holds the risk
-class, the probabilities, the top SHAP values with plain labels, each check with its
-values, and which features came from records, the profile or the conversation. Other
-members' figures are left out of it.
+bot turns, an `explain` object once the engine has run, and an `outcome` once it has ended.
+`explain` is plain language only: the reason, each check passed or not in the member's own
+figures, and the three largest drivers as sentences. The risk class, the probabilities, the
+SHAP values and the policy trace are kept on the turn and go only to officers and admins.
+
+The screens are `#/my/chat` for the member and `/present` for staff.
 
 Rehearse in the terminal, on a throwaway database. Nothing reaches Gemini without `--live`:
 
@@ -1053,6 +1060,62 @@ reconnects on its own when the connection returns; if the URL stops working,
 press Ctrl-C and run `scripts/demo_tunnel.sh` again for a new one.
 
 Afterwards: Ctrl-C the tunnel, then `docker compose down`.
+
+## Phone demo
+
+A member applies from a phone by talking, while the projector shows the laptop's presenter
+view of the same conversation. uvicorn serves the built frontend and the API from one origin,
+and a Cloudflare quick tunnel makes that origin https, which the phone's microphone requires.
+The session cookie needs nothing set: it is `Secure` when the request is https as the browser
+sees it and left off on plain localhost, always `HttpOnly` and `SameSite=Strict`. uvicorn
+believes cloudflared's `X-Forwarded-Proto` because cloudflared connects from 127.0.0.1.
+
+**Before the day** (`cloudflared`: see "Online demo"):
+
+    cd frontend && npm run build && cd ..
+    STORAGE_BACKEND=local CHAMAPRO_UPLOADS=data/demo_uploads \
+        python scripts/seed_demo.py --demo-db data/demo.db --replace    # note the passwords it prints
+    python scripts/warm_demo.py                                         # with the server stopped
+
+`warm_demo.py` runs both demo conversations in both languages on a temporary copy, so every
+line the bot will say is in `data/tts_cache`, and prints the time each turn takes. It stops
+with an instruction if the demo database is older than the code. Rehearse once with Gemini on:
+the automated runs use a stand-in for it.
+
+**On the day**, in two terminals on the laptop. Name the database and storage explicitly:
+`.env` may point at Supabase, and an explicit variable wins over it.
+
+    DATABASE_URL=sqlite:///$PWD/data/demo.db STORAGE_BACKEND=local CHAMAPRO_UPLOADS=data/demo_uploads \
+        CONVERSATION_GEMINI_LIVE=1 ASR_WARM_ENGLISH=1 \
+        uvicorn chamapro.api.main:app --port 8000
+
+    cloudflared tunnel --url http://localhost:8000     # prints https://<random>.trycloudflare.com
+
+1. **Projector:** on the laptop, open <http://localhost:8000/present> and sign in as `j.mwangi`
+   or `s.achieng`. Wait for the badge *Kikuyu speech model warmed*, about a minute after start-up.
+2. **Phone:** open the printed https address and sign in as `w.kamau` or `n.mwangi`.
+3. **Phone:** *Request a loan*, then the language, then *Tap to start*, which lets the phone play
+   sound. Turn the ringer on; the silent switch on an iPhone mutes it. Allow the microphone
+   when asked, then hold the button and speak.
+4. **Projector:** click the member's name, then *Presentation mode*.
+
+The answers: Wanjiru asks for 40,000 for a dairy cow, then 12 months, then yes. Njeri asks for
+60,000 for school fees, then 12 months, then says her income is 22,000 (the moment the bars
+move), then accepts 45,000. All of them can be typed, or tapped where Yes and No are offered.
+
+**To rehearse again:** sign in as the admin (`s.achieng`) and press *Reset demo members* at the
+bottom of `/present`. It closes both members' open conversations, reverses the loans their
+conversations paid out and closes any referral. Rehearsals stay in their ledger as
+compensating entries, so rebuild the database before the final run if My SACCO will be shown.
+
+**If something goes wrong:**
+
+- *The internet drops:* present from the laptop at <http://localhost:8000>, where the microphone
+  also works. A new tunnel gets a new address.
+- *Gemini is slow or unreachable:* each reply waits up to `CONVERSATION_GEMINI_SECONDS` (8), then
+  the parsers go on alone, and a Kikuyu reply has no English translation to show.
+- *A voice reply is misheard:* type the answer in the box below the button.
+- *An amount that is not in the script:* its sentence is made on the spot, about 3 s on the CPU.
 
 ## Licence and third-party components
 

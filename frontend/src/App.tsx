@@ -7,6 +7,7 @@ import { ErrorBoundary, ErrorNotice, Loading } from './components/Notice'
 import { ToastProvider } from './components/Toast'
 import { SkeletonPage } from './components/ui'
 import { AuthContext, isStaff, redirectFor } from './lib/auth'
+import { usePresentationMode } from './lib/presentation'
 import { parse, paths, redirect, useRoute, type Route } from './lib/router'
 import { t } from './strings'
 
@@ -37,6 +38,9 @@ const Results = screen(() => import('./screens/Results'), 'Results')
 const MyApplications = screen(() => import('./screens/MyApplications'), 'MyApplications')
 const MyApplication = screen(() => import('./screens/MyApplication'), 'MyApplication')
 const Apply = screen(() => import('./screens/Apply'), 'Apply')
+const Chat = screen(() => import('./screens/Chat'), 'Chat')
+const PresentList = screen(() => import('./screens/Present'), 'PresentList')
+const PresentOne = screen(() => import('./screens/Present'), 'PresentOne')
 const MySacco = screen(() => import('./screens/MySacco'), 'MySacco')
 const Registration = screen(() => import('./screens/MySacco'), 'Registration')
 const PracticeRunner = screen(() => import('./screens/Practice'), 'PracticeRunner')
@@ -69,6 +73,8 @@ function screenFor(route: Route, onSignedIn: (me: Me) => void): ReactNode {
     case 'member': return <MemberDetail key={`m${route.id}`} id={route.id} />
     case 'decisions': return <AutomaticDecisions />
     case 'decision': return <AutomaticDecisionPage key={`d${route.id}`} id={route.id} />
+    case 'present': return <PresentList />
+    case 'presentOne': return <PresentOne key={`o${route.id}`} id={route.id} />
     case 'bookings': return <Bookings />
     case 'events': return <Events />
     case 'admin': return <AdminHome />
@@ -79,6 +85,7 @@ function screenFor(route: Route, onSignedIn: (me: Me) => void): ReactNode {
     case 'my': return <MyApplications />
     case 'myApplication': return <MyApplication key={`y${route.id}`} id={route.id} />
     case 'apply': return <Apply />
+    case 'chat': return <Chat key={`h${route.id}`} id={route.id} />
     case 'mySacco': return <MySacco />
     case 'registration': return <Registration />
     case 'practice': return <PracticeRunner key={`q${route.id}`} id={route.id} question={route.question} />
@@ -92,6 +99,7 @@ export default function App() {
   useRoute() // re-render on every hash change
   // Render from the live hash: it can be ahead of the hashchange event after a redirect.
   const route = parse(window.location.hash)
+  const [presenting] = usePresentationMode()
   const [session, setSession] = useState<Session>({ status: 'checking' })
 
   const check = useCallback(async () => {
@@ -138,8 +146,10 @@ export default function App() {
     </ErrorBoundary>
   )
   const publicPage = route.screen === 'landing' || route.screen === 'login' || route.screen === 'signup'
+  // These fill the screen themselves: the chat for one hand, the presenter view on a projector.
+  const bare = route.screen === 'chat' || (presenting && (route.screen === 'present' || route.screen === 'presentOne'))
   let page: ReactNode = content
-  if (user && !publicPage) {
+  if (user && !publicPage && !bare) {
     page = isStaff(user.role)
       ? <StaffLayout user={user} screen={route.screen}>{content}</StaffLayout>
       : <MemberLayout user={user} screen={route.screen}>{content}</MemberLayout>

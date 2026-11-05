@@ -124,7 +124,7 @@ def parsers(question_id: str, text: str, language: str) -> dict:
     out = {}
     if question_id in ("CONSENT", "CONFIRM", "C6"):
         out = {"answer": answer}
-    elif question_id == "G2":
+    elif question_id in ("G2", "G2_NO_INCOME"):
         out = {"answer": answer, "corrections": parse_corrections(text, language, answer)}
     elif question_id == "R1":
         amount = number if number is not None and number >= SMALLEST_LOAN_KES else None

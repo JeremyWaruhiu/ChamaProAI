@@ -12,11 +12,14 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
 from collections import deque
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
 
+import numpy as np
+import soundfile as sf
 from sqlalchemy import select
 
 from chamapro import config
@@ -41,6 +44,7 @@ _asr: transcribe.ASR | None = None       # Kikuyu
 _asr_en: transcribe.ASR | None = None    # English, loaded on first use
 _asr_en_error: str | None = None
 _asr_en_lock = threading.Lock()
+_warmed: set[str] = set()       # languages whose model has run since it loaded
 # One worker thread transcribes one clip at a time: inference is CPU-bound and
 # the HF pipeline is not thread-safe. Request-scoped BackgroundTasks only
 # enqueue, so a 40-clip interview never parks 40 threads in the shared pool.
@@ -91,8 +95,40 @@ def asr_status() -> dict:
     for lang, asr, err in (("kik", _asr, None), ("en", _asr_en, _asr_en_error)):
         out[lang] = {"loaded": asr is not None, "engine": asr and asr.engine,
                      "device": asr and asr.device, "model": asr and asr.label,
-                     "language": ASR_LANGUAGES[lang], "error": err}
+                     "language": ASR_LANGUAGES[lang], "error": err, "warmed": lang in _warmed}
     return out
+
+
+def warm_asr(languages: tuple[str, ...] = ("kik",)) -> dict[str, float]:
+    """Transcribe one clip per language, so the first real one does not pay for the
+    model's first run: a corpus clip if this machine has the corpus, else a few seconds of
+    quiet noise. Returns the seconds each model took."""
+    corpus = sorted((config.DATA_DIR / "audio_16k").glob("*.wav"))
+    timings = {}
+    with tempfile.TemporaryDirectory(prefix="chamapro-warm-") as tmp:
+        clip = corpus[0] if corpus else Path(tmp) / "warm.wav"
+        if not corpus:
+            sf.write(clip, np.random.default_rng(0).normal(0, 0.005, 16000 * 3).astype(np.float32), 16000)
+        # The first upload pays for importing the audio libraries: about 8 s, if not done here.
+        duration = convert_upload(clip, Path(tmp) / "converted.wav")
+        for language in languages:
+            started = time.perf_counter()
+            transcribe_now(clip, language, duration)
+            timings[language] = time.perf_counter() - started
+            _warmed.add(language)
+    return timings
+
+
+def warm_asr_in_background() -> None:
+    def run():
+        languages = ("kik", "en") if config.ASR_WARM_ENGLISH else ("kik",)
+        try:
+            for language, seconds in warm_asr(languages).items():
+                log.info("ASR warmed for %s in %.1f s", language, seconds)
+        except Exception:
+            log.exception("the ASR could not be warmed; the first reply will take longer")
+    if config.ASR_WARM:
+        threading.Thread(target=run, name="asr-warm", daemon=True).start()
 
 
 def asr_settings() -> dict:

@@ -144,7 +144,9 @@ function BookingCard({ app, onChanged }: { app: Mine; onChanged: (a: Mine) => vo
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<ApiError | null>(null)
   const b = app.booking
-  const canBook = !b && (app.status === 'draft' || app.status === 'interview_pending')
+  // An automatic decision that referred it, or said "not now", can be taken to an officer.
+  const fromDecision = app.mode === 'self_service' && (app.status === 'decided' || (app.status === 'declined' && app.outcome === 'not_now'))
+  const canBook = !b && (app.status === 'draft' || app.status === 'interview_pending' || fromDecision)
   if (!b && !canBook) return null
 
   async function book() {

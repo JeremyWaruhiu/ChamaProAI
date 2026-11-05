@@ -324,9 +324,10 @@ def load_classifier(model_path=MODEL, meta_path=META):
     return _load(str(m), str(t), (m.stat().st_mtime_ns, t.stat().st_mtime_ns))
 
 
-def score(features, model_path=MODEL, meta_path=META, form=None):
+def score(features, model_path=MODEL, meta_path=META, form=None, top=8):
     """features: what the extraction model returned; form: form_values() of
-    the applicant form, or None for an interview without one (v1)."""
+    the applicant form, or None for an interview without one (v1); top: how many
+    SHAP contributions to keep, largest first."""
     clf, meta, sha = load_classifier(model_path, meta_path)
     order, classes = meta["feature_order"], meta["classes"]
 
@@ -345,7 +346,7 @@ def score(features, model_path=MODEL, meta_path=META, form=None):
         arr = sv[pred] if sv.ndim == 3 and sv.shape[0] == len(proba) else (
               sv[..., pred] if sv.ndim == 3 else sv)
         arr = np.asarray(arr).reshape(-1)
-        for i in np.argsort(np.abs(arr))[::-1][:8]:
+        for i in np.argsort(np.abs(arr))[::-1][:top]:
             contrib.append({"feature": order[i],
                             "value": None if pd.isna(X.iloc[0, i]) else float(X.iloc[0, i]),
                             "shap": round(float(arr[i]), 4)})

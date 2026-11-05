@@ -62,7 +62,7 @@ class CheckAmount(Fields):
 
 
 QUESTIONS: dict[str, type[Fields]] = {
-    "CONSENT": YesNo, "G2": YesNo, "R1": R1, "C1": C1, "C2": C2, "C2_NEW": C2, "C3": C3, "C4": C4, "C5": C5, "C6": YesNo,
+    "CONSENT": YesNo, "G2": YesNo, "G2_NO_INCOME": YesNo, "R1": R1, "C1": C1, "C2": C2, "C2_NEW": C2, "C3": C3, "C4": C4, "C5": C5, "C6": YesNo,
     "CHECK_AMOUNT": CheckAmount, "CONFIRM": YesNo,
 }
 # The one money figure a question can give, for comparing the model with the parser.

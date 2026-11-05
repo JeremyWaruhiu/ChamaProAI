@@ -45,10 +45,10 @@ def show_explain(explain: dict) -> None:
     print("\n--- explain")
     print(f"  outcome      {explain['outcome']} ({explain['reason_code']}): {explain['reason']}")
     print(f"  risk class   {explain['risk_class']}  {explain['probabilities']}")
-    for s in explain["top_shap"][:5]:
-        print(f"  SHAP         {s['shap']:+.3f} {'for    ' if s['in_favour'] else 'against'} {s['label']}")
-    print(f"  maximums     {explain['maximums']}")
-    for c in explain["checks"]:
+    for s in explain["contributions"][:5]:
+        print(f"  SHAP         {s['shap']:+.3f} {'for    ' if s['in_favour'] else 'against'} {s['feature']}")
+    print(f"  maximums     {explain['trace']['maximums']}")
+    for c in explain["trace"]["checks"]:
         mark = {True: "pass", False: "FAIL", None: "n/a "}[c["passed"]]
         print(f"  {mark}         {c['check']}: {json.dumps(c['values'], ensure_ascii=False)}")
     print(f"  sources      {json.dumps(explain['sources'])}")

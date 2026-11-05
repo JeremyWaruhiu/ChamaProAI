@@ -17,7 +17,7 @@ from chamapro import config
 from . import english_numbers, kikuyu_numbers
 
 PATH = Path(__file__).with_name("templates.yaml")
-NUMERIC_SLOTS = {"amount", "monthly_income", "capacity", "max_amount", "instalment", "term", "household_size", "children",
+NUMERIC_SLOTS = {"amount", "monthly_income", "max_amount", "instalment", "term", "household_size", "children",
                  "months", "min_guarantors"}
 LANGUAGES = ("en", "kik")
 

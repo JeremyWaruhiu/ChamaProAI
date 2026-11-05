@@ -1,4 +1,5 @@
 import type {
+  ConversationDetail, ConversationReply, ConversationStage, ConversationStarted, DemoResetResult, DemoStatus, PresentDetail, PresentRow,
   ApplicantFormOptions, ApplicationCreate, AutomaticDecision, AutomaticDecisionDetail, LoanOut, ApplicationDetail, ApplicationStatus, ApplicationSummary,
   ApplyOptions, Assessment, AuditEntry, AuditFilter, AuthConfig, Booking, BookingCalendar, DaySlots,
   Decision, DecisionCreate, EventBody, Guarantor, GuarantorIn, GuarantorOffers, ProfileBody, SaccoView, Health, InterviewCreate, InterviewState,
@@ -16,6 +17,8 @@ export const ASSESS_TIMEOUT_MS = 90_000
 /** The live statistics behind Model & Evaluation and the admin overview: a few
  * queries, each a round trip to Supabase, when the server's copy has expired. */
 export const RESULTS_TIMEOUT_MS = 30_000
+/** A conversation's reply can run speech recognition, the model, a decision and speech, one after another. */
+export const REPLY_TIMEOUT_MS = 120_000
 
 /** Every failure, network or HTTP, arrives as one of these with a readable message. */
 export class ApiError extends Error {
@@ -202,6 +205,27 @@ export const api = {
   // sign-up (public)
   signupInfo: () => request<SignupInfo>('/auth/signup'),
   signup: (body: SignupBody) => request<Me & { member_no: string; claimed: boolean; profile_due: boolean }>('/auth/signup', json('POST', body)),
+
+  // the presenter view, and rehearsing again
+  presentList: () => request<PresentRow[]>('/present/conversations'),
+  presentDetail: (id: number) => request<PresentDetail>(`/present/conversations/${id}`),
+  demoStatus: () => request<DemoStatus>('/admin/demo-reset'),
+  demoReset: () => request<DemoResetResult>('/admin/demo-reset', { method: 'POST' }, RESULTS_TIMEOUT_MS),
+
+  // a member's conversation
+  currentConversation: () => request<ConversationDetail | null>('/conversations/current'),
+  startConversation: (language: Language) =>
+    request<ConversationStarted>('/conversations', json('POST', { language }), REPLY_TIMEOUT_MS),
+  conversation: (id: number) => request<ConversationDetail>(`/conversations/${id}`),
+  conversationStage: (id: number) => request<ConversationStage>(`/conversations/${id}/stage`),
+  replyToConversation: (id: number, reply: { text: string } | { audio: Blob; filename: string }) => {
+    const form = new FormData()
+    if ('text' in reply) form.append('text', reply.text)
+    else form.append('audio', reply.audio, reply.filename)
+    return request<ConversationReply>(`/conversations/${id}/reply`, { method: 'POST', body: form }, REPLY_TIMEOUT_MS)
+  },
+  requestReview: (applicationId: number, key: string) =>
+    request<unknown>(`/self-service/applications/${applicationId}/review`, once(key, {})),
 
   // a member's own record and loan application
   myHome: () => request<MemberHome>('/me/home'),

@@ -68,6 +68,7 @@
   border: 1px solid var(--line-strong); border-radius: var(--radius); background: var(--surface); color: var(--ink); cursor: pointer;
 }
 .main { max-width: var(--content); margin: 0 auto; padding: var(--space-7) var(--space-6) var(--space-10); }
+.mainWide { max-width: none; }
 .main:focus { outline: none; }
 
 /* drawer (small screens) */

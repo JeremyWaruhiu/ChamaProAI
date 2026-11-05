@@ -198,6 +198,21 @@ def reversal_deadline(loan: LoanAccount, app: LoanApplication | None) -> datetim
     return loan.created_at + timedelta(hours=config.REVERSAL_HOURS)
 
 
+def apply_reversal(db: Session, loan: LoanAccount, app: LoanApplication | None, user: User, reason: str) -> None:
+    """The entries, the guarantors' notices, the audit row and the application's status."""
+    entries = ledger.reverse_loan(db, loan, user)
+    told = db.scalars(select(MemberNotice.member_id).where(MemberNotice.loan_account_id == loan.id,
+                                                           MemberNotice.kind == "guarantee_started")).all()
+    borrower = db.get(Member, loan.member_id).full_name
+    db.add_all([MemberNotice(member_id=i, kind="guarantee_ended", loan_account_id=loan.id,
+                             text=f"You are no longer guaranteeing {borrower}'s loan of "
+                                  f"KSh {loan.principal_kes:,}: it was reversed.") for i in told])
+    audit.record(db, user, "loan.reverse", "loan_account", loan.id, entry_ids=[e.id for e in entries],
+                 application_id=loan.application_id, reason=reason)
+    if app is not None:
+        loans.set_status(db, app, "reversed", user, loan_id=loan.id)
+
+
 @router.post("/loans/{loan_id}/reverse", response_model=s.LoanOut)
 def reverse_loan(loan_id: int, body: s.ReversalPost, key: IdemKey, db: Session = Depends(get_db),
                  user: User = Depends(require_officer)):
@@ -213,16 +228,6 @@ def reverse_loan(loan_id: int, body: s.ReversalPost, key: IdemKey, db: Session =
         if deadline is not None and utcnow() > deadline:
             raise HTTPException(409, f"this automatic payout can be reversed for {config.REVERSAL_HOURS} hours, "
                                      "and that time has passed")
-        entries = ledger.reverse_loan(db, loan, user)
-        told = db.scalars(select(MemberNotice.member_id).where(MemberNotice.loan_account_id == loan.id,
-                                                               MemberNotice.kind == "guarantee_started")).all()
-        borrower = db.get(Member, loan.member_id).full_name
-        db.add_all([MemberNotice(member_id=i, kind="guarantee_ended", loan_account_id=loan.id,
-                                 text=f"You are no longer guaranteeing {borrower}'s loan of "
-                                      f"KSh {loan.principal_kes:,}: it was reversed.") for i in told])
-        audit.record(db, user, "loan.reverse", "loan_account", loan.id, entry_ids=[e.id for e in entries],
-                     application_id=loan.application_id, reason=body.reason.strip())
-        if app is not None:
-            loans.set_status(db, app, "reversed", user, loan_id=loan.id)
+        apply_reversal(db, loan, app, user, body.reason.strip())
         return loan_out(db, loan)
     return idempotency.run_once(db, user, key, f"reverse:{loan_id}", body.model_dump(), work, status_code=200)

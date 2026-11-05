@@ -23,14 +23,23 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from chamapro import config
-from chamapro.api import decisions, pipeline, profiles, self_service, storage
-from chamapro.api.db import Conversation, ConversationTurn, Member, SessionLocal, User, utcnow
+from chamapro.api import decisions, ledger, pipeline, profiles, self_service, storage
+from chamapro.api.db import (Conversation, ConversationTurn, Guarantor, LoanAccount, LoanApplication, Member, SelfServiceRun,
+                            SessionLocal, User, utcnow)
 
 from . import extract, machine, templates, tts
 
 log = logging.getLogger("chamapro.conversation")
 
 LEASE = timedelta(minutes=3)
+# What each reply is doing right now, by conversation id, for the screens to show. In this
+# process only: with more than one worker a screen sees no stage, and nothing else changes.
+_stages: dict[int, str] = {}
+
+
+def stage_of(conversation_id: int) -> str | None:
+    """transcribing | understanding | deciding | speaking, while a reply is worked on."""
+    return _stages.get(conversation_id)
 
 
 class ConversationClosed(Exception):
@@ -176,18 +185,22 @@ def reply(db: Session, conv: Conversation, member: Member, actor: User, text: st
     try:
         answer, asr_model, asr_ms = text or "", None, None
         if voice is not None:
+            _stages[conv.id] = "transcribing"
             answer, audio_ref, asr_model, asr_ms = _transcribed(conv, voice)
 
+        _stages[conv.id] = "understanding"
         started = time.perf_counter()
         question_id = conv.context["question_id"]
         read = extract.extract(question_id, conv.context["question_en"], answer, conv.language)
         extract_ms = ms_since(started)
 
+        _stages[conv.id] = "deciding"
         started = time.perf_counter()
         step = machine.advance(db, conv, member, actor, read)
         evaluate_ms = ms_since(started) if step.evaluated else None
         db.commit()     # the decision, if any, is safely in; nothing is held while speech is made
 
+        _stages[conv.id] = "speaking"
         spoken = [tts.speak(line) for line in step.lines]
         tts_ms = sum(s.ms for s in spoken if s is not None)
 
@@ -204,6 +217,8 @@ def reply(db: Session, conv: Conversation, member: Member, actor: User, text: st
         db.add_all([member_turn, *bots])
         if step.corrections:
             profiles.request_update(db, member, _profile_fields(step.corrections), conv.id, actor)
+        if step.confirmed_groups:
+            profiles.confirm_groups(db, member, step.confirmed_groups, actor)
         if step.consent is not None:
             conv.consent_given, conv.consent_version, conv.consent_at = step.consent, templates.consent_version(), now
         if step.application_id is not None:
@@ -219,6 +234,8 @@ def reply(db: Session, conv: Conversation, member: Member, actor: User, text: st
         _release_lease(db, conv)
         _forget_audio(audio_ref)
         raise
+    finally:
+        _stages.pop(conv.id, None)
 
 
 def _forget_audio(ref: str | None) -> None:
@@ -235,5 +252,49 @@ def _profile_fields(corrections: dict) -> dict:
     return {k: v for k, v in corrections.items() if k in profiles.FIELD_GROUP}
 
 
+def is_busy(conv: Conversation) -> bool:
+    return conv.busy_until is not None and conv.busy_until >= utcnow()
+
+
+def open_conversation(db: Session, member: Member) -> Conversation | None:
+    """The member's unfinished conversation, if there is one to carry on."""
+    conv = db.scalar(select(Conversation).where(Conversation.member_id == member.id, Conversation.status == "open"))
+    if conv is not None:
+        abandon_if_idle(db, conv)
+    return conv if conv is not None and conv.status == "open" else None
+
+
+def outcome_of(db: Session, conv: Conversation) -> dict | None:
+    """How it came out, from the ledger and the application as they stand now, or None
+    while it is under way or if it was abandoned. decision: approved (the money was paid
+    out), reversed, referred, not_now, or none when it ended with nothing decided."""
+    if conv.status != "completed":
+        return None
+    out = {"decision": "none", "application_id": conv.application_id, "requested_kes": conv.context.get("amount_kes"),
+           "amount_kes": None, "term_months": conv.context.get("overrides", {}).get("term_months"),
+           "instalment_kes": None, "guarantors": [], "balance_before_kes": None, "balance_after_kes": None,
+           "review_requested": False, "ledger": None}
+    app = db.get(LoanApplication, conv.application_id) if conv.application_id else None
+    if app is None:
+        return out
+    out["requested_kes"] = app.amount_requested_kes
+    out["review_requested"] = db.scalar(select(SelfServiceRun.id).where(SelfServiceRun.application_id == app.id,
+                                                                        SelfServiceRun.trigger == "review").limit(1)) is not None
+    loan = db.scalar(select(LoanAccount).where(LoanAccount.application_id == app.id).order_by(LoanAccount.id.desc()).limit(1))
+    if loan is None:
+        out["decision"] = "not_now" if app.status == "declined" else "referred"
+        return out
+    entry, before = ledger.disbursement_of(db, loan)
+    out.update(decision="reversed" if loan.status == "reversed" else "approved", amount_kes=loan.principal_kes,
+               term_months=loan.term_months, instalment_kes=loan.monthly_instalment_kes,
+               guarantors=list(db.scalars(select(Guarantor.full_name).where(Guarantor.application_id == app.id,
+                                                                            Guarantor.status == "verified")
+                                          .order_by(Guarantor.id))),
+               balance_before_kes=before, balance_after_kes=before + entry.amount_kes,
+               ledger={"entry_id": entry.id, "reference": entry.reference, "posted_at": entry.posted_at,
+                       "amount_kes": entry.amount_kes, "entry_type": entry.entry_type, "loan_id": loan.id})
+    return out
+
+
 __all__ = ["ConversationBusy", "ConversationClosed", "Spoken", "SpeechUnavailable", "abandon_if_idle",
-           "abandon_idle_at_startup", "reply", "start", "turns_of"]
+           "abandon_idle_at_startup", "is_busy", "open_conversation", "outcome_of", "reply", "stage_of", "start", "turns_of"]

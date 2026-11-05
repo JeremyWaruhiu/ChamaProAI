@@ -19,7 +19,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import math
+import threading
 from dataclasses import dataclass, field
 from datetime import date, datetime
 
@@ -32,7 +34,11 @@ from . import comparator, ledger, member_text, profiles
 from .db import (GuarantorPledge, LoanAccount, Member, MemberProfile, MemberProfileHistory, nairobi_today)
 from .pipeline import score_interview
 
+log = logging.getLogger("chamapro.api")
+
 MAX_QUESTIONS = 2
+# SHAP contributions kept on each evaluation: the presenter view charts ten.
+SHAP_KEPT = 10
 OVERRIDE_KEYS = ("term_months", "monthly_income_kes", "expected_monthly_return_kes", "chama_loan_use",
                  "chama_instalment_kes", "extra_guarantor", "accepted_amount_kes", "household_size", "children")
 # Answers that replace a profile value the classifier reads.
@@ -413,7 +419,19 @@ def score_features(features: dict) -> score_interview.Scored:
     """The classifier and explainer as they are; never retrained."""
     if not (config.CLASSIFIER_PATH.exists() and config.CLASSIFIER_META_PATH.exists()):
         raise ClassifierMissing("classifier not available; run scripts/train_and_save.py")
-    return score_interview.score(features, config.CLASSIFIER_PATH, config.CLASSIFIER_META_PATH)
+    return score_interview.score(features, config.CLASSIFIER_PATH, config.CLASSIFIER_META_PATH, top=SHAP_KEPT)
+
+
+def warm_classifier_in_background() -> None:
+    """The classifier and SHAP load on the first evaluation, about 7 s in front of a member."""
+    def run():
+        try:
+            score_features({f: {} if f == "lost_as_guarantor" else None for f in score_interview.FIELDS})
+            log.info("classifier and SHAP ready")
+        except Exception:
+            log.exception("the classifier could not be warmed; the first evaluation will take longer")
+    if config.ASR_WARM:
+        threading.Thread(target=run, name="classifier-warm", daemon=True).start()
 
 
 def clean_overrides(overrides: dict | None, request: LoanRequest) -> dict:
@@ -429,11 +447,24 @@ def clean_overrides(overrides: dict | None, request: LoanRequest) -> dict:
     return overrides
 
 
-def last_confirmed(db: Session, member_id: int) -> datetime | None:
-    """The member's own "it is all still right". Not profile.confirmed_at, which any
-    edit or check of any one group moves: that says nothing about their income."""
-    return db.scalar(select(func.max(MemberProfileHistory.created_at))
-                     .where(MemberProfileHistory.member_id == member_id, MemberProfileHistory.change == "confirm"))
+def confirmations(db: Session, member_id: int) -> list[tuple[datetime, list]]:
+    """The member's own "still right"s, each with the groups it covered: none named means
+    the whole profile. Not profile.confirmed_at, which any edit or check of any one group
+    moves: that says nothing about their income."""
+    return [tuple(row) for row in db.execute(select(MemberProfileHistory.created_at, MemberProfileHistory.groups)
+                                             .where(MemberProfileHistory.member_id == member_id,
+                                                    MemberProfileHistory.change == "confirm"))]
+
+
+def last_confirmed(seen: list[tuple[datetime, list]], group: str) -> datetime | None:
+    return max((at for at, groups in seen if not groups or group in groups), default=None)
+
+
+def income_is_stale(db: Session, member: Member, today: date | None = None) -> bool:
+    """Whether the income on record is too old to read back to the member as fact."""
+    age = group_age_days(member.profile, "income", last_confirmed(confirmations(db, member.id), "income"),
+                         today or nairobi_today())
+    return stale(age)
 
 
 def group_age_days(p: MemberProfile | None, group: str, confirmed: datetime | None, today: date) -> int | None:
@@ -524,7 +555,7 @@ def evaluate(db: Session, member: Member, request: LoanRequest, overrides: dict 
     options, any_guarantor, own_free = guarantor_options(db, member, named)
     deposits = ledger.deposits_balance(db, member.id)
     instalments, behind, outstanding = loan_standing(db, member.id, today)
-    confirmed = last_confirmed(db, member.id)
+    confirmed = confirmations(db, member.id)
     asked = {q for q, key in ANSWER_KEY.items() if key in overrides}
     answered = {q for q in asked if overrides[ANSWER_KEY[q]] is not None}
     # C5 is answered only by a member who is found: anyone can be named.
@@ -544,10 +575,10 @@ def evaluate(db: Session, member: Member, request: LoanRequest, overrides: dict 
         loan_instalments_kes=instalments, chama_instalment_kes=overrides.get("chama_instalment_kes") or 0,
         guarantors=options, any_guarantor=any_guarantor,
         # Asked already: the answer is fresh, and no answer is settled as details_missing.
-        income_age_days=0 if "C2" in asked else group_age_days(p, "income", confirmed, today),
+        income_age_days=0 if "C2" in asked else group_age_days(p, "income", last_confirmed(confirmed, "income"), today),
         income_verified=provenance.get("monthly_income_kes") in ("verified", "conversation"),
         chama_use_known=features["chama_loan_use"] is not None,
-        credit_age_days=group_age_days(p, "credit", confirmed, today), in_arrears=behind,
+        credit_age_days=group_age_days(p, "credit", last_confirmed(confirmed, "credit"), today), in_arrears=behind,
         asked=frozenset(asked), answered=frozenset(answered), declined=frozenset(asked - answered), final=final,
         outstanding_principal_kes=outstanding, profile_income_kes=known.features["monthly_income_kes"],
         income_stated=overrides.get("monthly_income_kes") is not None, refer_reason=refer_reason)
@@ -565,7 +596,7 @@ def evaluate(db: Session, member: Member, request: LoanRequest, overrides: dict 
         "refer_reason": refer_reason,
         "clarifications": {"conditions": fired, "asked": sorted(asked), "answered": sorted(answered),
                            "returned": questions,
-                           "income_age_days": group_age_days(p, "income", confirmed, today),
+                           "income_age_days": group_age_days(p, "income", last_confirmed(confirmed, "income"), today),
                            "income_verified": known.provenance.get("monthly_income_kes") == "verified",
                            "income_top_three_driver": income_is_top_driver(facts.contributions)},
         "model": {"risk_class": out["risk_class"], "probabilities": out["probabilities"],

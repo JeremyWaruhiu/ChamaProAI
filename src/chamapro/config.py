@@ -122,7 +122,7 @@ PILOT_MAX_ASSESSMENTS_PER_DAY: int = int(os.getenv("PILOT_MAX_ASSESSMENTS_PER_DA
 # The policy's thresholds (api/decisions.py). A decision records the version, and
 # changing any of these from its default adds a hash of the values to it, so one
 # version always means one set of thresholds.
-POLICY_BASE_VERSION = "2026.11.2"
+POLICY_BASE_VERSION = "2026.11.3"
 POLICY_DEFAULTS = {"AUTO_APPROVE_LIMIT_KES": 50_000, "LOAN_INTEREST_MONTHLY": 0.01,
                    "AFFORDABILITY_RATIO": 1 / 3, "AFFORDABILITY_NEAR_BAND": 0.15, "PROFILE_STALE_DAYS": 180,
                    "UNVERIFIED_INCREASE_TOLERANCE": 0.30}
@@ -150,6 +150,13 @@ CONVERSATION_REPLIES_PER_HOUR: int = int(os.getenv("CONVERSATION_REPLIES_PER_HOU
 # scripts/converse.py turns it on with --live; a server, with this variable.
 CONVERSATION_GEMINI_LIVE: bool = os.getenv("CONVERSATION_GEMINI_LIVE") == "1"
 CONVERSATION_GEMINI_SECONDS: float = float(os.getenv("CONVERSATION_GEMINI_SECONDS") or 8)
+
+# --- Speech recognition warm-up ----------------------------------------------
+# After the Kikuyu ASR loads, it transcribes one clip in the background, and the classifier
+# scores once, so a member's first reply waits for neither. 0 turns both off. The English
+# model loads on first use unless ASR_WARM_ENGLISH=1 loads and warms it the same way.
+ASR_WARM: bool = os.getenv("ASR_WARM", "1") != "0"
+ASR_WARM_ENGLISH: bool = os.getenv("ASR_WARM_ENGLISH") == "1"
 
 # --- Speech output -----------------------------------------------------------
 # Both models are CC-BY-NC 4.0: see README, "Licence and third-party components".

@@ -155,6 +155,10 @@ def prewarm_in_background() -> None:
     def run():
         try:
             log.info("speech cache: %d fixed lines ready", prewarm())
+            # A cache hit never loads a voice, and a line it has not heard should not wait for that too.
+            voices = ["en", "kik"] if any(e["kik"] for e in templates.load().values()) else ["en"]
+            for voice in voices:
+                engine_for(model_for(voice)).synthesize("Ready.")
         except Exception:
             log.exception("speech cache could not be warmed")
     if config.TTS_ENABLED:

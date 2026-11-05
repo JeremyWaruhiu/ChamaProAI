@@ -1,5 +1,7 @@
 /* Member portal: phone first, one column. */
 
+.requestLoan { min-height: 72px; font-size: var(--text-lg); width: 100%; }
+
 .list { display: grid; gap: var(--space-4); margin: 0; padding: 0; list-style: none; }
 
 .appCard {

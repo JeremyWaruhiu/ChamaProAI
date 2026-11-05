@@ -576,3 +576,35 @@ def test_0007_downgrades_only_without_conversations(engine):
         pol = c.execute(text("SELECT relrowsecurity FROM pg_class WHERE relname IN "
                              "('conversations', 'conversation_turns', 'member_notices')")).scalars().all()
     assert pol == [True, True, True]
+
+
+def test_the_presenter_view_and_the_demo_reset_on_postgres(engine, stand_in_model):
+    from chamapro.api import presenter
+    with Session(engine, expire_on_commit=False) as db:
+        member_id, user_id = conversing(db, "PR")
+        member, user = db.get(Member, member_id), db.get(User, user_id)
+        member.seed_tag = "demo-db:wanjiru"
+        profiles.save_profile(db, member, {"household_size": 4, "children": 2}, "registration", None)
+        admin = User(username=f"pg_{secrets.token_hex(3)}", password_hash="x", role="admin")
+        db.add(admin)
+        db.commit()
+        conv, _ = service.start(db, member, "en")
+        service.reply(db, conv, member, user, text="yes")
+        service.reply(db, conv, member, user, text="yes")
+        confirmed = decisions.confirmations(db, member_id)
+        assert decisions.last_confirmed(confirmed, "household") is not None
+        assert decisions.last_confirmed(confirmed, "credit") != decisions.last_confirmed(confirmed, "household")
+        for words in ("Forty thousand for a dairy cow", "twelve months", "yes"):
+            service.reply(db, conv, member, user, text=words)
+        assert conv.status == "completed"
+        outcome = service.outcome_of(db, conv)
+        assert outcome["decision"] == "approved" and outcome["balance_after_kes"] - outcome["balance_before_kes"] == 40000
+        assert any(r.id == conv.id for r in presenter.present_list(limit=200, db=db, _=admin))
+        detail = presenter.present_detail(conv.id, db=db, _=admin)
+        assert detail.outcome.ledger.amount_kes == 40000 and any(t.explain for t in detail.turns)
+        result = presenter.demo_reset(db=db, user=admin)
+        assert result.loans_reversed == 1 and result.problems == []
+        assert ledger.balances(db, member_id)["transactional"] == 0
+        assert presenter.demo_reset(db=db, user=admin).loans_reversed == 0
+        member.seed_tag = None
+        db.commit()

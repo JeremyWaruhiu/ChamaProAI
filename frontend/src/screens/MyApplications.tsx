@@ -34,6 +34,7 @@ export function MyApplications() {
       {!data && !error && <SkeletonList rows={3} what={Y.title} />}
       {data && (
         <div className={styles.detail}>
+          <a href={paths.chat()} className={`btn btn-accent ${styles.requestLoan}`}><Icon name="mic" size={24} /> {t.chat.request}</a>
           {next && (
             <Card title={H.nextInterview}>
               <p className={styles.nextWhen}><Icon name="clock" size={18} /> {formatNairobi(next.starts_at)}</p>

@@ -2,8 +2,9 @@
 
 Member role, their own conversations only: anyone else's is the same 404 as none at all.
 Replies and starts are rate limited per member, since each can run the classifier. A
-member sees here what the rest of the member API keeps from them: the class, the
-probabilities and the SHAP values, in the explain object. Other members' figures stay out.
+member sees plain language only: each check in their own figures and the three largest
+drivers as sentences. The class, the probabilities, the SHAP values and the policy trace
+stay on the turn's record, for officers and admins (presenter.py).
 """
 from __future__ import annotations
 
@@ -19,7 +20,7 @@ from sqlalchemy.orm import Session
 from chamapro import config
 from chamapro.conversation import service, tts
 
-from . import decisions
+from . import decisions, member_text
 from . import pipeline as pl
 from . import schemas as s
 from .auth import LoginLimiter, require_member
@@ -48,7 +49,7 @@ def turn_out(t: ConversationTurn) -> s.TurnOut:
         seq=t.seq, speaker=t.speaker, template_id=t.template_id, text=t.text, text_en=t.text_en, kik_pending=t.kik_pending,
         audio_url=f"/api/conversations/{t.conversation_id}/turns/{t.seq}/audio" if t.speaker == "bot" and t.audio_ref else None,
         input_mode=t.input_mode, asr_transcript=t.asr_transcript, asr_model=t.asr_model, translation=t.translation,
-        extraction=t.extraction, explain=t.explain, actions=t.actions or [],
+        extraction=t.extraction, explain=member_text.plain_explain(t.explain) if t.explain else None, actions=t.actions or [],
         latency_ms=s.TurnLatency(asr=t.asr_ms, translate_extract=t.extract_ms, evaluate=t.evaluate_ms, tts=t.tts_ms),
         created_at=t.created_at)
 
@@ -58,7 +59,7 @@ def conversation_out(conv: Conversation) -> s.ConversationBrief:
                                consent_given=conv.consent_given, consent_version=conv.consent_version,
                                policy_version=conv.policy_version, application_id=conv.application_id,
                                self_service_run_id=conv.self_service_run_id, started_at=conv.started_at,
-                               ended_at=conv.ended_at)
+                               ended_at=conv.ended_at, busy=service.is_busy(conv))
 
 
 def received_voice(file: UploadFile, folder: Path) -> service.Spoken:
@@ -85,6 +86,17 @@ def received_voice(file: UploadFile, folder: Path) -> service.Spoken:
     if duration > config.CONVERSATION_MAX_AUDIO_SECONDS:
         raise HTTPException(413, f"a reply can be up to {config.CONVERSATION_MAX_AUDIO_SECONDS} seconds")
     return service.Spoken(wav, duration)
+
+
+@router.get("/conversations/current", response_model=s.ConversationDetail | None)
+def current_conversation(db: Session = Depends(get_db), user: User = Depends(require_member)):
+    """The unfinished conversation to carry on after a page reload, or null. Starts nothing."""
+    member = required_member(db, user)
+    conv = service.open_conversation(db, member)
+    if conv is None:
+        return None
+    return s.ConversationDetail(conversation=conversation_out(conv), turns=[turn_out(t) for t in service.turns_of(db, conv)],
+                                outcome=None)
 
 
 @router.post("/conversations", status_code=201, response_model=s.ConversationStarted)
@@ -125,7 +137,8 @@ def reply_to_conversation(conversation_id: int, text: str | None = Form(None, ma
     finally:
         shutil.rmtree(folder, ignore_errors=True)
     return s.ConversationReply(conversation=conversation_out(conv), member_turn=turn_out(spoken),
-                               bot_turns=[turn_out(t) for t in bots], explain=explain)
+                               bot_turns=[turn_out(t) for t in bots], explain=member_text.plain_explain(explain) if explain else None,
+                               outcome=service.outcome_of(db, conv))
 
 
 @router.get("/conversations/{conversation_id}", response_model=s.ConversationDetail)
@@ -134,7 +147,15 @@ def get_conversation(conversation_id: int, db: Session = Depends(get_db), user: 
     member = required_member(db, user)
     conv = own(db, member, conversation_id)
     service.abandon_if_idle(db, conv)
-    return s.ConversationDetail(conversation=conversation_out(conv), turns=[turn_out(t) for t in service.turns_of(db, conv)])
+    return s.ConversationDetail(conversation=conversation_out(conv), turns=[turn_out(t) for t in service.turns_of(db, conv)],
+                                outcome=service.outcome_of(db, conv))
+
+
+@router.get("/conversations/{conversation_id}/stage", response_model=s.ConversationStage)
+def conversation_stage(conversation_id: int, db: Session = Depends(get_db), user: User = Depends(require_member)):
+    """What the reply in flight is doing, for the stage indicator."""
+    conv = own(db, required_member(db, user), conversation_id)
+    return s.ConversationStage(stage=service.stage_of(conv.id), busy=service.is_busy(conv))
 
 
 @router.get("/conversations/{conversation_id}/turns/{seq}/audio", response_class=FileResponse,

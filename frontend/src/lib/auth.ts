@@ -31,9 +31,9 @@ export function userLabel(u: { username: string; display_name?: string | null; r
 const PUBLIC = new Set<Screen>(['landing', 'login', 'signup'])
 const EVERY_ROLE = new Set<Screen>(['profile'])
 const STAFF = new Set<Screen>(['home', 'start', 'interviews', 'record', 'review', 'assessment',
-  'applications', 'application', 'decisions', 'decision', 'members', 'member', 'bookings', 'events'])
+  'applications', 'application', 'decisions', 'decision', 'present', 'presentOne', 'members', 'member', 'bookings', 'events'])
 const ADMIN = new Set<Screen>(['admin', 'users', 'audit', 'results', 'pilot'])
-const MEMBER = new Set<Screen>(['my', 'myApplication', 'apply', 'mySacco', 'registration', 'practice', 'practiceReview', 'practiceResult'])
+const MEMBER = new Set<Screen>(['my', 'myApplication', 'apply', 'chat', 'mySacco', 'registration', 'practice', 'practiceReview', 'practiceResult'])
 
 /** Where each role starts. */
 export function homeFor(role: Role): string {

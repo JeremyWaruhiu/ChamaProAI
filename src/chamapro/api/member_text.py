@@ -188,7 +188,7 @@ def in_favour(risk_class: str, shap: float) -> bool:
     return shap > 0 if risk_class == "Low" else shap < 0
 
 
-def reasons(risk_class: str, contributions: list[dict] | str, n: int = 3) -> list[str]:
+def reasons(risk_class: str, contributions: list[dict] | str, n: int = 3, verb: str = "counted") -> list[str]:
     """Up to n sentences from the largest contributions; none if SHAP was unavailable."""
     if not isinstance(contributions, list):
         return []
@@ -199,8 +199,63 @@ def reasons(risk_class: str, contributions: list[dict] | str, n: int = 3) -> lis
         what = subject(c["feature"], c.get("value"))
         if what is None:
             continue
-        out.append(f"{what} counted in your favour." if in_favour(risk_class, c["shap"])
-                   else f"{what} counted against your application.")
+        out.append(f"{what} {verb} in your favour." if in_favour(risk_class, c["shap"])
+                   else f"{what} {verb} against your application.")
         if len(out) == n:
             break
     return out
+
+
+def _kes(n: float | None) -> str:
+    return f"KSh {int(n):,}"
+
+
+def _check_sentence(check: str, passed: bool | None, v: dict) -> str | None:
+    """One check in the member's own figures. Nothing about a guarantor beyond how many,
+    and the risk check in the same words for Medium and High: a referral must not give the
+    class away. None for a check this version does not know: left out, never shown raw."""
+    if check == "deposits_on_record":
+        return f"Your deposits on record are {_kes(v['deposits_kes'])}." if passed else \
+            f"Your savings of {_kes(v['declared_savings_kes'] or 0)} are not on the SACCO's records yet."
+    if check == "membership":
+        return f"You have been a member for {v['months']} months. The minimum is {v['minimum']}."
+    if check == "savings_multiple":
+        return f"{_kes(v['amount_kes'])} is {'within' if passed else 'more than'} what your deposits allow, " \
+               f"{_kes(v['maximum_kes'])}."
+    if check == "guarantors":
+        return f"You have {v['usable']} who can guarantee you. At least {v['minimum']} are needed."
+    if check == "guarantor_capacity":
+        return f"{_kes(v['own_free_kes'])} of your own deposits is free. With your guarantors, that " \
+               f"{'covers' if passed else 'does not yet cover'} this loan."
+    if check == "affordability":
+        if passed is None:
+            return "We could not yet work out what you can afford."
+        return f"The instalment of {_kes(v['instalment_kes'])} a month is {'within' if passed else 'more than'} " \
+               f"the {_kes(v['limit_kes'])} a month your income allows."
+    if check == "auto_limit":
+        return f"{_kes(v['amount_kes'])} is within the {_kes(v['limit_kes'])} we can decide here." if passed else \
+            f"Loans above {_kes(v['limit_kes'])} are looked at by a loan officer."
+    if check == "income_increase":
+        if not v["stated"]:
+            return "We used the income on your record." if v["monthly_income_kes"] is not None else \
+                "There is no income on your record."
+        return f"The income you gave, {_kes(v['monthly_income_kes'])}, " + \
+            ("is close enough to your record to use." if passed else "needs an officer to confirm it.")
+    if check == "risk":
+        return "Your details fit what we can decide here." if passed else "A loan officer should look at your details with you."
+    if check == "no_arrears":
+        return "You have no loan payment outstanding." if passed else "You have a loan payment outstanding."
+    return None
+
+
+def plain_explain(full: dict) -> dict:
+    """All a member gets of how a decision was worked out, built field by field from the
+    turn's record: the reason, each check passed or not in their own figures, and the three
+    largest drivers as sentences. No class, probability, SHAP value or other member's figure."""
+    checks = []
+    for c in (full.get("trace") or full).get("checks") or []:
+        text = _check_sentence(c["check"], c["passed"], c["values"])
+        if text is not None:
+            checks.append({"passed": c["passed"], "text": text})
+    return {"reason": full["reason"], "checks": checks,
+            "drivers": reasons(full["risk_class"], full.get("contributions") or [], verb="counts")}

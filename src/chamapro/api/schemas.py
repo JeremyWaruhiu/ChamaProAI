@@ -330,6 +330,7 @@ class AsrStatus(BaseModel):
     model: str | None
     language: str
     error: str | None = None
+    warmed: bool = Field(default=False, description="It has transcribed a clip since it loaded: the first real one will not wait")
 
 
 class Health(BaseModel):
@@ -1392,6 +1393,26 @@ class ConversationBrief(BaseModel):
     self_service_run_id: int | None
     started_at: datetime
     ended_at: datetime | None
+    busy: bool = Field(description="A reply to it is being worked on")
+
+
+class ConversationStage(BaseModel):
+    stage: Literal["transcribing", "understanding", "deciding", "speaking"] | None
+    busy: bool
+
+
+class ConversationOutcome(BaseModel):
+    """How a finished conversation came out, from the ledger as it stands."""
+    decision: Literal["approved", "reversed", "referred", "not_now", "none"]
+    application_id: int | None
+    requested_kes: int | None
+    amount_kes: int | None = Field(description="What was paid out")
+    term_months: int | None
+    instalment_kes: int | None
+    guarantors: list[str]
+    balance_before_kes: int | None = Field(description="The transactional account, just before the payout")
+    balance_after_kes: int | None
+    review_requested: bool
 
 
 class TurnLatency(BaseModel):
@@ -1412,38 +1433,16 @@ class ConversationAction(BaseModel):
 
 
 class ExplainCheck(BaseModel):
-    check: str
-    passed: bool | None
-    values: dict
+    passed: bool | None = Field(description="null: it could not be worked out yet")
+    text: str
 
 
-class ExplainShap(BaseModel):
-    feature: str
-    label: str
-    shap: float
-    in_favour: bool
-
-
-class ExplainSources(BaseModel):
-    records: list[str]
-    profile: list[str]
-    conversation: list[str]
-    missing: list[str]
-
-
-class Explain(BaseModel):
-    """How this was worked out. Other members' figures are not in it."""
-    outcome: SelfServiceOutcome
-    reason_code: str
+class MemberExplain(BaseModel):
+    """What a member reads of how this was worked out: plain language only. The class,
+    the probabilities, the SHAP values and the policy trace go to officers and admins."""
     reason: str
-    risk_class: str
-    probabilities: dict[str, float]
-    top_shap: list[ExplainShap]
-    personal_features_left_out: int = Field(description="Age, sex and marital status are not labelled for a member")
     checks: list[ExplainCheck]
-    maximums: dict[str, int | None]
-    sources: ExplainSources
-    policy_version: str
+    drivers: list[str] = Field(description="The three largest drivers, as sentences")
 
 
 class TurnOut(BaseModel):
@@ -1460,7 +1459,7 @@ class TurnOut(BaseModel):
     asr_model: str | None
     translation: str | None
     extraction: dict | None
-    explain: Explain | None
+    explain: MemberExplain | None
     actions: list[ConversationAction]
     latency_ms: TurnLatency
     created_at: datetime
@@ -1476,12 +1475,96 @@ class ConversationReply(BaseModel):
     conversation: ConversationBrief
     member_turn: TurnOut
     bot_turns: list[TurnOut]
-    explain: Explain | None = Field(description="Present when this reply was evaluated")
+    explain: MemberExplain | None = Field(description="Present when this reply was evaluated")
+    outcome: ConversationOutcome | None = Field(description="Present once it has ended")
 
 
 class ConversationDetail(BaseModel):
     conversation: ConversationBrief
     turns: list[TurnOut]
+    outcome: ConversationOutcome | None
+
+
+# --- Officer: the presenter view ------------------------------------------------------------
+
+class PresentRow(BaseModel):
+    id: int
+    member_id: int
+    member_no: str
+    member_name: str
+    language: ConversationLanguage
+    status: Literal["open", "completed", "abandoned"]
+    state: str
+    turn_count: int
+    busy: bool
+    stage: str | None
+    started_at: datetime
+    last_activity_at: datetime
+
+
+class PresentTurn(BaseModel):
+    """A turn as it was recorded, whole. Staff only: explain holds the class, the
+    probabilities, the SHAP values and the policy trace."""
+    seq: int
+    speaker: Literal["bot", "member"]
+    template_id: str | None
+    text: str
+    text_en: str | None
+    kik_pending: bool
+    audio_url: str | None
+    input_mode: Literal["voice", "text"] | None
+    asr_transcript: str | None
+    asr_model: str | None
+    translation: str | None
+    extraction: dict | None
+    explain: dict | None
+    latency_ms: TurnLatency
+    created_at: datetime
+
+
+class PresentLedger(BaseModel):
+    entry_id: int
+    loan_id: int
+    reference: str
+    entry_type: str
+    amount_kes: int
+    posted_at: datetime
+
+
+class PresentOutcome(ConversationOutcome):
+    ledger: PresentLedger | None
+
+
+class PresentDetail(BaseModel):
+    row: PresentRow
+    consent_given: bool | None
+    consent_version: str | None
+    policy_version: str
+    application_id: int | None
+    turns: list[PresentTurn]
+    outcome: PresentOutcome | None
+
+
+class DemoPerson(BaseModel):
+    member_id: int
+    full_name: str
+    open_conversations: int
+    active_loans: int
+    open_applications: int
+
+
+class DemoStatus(BaseModel):
+    """Whether this database holds the demo's two members; only a --demo-db build does."""
+    available: bool
+    people: list[DemoPerson]
+
+
+class DemoResetResult(BaseModel):
+    conversations_closed: int
+    loans_reversed: int
+    applications_closed: int
+    problems: list[str] = Field(description="What could not be undone, such as money drawn out")
+    people: list[DemoPerson]
 
 
 # --- Officer: automatic decisions -----------------------------------------------------------

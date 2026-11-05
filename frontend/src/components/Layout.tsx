@@ -23,6 +23,7 @@ const WORK: NavItem[] = [
   { key: 'bookings', label: t.nav.bookings, href: paths.bookings(), icon: 'clock', screens: ['bookings'] },
   { key: 'applications', label: t.nav.applications, href: paths.applications(), icon: 'file', screens: ['applications', 'application'] },
   { key: 'decisions', label: t.nav.decisions, href: paths.decisions(), icon: 'sparkle', screens: ['decisions', 'decision'] },
+  { key: 'present', label: t.nav.present, href: paths.present(), icon: 'activity', screens: ['present', 'presentOne'] },
   { key: 'members', label: t.nav.members, href: paths.members(), icon: 'users', screens: ['members', 'member'] },
   { key: 'events', label: t.nav.events, href: paths.events(), icon: 'calendar', screens: ['events'] },
 ]
@@ -326,7 +327,7 @@ export function StaffLayout({ user, screen, children }: { user: Me; screen: Scre
           <SearchBox />
           <UserMenu user={user} />
         </header>
-        <main id="main" tabIndex={-1} className={styles.main}>{children}</main>
+        <main id="main" tabIndex={-1} className={cx(styles.main, (screen === 'present' || screen === 'presentOne') && styles.mainWide)}>{children}</main>
       </div>
     </div>
   )

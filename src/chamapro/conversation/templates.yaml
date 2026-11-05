@@ -12,6 +12,9 @@ CONSENT:
 G2:
   en: "First, let us check your details. You have {household_size} people at home, {children} children, and you earn about {monthly_income} shillings a month. Is that still correct?"
   kik: ""
+G2_NO_INCOME:
+  en: "First, let us check your details. You have {household_size} people at home and {children} children. Is that still correct?"
+  kik: ""
 R1:
   en: "How much would you like to borrow, and what is it for?"
   kik: ""
@@ -31,7 +34,7 @@ C4:
   en: "Are you repaying a chama loan at the moment?"
   kik: ""
 C5:
-  en: "Your guarantors can cover {capacity} shillings. Who else could guarantee this loan?"
+  en: "You need one more guarantor for this loan. Who else could guarantee it?"
   kik: ""
 C6:
   en: "We can offer up to {max_amount} shillings. Would that amount work for you?"

@@ -27,6 +27,8 @@ const PATHS = {
   plus: 'M12 5v14M5 12h14',
   wallet: 'M3 7a2 2 0 0 1 2-2h13v4M3 7v10a2 2 0 0 0 2 2h15V9H5a2 2 0 0 1-2-2ZM16 14h.01',
   play: 'M7 4v16l13-8L7 4Z',
+  speaker: 'M4 9.5v5h3.5L12 18.5v-13L7.5 9.5H4ZM15.5 9a4 4 0 0 1 0 6M18 6.5a8 8 0 0 1 0 11',
+  send: 'M4 12 20 4l-4 16-4-7-8-1ZM12 13l8-9',
   stop: 'M6 6h12v12H6z',
   upload: 'M12 16V4M7 9l5-5 5 5M4 20h16',
   download: 'M12 4v12M7 11l5 5 5-5M4 20h16',

@@ -18,6 +18,8 @@ import { useEffect, useState } from 'react'
 //   #/members/:id                      one member and their applications
 //   #/decisions                        automatic decisions
 //   #/decisions/:id                    one of them: its trace and SHAP, and reversing it
+//   #/present                          the presenter view: conversations to follow
+//   #/present/:id                      one conversation, live, with its whole working
 //   #/bookings                         upcoming interviews and the week's calendar
 //   #/events                           SACCO events
 // Admins:
@@ -30,6 +32,8 @@ import { useEffect, useState } from 'react'
 //   #/my                               my applications
 //   #/my/applications/:id              one of my applications
 //   #/my/apply                         apply for a loan and book the interview
+//   #/my/chat                          request a loan by talking: carry on, or choose a language
+//   #/my/chat/:id                      that conversation, and how it came out
 //   #/my/sacco                         my profile, balances, guarantors and loans
 //   #/my/registration                  the registration profile form, once after sign-up
 //   #/my/practice/:id[/:n]             my practice interview, question n
@@ -53,6 +57,8 @@ export type Route =
   | { screen: 'member'; id: number }
   | { screen: 'decisions' }
   | { screen: 'decision'; id: number }
+  | { screen: 'present' }
+  | { screen: 'presentOne'; id: number }
   | { screen: 'bookings' }
   | { screen: 'events' }
   | { screen: 'admin' }
@@ -63,6 +69,7 @@ export type Route =
   | { screen: 'my' }
   | { screen: 'myApplication'; id: number }
   | { screen: 'apply' }
+  | { screen: 'chat'; id: number | null }
   | { screen: 'mySacco' }
   | { screen: 'registration' }
   | { screen: 'practice'; id: number; question: number | null }
@@ -111,6 +118,10 @@ export function parse(hash: string): Route {
     if (n === 1) return { screen: 'decisions' }
     if (id && n === 2) return { screen: 'decision', id }
   }
+  if (a === 'present') {
+    if (n === 1) return { screen: 'present' }
+    if (id && n === 2) return { screen: 'presentOne', id }
+  }
   if (a === 'members') {
     if (n === 1) return { screen: 'members' }
     if (id && n === 2) return { screen: 'member', id }
@@ -126,6 +137,8 @@ export function parse(hash: string): Route {
     if (n === 1) return { screen: 'my' }
     if (b === 'applications' && n === 3 && positive(c)) return { screen: 'myApplication', id: positive(c)! }
     if (b === 'apply' && n === 2) return { screen: 'apply' }
+    if (b === 'chat' && n === 2) return { screen: 'chat', id: null }
+    if (b === 'chat' && n === 3 && positive(c)) return { screen: 'chat', id: positive(c)! }
     if (b === 'sacco' && n === 2) return { screen: 'mySacco' }
     if (b === 'registration' && n === 2) return { screen: 'registration' }
     const practice = positive(c)
@@ -154,6 +167,8 @@ export const paths = {
   application: (id: number) => `#/applications/${id}`,
   decisions: () => '#/decisions',
   decision: (id: number) => `#/decisions/${id}`,
+  present: () => '#/present',
+  presentOne: (id: number) => `#/present/${id}`,
   members: () => '#/members',
   member: (id: number) => `#/members/${id}`,
   bookings: () => '#/bookings',
@@ -166,6 +181,7 @@ export const paths = {
   my: () => '#/my',
   myApplication: (id: number) => `#/my/applications/${id}`,
   apply: () => '#/my/apply',
+  chat: (id?: number) => `#/my/chat${id ? `/${id}` : ''}`,
   mySacco: () => '#/my/sacco',
   registration: () => '#/my/registration',
   practice: (id: number, n?: number) => `#/my/practice/${id}${n ? `/${n}` : ''}`,

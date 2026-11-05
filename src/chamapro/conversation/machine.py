@@ -46,31 +46,21 @@ def and_join(names: list[str]) -> str:
 
 
 def explain(ev: Evaluation) -> dict:
-    """What a member is shown of how this was worked out. Every check with its values,
-    except other members' figures: a guarantor's free capacity and member number stay
-    on the officer's page. Age, sex and marital status are left out of the plain labels,
-    as in member_text; how many were left out is said."""
-    checks = []
-    for c in ev.trace["checks"]:
-        values = c["values"]
-        if c["check"] == "guarantor_capacity":
-            values = {k: values[k] for k in ("need_kes", "own_free_kes")}
-        checks.append({"check": c["check"], "passed": c["passed"], "values": values})
-    shap, omitted = [], 0
-    if isinstance(ev.contributions, list):
-        for c in sorted(ev.contributions, key=lambda c: abs(c.get("shap") or 0), reverse=True):
-            label = member_text.subject(c["feature"], c.get("value"))
-            if c["feature"] in member_text.PERSONAL or label is None:
-                omitted += 1
-                continue
-            shap.append({"feature": c["feature"], "label": label, "shap": c["shap"],
-                         "in_favour": member_text.in_favour(ev.risk_class, c["shap"])})
+    """How this was worked out, whole: the turn's record, for officers and admins. The
+    class, the probabilities, the SHAP values and the policy trace are in it, so a member
+    never gets this: they get member_text.plain_explain of it."""
     sources: dict[str, list[str]] = {"records": [], "profile": [], "conversation": [], "missing": []}
     for name, source in sorted(ev.provenance.items()):
         sources[{"declared": "profile", "verified": "profile"}.get(source, source)].append(name)
+    contributions = ev.contributions if isinstance(ev.contributions, list) else []
     return {"outcome": ev.outcome, "reason_code": ev.settled.reason_code, "reason": ev.reason, "risk_class": ev.risk_class,
-            "probabilities": ev.probabilities, "top_shap": shap, "personal_features_left_out": omitted, "checks": checks,
-            "maximums": ev.trace["maximums"], "sources": sources, "policy_version": ev.policy_version}
+            "probabilities": ev.probabilities,
+            "contributions": [{**c, "in_favour": member_text.in_favour(ev.risk_class, c["shap"])} for c in contributions],
+            "shap_error": ev.contributions if isinstance(ev.contributions, str) else None,
+            "features": ev.features, "provenance": ev.provenance, "sources": sources, "overrides": ev.overrides,
+            "questions": ev.questions,
+            "amount_kes": ev.amount_kes, "term_months": ev.facts.term_months, "instalment_kes": ev.instalment_kes,
+            "policy_version": ev.policy_version, "trace": ev.trace}
 
 
 @dataclass
@@ -84,6 +74,7 @@ class Step:
     actions: list[dict] = field(default_factory=list)
     consent: bool | None = None
     corrections: dict | None = None
+    confirmed_groups: list[str] | None = None
     application_id: int | None = None
     run_id: int | None = None
     evaluated: bool = False
@@ -176,8 +167,6 @@ class Turn:
                 self.ask("C2", monthly_income=ev.facts.profile_income_kes)
         elif question == "C3":
             self.ask("C3", purpose=self.ctx["purpose"])
-        elif question == "C5":
-            self.ask("C5", capacity=sum(g.free_kes for g in ev.facts.guarantors))
         elif question == "C6":
             self.ctx["offer_kes"] = ev.worked.offer_kes
             self.ask("C6", max_amount=ev.worked.offer_kes)
@@ -298,7 +287,13 @@ def _ask_profile_check(t: Turn) -> None:
               "monthly_income": features["monthly_income_kes"]}
     if any(v is None for v in wanted.values()):
         t.ask("R1")
+    elif decisions.income_is_stale(t.db, t.member, t.today):
+        # Left out rather than read back as fact: C2 asks about it, once, if it comes to that.
+        t.ctx["read_out"] = ["household"]
+        wanted.pop("monthly_income")
+        t.ask("G2", "G2_NO_INCOME", **wanted)
     else:
+        t.ctx["read_out"] = ["household", "income"]
         t.ask("G2", **wanted)
 
 
@@ -309,6 +304,7 @@ def _profile_check(t: Turn, a: Extracted) -> None:
         t.step.corrections = corrections
         t.ask("R1")
     elif a.fields.get("answer") == "yes":
+        t.step.confirmed_groups = t.ctx.pop("read_out", None)
         t.ask("R1")
     else:
         # A bare "no" says something is wrong and not what.

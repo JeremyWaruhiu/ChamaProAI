@@ -39,7 +39,8 @@ MEMBER_ROUTES = {("GET", "/api/me/applications"), ("GET", "/api/me/applications/
                  ("POST", "/api/self-service/applications/{application_id}/review"),
                  # the conversation, on the member's own record; and a guarantor's own ceiling
                  ("POST", "/api/conversations"), ("GET", "/api/conversations/{conversation_id}"),
-                 ("POST", "/api/conversations/{conversation_id}/reply"),
+                 ("POST", "/api/conversations/{conversation_id}/reply"), ("GET", "/api/conversations/current"),
+                 ("GET", "/api/conversations/{conversation_id}/stage"),
                  ("GET", "/api/conversations/{conversation_id}/turns/{seq}/audio"),
                  ("PATCH", "/api/me/pledges/{pledge_id}"),
                  # the booking calendar and upcoming events: every signed-in role

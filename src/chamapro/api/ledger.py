@@ -389,6 +389,16 @@ def reverse_loan(db: Session, loan: LoanAccount, actor: User | None) -> list[Acc
     return entries
 
 
+def disbursement_of(db: Session, loan: LoanAccount) -> tuple[AccountEntry, int]:
+    """(the entry that paid this loan out, the account's balance just before it)."""
+    entry = db.scalar(select(AccountEntry).where(AccountEntry.loan_account_id == loan.id,
+                                                 AccountEntry.entry_type == "loan_disbursement")
+                      .order_by(AccountEntry.id).limit(1))
+    before = db.scalar(select(func.coalesce(func.sum(AccountEntry.amount_kes), 0))
+                       .where(AccountEntry.account_id == entry.account_id, AccountEntry.id < entry.id))
+    return entry, before
+
+
 def still_guarantees(db: Session, member_id: int) -> bool:
     """Backing an active loan or an open application, or still answerable for a
     defaulted loan beyond what has been recovered from them."""
