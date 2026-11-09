@@ -53,6 +53,18 @@ describe('My SACCO', () => {
     expect(screen.queryByText(text)).toBeNull()
   })
 
+  it('heads the panels to the member, and about the member for staff', () => {
+    const titles = () => screen.getAllByRole('heading').map((h) => h.textContent)
+    render(<SaccoPanels view={VIEW} options={OPTIONS} />)
+    expect(titles()).toEqual(expect.arrayContaining(['My profile', 'My balances', 'Guarantors', 'My loans', 'My guarantors', 'Whom I guarantee']))
+    cleanup()
+    render(<SaccoPanels view={VIEW} options={OPTIONS} staff />)
+    expect(titles()).toEqual(expect.arrayContaining(['Profile', 'Balances', 'Guarantees', 'Loans', 'Their guarantors', 'Whom they guarantee']))
+    expect(titles().filter((x) => /^My |\bI\b/.test(x ?? ''))).toEqual([])
+    expect(screen.queryByText('What I can still guarantee')).toBeNull()
+    expect(screen.getByText('Can still guarantee')).toBeTruthy()
+  })
+
   it('lets a guarantor set their own limit, and refuses a bad one', async () => {
     const saved = { ...VIEW, i_guarantee: [{ ...VIEW.i_guarantee[0], max_amount_kes: 12000 }] }
     const patch = vi.spyOn(api, 'setPledgeCeiling').mockResolvedValue(saved)

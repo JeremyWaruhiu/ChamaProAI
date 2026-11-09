@@ -519,6 +519,20 @@ def test_njeri_answers_c2_within_the_band_and_takes_the_reduced_offer(people, la
     assert end["bot_turns"][0]["text"] == ("We have approved 45,000 shillings, repaid over 12 months at 3,999 shillings a "
                                            "month. The money is now in your account.")
     assert transactional(ids["njeri"]) == 45000
+
+    # The working behind the outcome is the evaluation she accepted, at 45,000, not her request for 60,000.
+    final = recorded(end)
+    assert final["outcome"] == "approve" and final["amount_kes"] == 45000 and final["instalment_kes"] == 3999
+    checks = {c["check"]: c for c in final["trace"]["checks"]}
+    assert checks["auto_limit"]["passed"] is True and checks["auto_limit"]["values"]["amount_kes"] == 45000
+    assert checks["affordability"]["values"]["instalment_kes"] == 3999
+    why = end["bot_turns"][0]["explain"]
+    assert why is not None and all(c["passed"] is not False for c in why["checks"]), why["checks"]
+    if language == "en":
+        texts = [c["text"] for c in why["checks"]]
+        assert "KSh 45,000 is within the KSh 50,000 we can decide here." in texts, texts
+        assert any(t.startswith("The instalment of KSh 3,999 a month") for t in texts), texts
+        assert "3,999" in why["reason"] and "60,000" not in why["reason"], why["reason"]
     with SessionLocal() as db:
         assert db.get(Member, ids["njeri"]).profile.monthly_income_kes == 18000     # the profile stands
         run = db.get(SelfServiceRun, end["conversation"]["self_service_run_id"])
@@ -1708,6 +1722,10 @@ def test_a_reversal_tells_the_guarantor_it_is_over(client, model):
     with SessionLocal() as db:
         words = list(db.scalars(select(MemberNotice.text).where(MemberNotice.member_id == gs[0]).order_by(MemberNotice.id)))
     assert words[-1] == f"You are no longer guaranteeing {name}'s loan of KSh 40,000: it was reversed."
+    # On My SACCO only the ending shows: "now guaranteeing" is for a loan still active.
+    shown = client.get(f"/api/members/{gs[0]}/sacco").json()["notices"]
+    assert [(n["kind"], n["text"]) for n in shown] == [
+        ("guarantee_ended", f"You are no longer guaranteeing {name}'s loan of KSh 40,000: it was reversed.")]
 
 
 def get_member_name(mid):

@@ -7,16 +7,18 @@
 #
 # Run one service at a time: both publish port 8000 and share data/.
 #
-# Which database (one switch, DATABASE_URL; README "Docker"):
-#   unset                                     data/demo.db, the online demo
+# Which database (README "Docker"). Always SQLite in the mounted data/, with
+# audio stored locally; DATABASE_URL and STORAGE_BACKEND in .env or the shell
+# are ignored:
+#   (default)                                 data/demo.db, the online demo
 #                                             (python scripts/seed_demo.py --demo-db data/demo.db)
-#   sqlite:////app/data/chamapro.db           the working database; set
-#                                             CHAMAPRO_UPLOADS=/app/data/uploads with it
-#   postgresql://...pooler.supabase.com/...   Supabase (run `alembic upgrade head` first)
-# Compose takes it from the shell, or from .env in this folder.
+#   CHAMAPRO_SQLITE=chamapro.db               the working database; set
+#     CHAMAPRO_UPLOADS=/app/data/uploads      with it
+# Supabase only through the override file, which says so on the command line:
+#   docker compose -f docker-compose.yml -f docker-compose.supabase.yml up -d
 #
 # Nothing private is in the image: models/ and data/ are mounted from this
-# folder and .env is read at run time.
+# folder and .env (API keys) is read at run time.
 
 name: chamapro
 
@@ -35,7 +37,10 @@ x-app: &app
     - "${HOST_BIND:-127.0.0.1}:8000:8000"
   restart: unless-stopped
   environment: &environment
-    DATABASE_URL: ${DATABASE_URL:-sqlite:////app/data/demo.db}
+    # Literal, not ${DATABASE_URL}: compose would fill that in from .env,
+    # which may point at Supabase. These beat .env's values (env_file).
+    DATABASE_URL: sqlite:////app/data/${CHAMAPRO_SQLITE:-demo.db}
+    STORAGE_BACKEND: local
     # Each database keeps its own audio: interview ids restart in every
     # database, so sharing one folder would mix (or overwrite) clips.
     CHAMAPRO_UPLOADS: ${CHAMAPRO_UPLOADS:-/app/data/demo_uploads}
@@ -54,12 +59,18 @@ services:
       ASR_DEVICE: CPU
 
   # WSL2 exposes the Windows GPU driver as /dev/dxg plus the user-mode
-  # libraries in /usr/lib/wsl/lib; the image has Intel's compute runtime.
+  # libraries in /usr/lib/wsl/lib; this image is built with Intel's OpenCL
+  # runtime (INTEL_GPU=1), under its own tag so the CPU image stays as it is.
   # If OpenVINO still sees no GPU, the ASR loads on the CPU and /api/health
   # reports asr_device CPU instead of the container failing.
   app-gpu:
     <<: *app
     profiles: [gpu]
+    build:
+      context: .
+      args:
+        INTEL_GPU: "1"
+    image: chamapro-ai:gpu
     devices:
       - /dev/dxg
       - /dev/dri

@@ -1,0 +1,18 @@
+# Supabase instead of the SQLite default: the only way the containers reach
+# it. Name this file explicitly, after docker-compose.yml:
+#
+#   docker compose -f docker-compose.yml -f docker-compose.supabase.yml run --rm app alembic upgrade head
+#   docker compose -f docker-compose.yml -f docker-compose.supabase.yml up -d
+#
+# DATABASE_URL (the session pooler string) and SUPABASE_URL,
+# SUPABASE_SERVICE_ROLE_KEY come from the shell or .env (README "Switching to
+# Supabase"); without DATABASE_URL compose stops instead of starting.
+
+x-supabase: &supabase
+  environment:
+    DATABASE_URL: ${DATABASE_URL:?set DATABASE_URL to the Supabase session pooler string}
+    STORAGE_BACKEND: supabase
+
+services:
+  app: *supabase
+  app-gpu: *supabase

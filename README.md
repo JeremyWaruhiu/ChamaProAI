@@ -22,10 +22,13 @@ dashboard and a member portal.
 ## Quick start
 
 1. Install: Python, ffmpeg and the frontend packages, and the models in `models/` ([Prerequisites](#prerequisites), [Setup](#setup)).
-2. `cp .env.example .env` and fill it in ([Environment variables](#environment-variables)); `DATABASE_URL` picks the database ([Docker](#docker)).
-3. Supabase only: `docker compose run --rm app alembic upgrade head` ([Switching to Supabase](#switching-to-supabase)).
-4. First admin: `docker compose run --rm app python scripts/create_user.py admin --role admin` ([Users](#users)).
-5. `docker compose up --build -d`, then open http://localhost:8000 ([Docker](#docker)).
+2. `cp .env.example .env` and fill it in ([Environment variables](#environment-variables)).
+3. Choose the database ([Docker](#docker)). Compose runs on SQLite in `data/`, whatever `.env` says:
+   - the demo, `data/demo.db` (the default): build it before the first `docker compose up` with `python scripts/seed_demo.py --demo-db data/demo.db`, which prints its logins. Started without it, the app creates an empty `data/demo.db`, and the seeder refuses to replace a file that is not a demo;
+   - the working database: put `CHAMAPRO_SQLITE=chamapro.db CHAMAPRO_UPLOADS=/app/data/uploads` before every compose command;
+   - Supabase: `docker compose -f docker-compose.yml -f docker-compose.supabase.yml run --rm app alembic upgrade head`, and the same `-f` pair on every compose command after it ([Switching to Supabase](#switching-to-supabase)).
+4. First admin, except on the demo, which has its own: `docker compose run --rm app python scripts/create_user.py admin --role admin`, with the settings from step 3 ([Users](#users)).
+5. `docker compose up --build -d`, with the same settings, then open http://localhost:8000 ([Docker](#docker)).
 6. `curl -s localhost:8000/api/health` reports the classifier, API key and speech models.
 
 ## Layout
@@ -61,6 +64,7 @@ frontend/                             React web app (Vite + TypeScript); see fro
 docs/screenshots/                     screenshots of the main screens, desktop and phone-360/430 (fictional data)
 tests/                                API and script tests (pytest)
 Dockerfile, docker-compose.yml        one-image deployment, CPU or Intel GPU (see Docker)
+docker-compose.supabase.yml           override: the containers on Supabase instead of SQLite
 scripts/demo_tunnel.sh                public https URL for an online demo (see Online demo)
 scripts/explore_finaccess.py          browse the FinAccess microdata
 ```
@@ -1096,8 +1100,17 @@ corpus needed; see [Online demo](#online-demo).
 One image holds the API and the built dashboard, served together on
 http://localhost:8000 (one origin, so the session cookie needs no CORS). It is
 built in two stages: Node 24 builds `frontend/dist`, then a Python 3.12 slim
-runtime installs `requirements.lock.txt`, ffmpeg and Intel's GPU compute
-runtime. It runs as a non-root user and Docker checks `/api/health`.
+runtime (pinned to Debian 12 bookworm, `python:3.12-slim-bookworm`) installs
+ffmpeg and `requirements.lock.txt`, torch and torchvision first from PyTorch's
+CPU index so no CUDA wheels are downloaded. It runs as a non-root user and
+Docker checks `/api/health`.
+
+Intel's GPU runtime is optional and off by default: the build argument
+`INTEL_GPU=1` adds `intel-opencl-icd`, which OpenVINO needs to see an Intel
+GPU (bookworm has no Level Zero GPU driver; OpenVINO does not need one).
+Without it the image runs the ASR on the CPU. The `gpu` profile below builds
+with `INTEL_GPU=1` as its own image, `chamapro-ai:gpu`, so the CPU image
+(`chamapro-ai:latest`) stays small.
 
 Nothing private is in the image: `models/` (read-only) and `data/` are mounted
 from this folder and `.env` is read at run time. So the classifier and the
@@ -1112,8 +1125,9 @@ with the compose plugin.
     docker compose logs -f                    # startup, ASR device, requests
     docker compose down                       # stop
 
-**Intel GPU on WSL2** (profile `gpu`): the container gets `/dev/dxg`,
-`/dev/dri` and the Windows driver's libraries from `/usr/lib/wsl/lib`.
+**Intel GPU on WSL2** (profile `gpu`): the image is built with `INTEL_GPU=1`
+and the container gets `/dev/dxg`, `/dev/dri` and the Windows driver's
+libraries from `/usr/lib/wsl/lib`.
 
     RENDER_GID=$(getent group render | cut -d: -f3) \
         docker compose --profile gpu up --build -d app-gpu
@@ -1124,18 +1138,35 @@ Start one service at a time: both publish port 8000. If the GPU is not
 visible inside the container, the app starts anyway with the ASR on the CPU
 and `/api/health` reports `"asr_device": "CPU"`.
 
-**Which database.** `DATABASE_URL` chooses it, from the shell or `.env`:
+**Which database.** `docker-compose.yml` always runs on a SQLite file in the
+mounted `data/`, with audio stored locally. It sets `DATABASE_URL` and
+`STORAGE_BACKEND=local` itself, so the values in `.env` or the shell are
+ignored, even when `.env` points at Supabase. `CHAMAPRO_SQLITE` picks the file.
+Supabase is reached only through the override file
+`docker-compose.supabase.yml`, named on every command:
 
 | Database                    | Setting |
 |-----------------------------|---------|
 | `data/demo.db` (default)    | nothing; build it first: `python scripts/seed_demo.py --demo-db data/demo.db` |
-| `data/chamapro.db` (working)| `DATABASE_URL=sqlite:////app/data/chamapro.db CHAMAPRO_UPLOADS=/app/data/uploads docker compose up -d` |
-| Supabase                    | `DATABASE_URL=postgresql://...` (the session pooler string), after `docker compose run --rm app alembic upgrade head` |
+| `data/chamapro.db` (working)| `CHAMAPRO_SQLITE=chamapro.db CHAMAPRO_UPLOADS=/app/data/uploads docker compose up -d` |
+| Supabase                    | `docker compose -f docker-compose.yml -f docker-compose.supabase.yml up -d`, after the same with `run --rm app alembic upgrade head` |
+
+The Supabase override takes `DATABASE_URL` (the session pooler string),
+`SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` from `.env` or the shell, sets
+`STORAGE_BACKEND=supabase`, and stops with an error if `DATABASE_URL` is
+unset. Use the same `-f` pair for `run`, `ps`, `logs` and `down`.
 
 Each SQLite database keeps its audio in its own folder (`data/demo_uploads/`
 for the demo): interview ids restart in every database, so one shared folder
 would mix clips. The demo database can also be built inside the container:
 `docker compose run --rm app python scripts/seed_demo.py --demo-db data/demo.db`.
+
+The container takes everything else from `.env`. For the conversations to run
+as in "Phone demo" and "Online presentation" (Gemini reading each answer, the
+English speech model warmed at start-up), put `CONVERSATION_GEMINI_LIVE=1` and
+`ASR_WARM_ENGLISH=1` in `.env`; without them the parsers read the answers alone.
+The bot's speech comes from `data/tts_cache/` in the mounted `data/`, so run
+`python scripts/warm_demo.py` on the host first.
 
 The port is published on `127.0.0.1` only. Uvicorn runs with
 `--proxy-headers` and believes `X-Forwarded-Proto` from any peer
@@ -1187,7 +1218,7 @@ existing file that is not an earlier demo database (one whose logins carry a
 
 **On the day:**
 
-    docker compose up -d                      # the demo database is the default
+    docker compose up -d                      # data/demo.db, audio local; ignores .env's DATABASE_URL
     docker compose ps                         # wait for "healthy"
     scripts/demo_tunnel.sh                    # prints https://<random>.trycloudflare.com
 

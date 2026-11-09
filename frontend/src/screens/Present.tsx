@@ -169,6 +169,15 @@ export function PresentList() {
 
 const seconds = (v: number | null) => (v === null ? P.notRun : P.ms(v))
 
+/** A dash on the screen; why there is none is for staff who point at it. */
+function NoTranslation() {
+  return (
+    <span className={styles.muted} title={P.noTranslation} data-testid="no-translation">
+      <span aria-hidden>-</span><span className="visually-hidden">{P.noTranslation}</span>
+    </span>
+  )
+}
+
 function MemberTurnCard({ turn, asked }: { turn: PresentTurn; asked: PresentTurn | null }) {
   const ex = turn.extraction
   const read = ex?.model ? P.readBy.model : P.readBy.parsers
@@ -181,7 +190,7 @@ function MemberTurnCard({ turn, asked }: { turn: PresentTurn; asked: PresentTurn
           : <span className={styles.typed}><Badge>{P.typed}</Badge></span>}
         <dl className={styles.turnRows}>
           <div><dt>{P.transcript}</dt><dd lang="kik" className={styles.spoken}>{turn.asr_transcript ?? turn.text}</dd></div>
-          <div><dt>{P.translation}</dt><dd>{turn.translation ?? <span className={styles.muted}>{P.noTranslation}</span>}</dd></div>
+          <div><dt>{P.translation}</dt><dd>{turn.translation ?? <NoTranslation />}</dd></div>
           <div><dt>{P.extracted} <small>({read})</small></dt>
             <dd><pre className={styles.json}>{JSON.stringify(ex?.used ?? {}, null, 2)}</pre></dd></div>
         </dl>

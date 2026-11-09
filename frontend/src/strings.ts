@@ -861,7 +861,7 @@ const en = {
     translation: 'English',
     extracted: 'Extracted',
     readBy: { model: 'Gemini and parsers', parsers: 'Parsers only' },
-    noTranslation: 'None: Gemini is off, or did not answer',
+    noTranslation: 'No translation: Gemini is off, or did not answer',
     latency: { asr: 'ASR', translate_extract: 'Understand', evaluate: 'Decide', tts: 'Speak' } as Record<string, string>,
     ms: (ms: number) => (ms < 1000 ? `${ms} ms` : `${(ms / 1000).toFixed(1)} s`),
     notRun: 'n/a',
@@ -1770,6 +1770,13 @@ const en = {
     cancelCeiling: 'Cancel',
     loans: 'My loans',
     noLoans: 'No loans yet.',
+    // The same panels on the officer's member page, about the member rather than to them.
+    staff: {
+      profile: 'Profile', balances: 'Balances', guarantors: 'Guarantees', loans: 'Loans',
+      capacity: 'Can still guarantee', deposits: 'Deposits', myGuarantors: 'Their guarantors',
+      noGuarantors: 'Nobody has pledged to guarantee this member yet.', iGuarantee: 'Whom they guarantee',
+      noneGuaranteed: 'This member has not pledged to guarantee anyone.',
+    },
     loanStatus: { active: 'Active', repaid: 'Repaid', defaulted: 'Defaulted', reversed: 'Reversed' },
     loanLine: (date: string, months: number, instalment: number) => `Paid out ${date} · ${plural(months, 'month', 'months')} · ${ksh(instalment)} a month`,
     paid: (n: number) => `${ksh(n)} repaid so far`,

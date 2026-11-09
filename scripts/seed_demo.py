@@ -85,7 +85,7 @@ import soundfile as sf
 from sqlalchemy import event, select, text
 
 from chamapro import config
-from chamapro.api import audit, decisions, ledger, loans, self_service, storage
+from chamapro.api import audit, decisions, ledger, ledger_api, loans, self_service, storage
 from chamapro.api import schemas as s
 from chamapro.api.auth import hash_password
 from chamapro.api.db import (APPLICATION_STATUSES, SYSTEM_ROLE, SYSTEM_USERNAME, Applicant, Assessment, Base, Guarantor,
@@ -941,11 +941,9 @@ def seed_automatic_decisions(db, members: dict[str, Member], admin: User, office
         if then == "reverse":
             loan = db.get(ledger.LoanAccount, reply["loan_id"])
             ledger.lock_members(db, [loan.member_id])
-            entries = ledger.reverse_loan(db, loan, officer)
-            app = db.get(LoanApplication, reply["application_id"])
-            audit.record(db, officer, "loan.reverse", "loan_account", loan.id, entry_ids=[e.id for e in entries],
-                         application_id=app.id, reason="Paid out against the wrong account")
-            loans.set_status(db, app, "reversed", officer, loan_id=loan.id)
+            # The officers' own path: the entries, the audit row, and the guarantors told it is over.
+            ledger_api.apply_reversal(db, loan, db.get(LoanApplication, reply["application_id"]), officer,
+                                      "Paid out against the wrong account")
             db.commit()
         app = db.get(LoanApplication, reply["application_id"])
         out.append((app.id, m.member_no, ev.risk_class, app.status))

@@ -151,6 +151,16 @@ describe('following a conversation', () => {
     expect(screen.getByText('No money has moved.')).toBeTruthy()
   })
 
+  it('shows a dash where there is no translation, with the reason only as a tooltip', async () => {
+    vi.spyOn(api, 'presentDetail').mockResolvedValue(detail({ turns: [bot(1, explain()), { ...spoke(2), translation: null }, bot(3, AFTER)] }))
+    render(<ToastProvider><PresentOne id={5} /></ToastProvider>)
+    const turn = within(await screen.findByTestId('present-turn'))
+    const none = turn.getByTestId('no-translation')
+    expect(none.querySelector('[aria-hidden]')?.textContent).toBe('-')
+    expect(none.getAttribute('title')).toBe('No translation: Gemini is off, or did not answer')
+    expect(turn.queryByText(/^None:/)).toBeNull()
+  })
+
   it('finally shows the ledger entry and the balance change', async () => {
     vi.spyOn(api, 'presentDetail').mockResolvedValue(detail({ outcome: {
       decision: 'approved', application_id: 1, requested_kes: 60000, amount_kes: 45000, term_months: 12, instalment_kes: 3999, guarantors: ['A'],

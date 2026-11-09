@@ -9,7 +9,7 @@ see the figures. A fixed number of queries per page, however many rows there are
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session, joinedload
 
 from . import audit, comparator, ledger, loans, profiles
@@ -67,7 +67,10 @@ def loans_out(db: Session, m: Member) -> list[s.LoanOut]:
 
 
 def notices_out(db: Session, m: Member) -> list[s.NoticeOut]:
-    rows = db.scalars(select(MemberNotice).where(MemberNotice.member_id == m.id)
+    # "You are now guaranteeing" holds only while that loan is live; its ending has a notice of its own.
+    rows = db.scalars(select(MemberNotice).outerjoin(LoanAccount, LoanAccount.id == MemberNotice.loan_account_id)
+                      .where(MemberNotice.member_id == m.id,
+                             or_(MemberNotice.kind != "guarantee_started", LoanAccount.status == "active"))
                       .order_by(MemberNotice.created_at.desc(), MemberNotice.id.desc()).limit(NOTICES_SHOWN))
     return [s.NoticeOut.model_validate(n) for n in rows]
 

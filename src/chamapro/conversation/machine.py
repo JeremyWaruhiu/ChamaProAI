@@ -215,6 +215,8 @@ class Turn:
         accepted = None
         if ev.outcome == "approve_reduced":
             accepted = self_service.accepted_as_well(self.db, self.member, ev, self.snapshot)
+            # What they took is what is recorded and told: the Why sheet and /present explain that.
+            self.step.explain = explain(accepted)
         self.step.to_record = ToRecord(ev, accepted, COMMIT_KEY.format(cid), ACCEPT_KEY.format(cid), len(self.step.lines),
                                        len(self.step.actions), self.step.state, self.step.status)
         self.tell(accepted or ev)

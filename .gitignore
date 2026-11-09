@@ -81,3 +81,6 @@ data/demo.db
 data/demo_uploads/
 # Spoken bot turns, regenerable: data/** covers them too.
 data/tts_cache/
+
+# Backup demo video and its working files (regenerable, large)
+docs/demo/

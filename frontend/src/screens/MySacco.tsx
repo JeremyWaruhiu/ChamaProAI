@@ -17,6 +17,8 @@ import { t } from '../strings'
 import styles from './MySacco.module.css'
 
 const S = t.sacco
+/** The panels' words: to the member, or about them on the officer's member page. */
+const wordsFor = (staff: boolean) => (staff ? { ...S, ...S.staff } : S)
 
 // --- The member's page ---------------------------------------------------------------------
 
@@ -237,11 +239,11 @@ export function SaccoPanels({ view, options, staff = false, actions, onView }: {
         </Card>
       )}
       <ProfileCard profile={view.profile} options={options} staff={staff} actions={actions} />
-      <Card title={S.balances} delay={0.03}>
+      <Card title={wordsFor(staff).balances} delay={0.03}>
         <ul className={styles.accounts}>{view.accounts.map((a) => <Account key={a.kind} account={a} />)}</ul>
       </Card>
       <Guarantors view={view} staff={staff} onView={onView} />
-      <LoanHistory loans={view.loans} />
+      <LoanHistory loans={view.loans} staff={staff} />
     </div>
   )
 }
@@ -276,7 +278,7 @@ function ProfileCard({ profile: p, options, staff, actions }: {
   const groups = Object.entries(p.groups).filter(([, g]) => g.source)
   const missing = staff ? Object.entries(p.provenance ?? {}).filter(([, v]) => v === 'missing').length : 0
   return (
-    <Card title={S.profile} actions={actions}>
+    <Card title={wordsFor(staff).profile} actions={actions}>
       <p className={styles.confirmed}>
         <Icon name="clock" size={16} /> {p.confirmed_at ? S.lastConfirmed(formatDate(p.confirmed_at), p.days_since_confirmed ?? 0) : S.neverConfirmed}
       </p>
@@ -333,20 +335,21 @@ function Account({ account: a }: { account: AccountOut }) {
 
 function Guarantors({ view, staff, onView }: { view: SaccoView; staff: boolean; onView?: (view: SaccoView) => void }) {
   const g = view.guarantee
+  const W = wordsFor(staff)
   return (
-    <Card title={S.guarantors} delay={0.06}>
+    <Card title={W.guarantors} delay={0.06}>
       <DetailList items={[
-        [S.capacity, <strong key="c">{formatKes(g.capacity_kes)}</strong>],
-        [S.deposits, formatKes(g.deposits_kes)],
+        [W.capacity, <strong key="c">{formatKes(g.capacity_kes)}</strong>],
+        [W.deposits, formatKes(g.deposits_kes)],
         [S.guaranteedNow, formatKes(g.guaranteed_kes)],
         ...(g.committed_kes > 0 ? [[S.committed, formatKes(g.committed_kes)] as [string, string]] : []),
       ]} />
-      <h3 className={styles.subTitle}>{S.myGuarantors}</h3>
-      {view.my_guarantors.length === 0 ? <p className="subtle small">{S.noGuarantors}</p> : (
+      <h3 className={styles.subTitle}>{W.myGuarantors}</h3>
+      {view.my_guarantors.length === 0 ? <p className="subtle small">{W.noGuarantors}</p> : (
         <ul className={styles.people}>{view.my_guarantors.map((p) => <Person key={p.id} p={p} staff={staff} side="mine" />)}</ul>
       )}
-      <h3 className={styles.subTitle}>{S.iGuarantee}</h3>
-      {view.i_guarantee.length === 0 ? <p className="subtle small">{S.noneGuaranteed}</p> : (
+      <h3 className={styles.subTitle}>{W.iGuarantee}</h3>
+      {view.i_guarantee.length === 0 ? <p className="subtle small">{W.noneGuaranteed}</p> : (
         <ul className={styles.people}>{view.i_guarantee.map((p) => <Person key={p.id} p={p} staff={staff} side="theirs" onView={onView} />)}</ul>
       )}
     </Card>
@@ -418,9 +421,9 @@ function Ceiling({ p, onView }: { p: PledgeOut; onView?: (view: SaccoView) => vo
   )
 }
 
-function LoanHistory({ loans }: { loans: LoanOut[] }) {
+function LoanHistory({ loans, staff }: { loans: LoanOut[]; staff: boolean }) {
   return (
-    <Card title={S.loans} delay={0.09}>
+    <Card title={wordsFor(staff).loans} delay={0.09}>
       {loans.length === 0 ? <EmptyState icon="file" title={S.noLoans} /> : (
         <ul className={styles.loans}>
           {loans.map((x) => (

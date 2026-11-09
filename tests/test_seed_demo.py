@@ -505,6 +505,10 @@ def test_demo_db_covers_every_status_and_outcome(tmp_path):
         {seed_demo.SEED_EXTRACTION, self_service.PROFILE_NOT_EXTRACTED}
     days = col("SELECT DISTINCT date(created_at) FROM loan_applications")
     assert len(days) >= 8                                   # spread over weeks, not one moment
+    # The reversed payout told its guarantors it is over, as an officer's reversal does.
+    told = lambda kind: sorted(col("SELECT n.member_id FROM member_notices n JOIN loan_accounts l "  # noqa: E731
+                                   f"ON l.id = n.loan_account_id WHERE l.status = 'reversed' AND n.kind = '{kind}'"))
+    assert told("guarantee_started") and told("guarantee_ended") == told("guarantee_started")
     con.close()
 
     stored = b"".join(p.read_bytes() for p in tmp_path.glob("demo.db*"))
