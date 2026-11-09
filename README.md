@@ -65,6 +65,8 @@ docs/screenshots/                     screenshots of the main screens, desktop a
 tests/                                API and script tests (pytest)
 Dockerfile, docker-compose.yml        one-image deployment, CPU or Intel GPU (see Docker)
 docker-compose.supabase.yml           override: the containers on Supabase instead of SQLite
+deploy/hf-space/                      Hugging Face Docker Space: CPU image, model fetch, Space card (see Deployment)
+scripts/reset_passwords.py            new random passwords for named or seeded users, printed once
 scripts/demo_tunnel.sh                public https URL for an online demo (see Online demo)
 scripts/explore_finaccess.py          browse the FinAccess microdata
 ```
@@ -1291,6 +1293,167 @@ compensating entries, so rebuild the database before the final run if My SACCO w
   the parsers go on alone, and a Kikuyu reply has no English translation to show.
 - *A voice reply is misheard:* type the answer in the box below the button.
 - *An amount that is not in the script:* its sentence is made on the spot, about 3 s on the CPU.
+
+## Deployment
+
+A Hugging Face Docker Space on the free CPU tier (2 vCPU, 16 GB RAM), against the Supabase
+database. Everything for it is in `deploy/hf-space/`:
+
+```
+Dockerfile          CPU image: frontend built inside, torch from PyTorch's CPU index, user 1000, port 7860
+README.md           the Space card: metadata (sdk: docker, app_port: 7860) and the secrets it needs
+start.sh            fetch the private models, then start uvicorn
+fetch_models.py     the classifier and the OpenVINO INT8 Paza from a private model repo, with HF_TOKEN
+assemble.sh         stage the Space repo in build/hf-space: these files plus src/, scripts/, frontend/
+```
+
+Nothing private is in the Space repo or the image. `models/classifier.joblib`, its meta file
+and `models/paza-ov-int8` live in a private model repo (`<you>/chamapro-private`); at start the
+container downloads them with the `HF_TOKEN` secret into `~/.cache/chamapro/models`, which
+`/home/user/app/models` links to. Paza runs on OpenVINO's CPU device (torch only if that
+fails). English Whisper (torch) and the MMS voices come from the public hub. Paza, English
+Whisper, the classifier and the voices are warmed in the background once the API is up
+(`ASR_WARM_ENGLISH=1`: the whole app peaks at about 4.4 GB of the 16 GB). The speech cache
+is ephemeral. Every model's CPU threads follow the container's CPU quota (2), not the host's
+core count (`CPU_THREADS` overrides it): left at the host's count, Paza was 7 times slower.
+
+**The Space's own embedded view cannot sign anyone in.** huggingface.co shows the app in an
+iframe from `*.hf.space`, a different site, and browsers do not send the `SameSite=Strict`
+session cookie there. Share and open the direct address, `https://<you>-chamapro.hf.space`.
+On that address the cookie is `Secure` (the host is not localhost, and uvicorn takes https
+from the proxy) and `SameSite=Strict` works as it does everywhere else. Loosening the
+cookie to `SameSite=None` would make the frame work and drop the app's CSRF protection.
+
+### Order of steps
+
+The API refuses to start on a database whose schema is not at the code's head, and never
+migrates PostgreSQL itself, so the migration goes first. Steps 4 and 5 (the model repo and
+the Space) can happen at any time; the Space only starts once steps 1 and 6 are done.
+
+**1. Migration 0008 on Supabase** (pins `chamapro_reject_change()`'s search path: Supabase's
+"function search path mutable" warning). From the project folder, with `.env` pointing at
+Supabase (or `DATABASE_URL` set to the session pooler string):
+
+    .venv/bin/alembic current                      # 0007
+    .venv/bin/alembic upgrade 0007:0008 --sql      # the SQL, to read first; changes nothing
+    .venv/bin/alembic upgrade 0008
+    .venv/bin/alembic current                      # 0008 (head)
+
+It is one `ALTER FUNCTION public.chamapro_reject_change() SET search_path = ''` and the version
+row, in one transaction; the function body names nothing in any schema. Then *Advisors →
+Security Advisor → Rerun*: the warning goes. A local server or `docker compose` against
+Supabase needs the new code from then on.
+
+**2. New passwords** for the demo logins, before the link is shared:
+
+    .venv/bin/python scripts/reset_passwords.py --seeded       # or name them: w.kamau n.mwangi ...
+
+It shows the database and the users, asks you to type the host back, then prints each new
+password once. Every reset user is signed out everywhere. Untagged users (`seed_tag` empty)
+are left alone by `--seeded`: name them to reset them.
+
+**3. The Supabase database password.** *Project Settings → Database → Reset database
+password*. Then put the new password in `.env`'s `DATABASE_URL`, and use the new session pooler
+string for the Space's `DATABASE_URL` secret in step 6. Anything still using the old string
+(a local server, `docker compose`) stops connecting.
+
+**4. The private model repo.** Log in with a **write** token (the CLI asks for it without
+echoing it, and keeps it in `~/.cache/huggingface/token`, not in this project). Stage the
+files as hard links in `build/` (ignored by git), then upload; `upload-large-folder` keeps
+its progress in the folder, so after a dropped connection the same command carries on:
+
+    .venv/bin/hf auth login
+    U=<your-hf-username>
+    .venv/bin/hf repo create $U/chamapro-private --repo-type model --private
+    mkdir -p build/hf-private/paza-ov-int8
+    ln -f models/classifier.joblib models/classifier_meta.json build/hf-private/
+    find models/paza-ov-int8 -maxdepth 1 -type f -exec ln -f {} build/hf-private/paza-ov-int8/ \;
+    .venv/bin/hf upload-large-folder $U/chamapro-private build/hf-private --repo-type model --private
+
+About 830 MB: 37 minutes at 0.4 MB/s. `paza-ov-int8/encoder/` is left out: it is a compiled
+cache for this laptop's GPU, not used on a CPU.
+
+**5. The Space.** Public, so the link works for anyone; its files are the same source as
+this repository, and every key is a secret. A Docker Space on the free cpu-basic hardware
+needs a Hugging Face **PRO** subscription on the owner's account: without one, creating it
+fails with `402 Payment Required` (as of November 2026). It builds on Hugging Face on every push:
+
+    .venv/bin/hf repo create $U/chamapro --repo-type space --space_sdk docker
+    deploy/hf-space/assemble.sh             # stages build/hf-space; lists files git does not track yet
+    .venv/bin/hf upload $U/chamapro build/hf-space . --repo-type space --delete "*"
+
+`--delete "*"` removes files from the Space that are no longer in the staged folder. Until
+step 6 is done the container stops at once, saying `HF_TOKEN is not set`.
+
+**6. The Space's secrets.** *Settings → Variables and secrets → New secret*, one per line of the
+Space card: `DATABASE_URL` (the session pooler string from step 3), `SUPABASE_URL`,
+`SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_BUCKET`, `GEMINI_API_KEY`, `PILOT_INVITE_CODE`,
+`GOOGLE_CLIENT_ID` and `HF_TOKEN` (a separate fine-grained **read** token with access to
+`$U/chamapro-private` is enough; not the write token). Saving a secret restarts the Space.
+
+**7. Google sign-in.** In Google Cloud Console, *APIs & Services → Credentials →* the OAuth
+client whose ID is `GOOGLE_CLIENT_ID` → *Authorised JavaScript origins → Add URI*:
+`https://<you>-chamapro.hf.space` (lower case, no trailing slash). It can take a few minutes to apply.
+
+**8. Check.** The Space's *Logs* show the model download, `Kikuyu ASR ready`, then
+`ASR warmed for kik` and `for en`, and `speech cache: 11 fixed lines ready`. Then:
+
+    curl -s https://$U-chamapro.hf.space/api/health      # "status": "ok", asr_device CPU
+
+### Building the Space image locally
+
+On SQLite and local audio, never Supabase; only the private files mounted (`build/hf-private`
+from step 4, as the Space downloads them) and the hub cache read-only, so nothing is
+downloaded. A demo database built for the purpose, never `data/demo.db` itself:
+
+    deploy/hf-space/assemble.sh
+    docker build -t chamapro-space:local build/hf-space
+    mkdir -p /tmp/space/data /tmp/space/uploads
+    DATABASE_URL=sqlite:////tmp/space/data/demo.db STORAGE_BACKEND=local CHAMAPRO_UPLOADS=/tmp/space/uploads \
+        .venv/bin/python scripts/seed_demo.py --demo-db /tmp/space/data/demo.db
+    docker run --rm -p 127.0.0.1:7860:7860 --cpus 2 --memory 16g \
+        -e DATABASE_URL=sqlite:////home/user/app/data/demo.db -e STORAGE_BACKEND=local \
+        -e CONVERSATION_GEMINI_LIVE=0 -e HF_HUB_OFFLINE=1 \
+        -v /tmp/space/data:/home/user/app/data -v /tmp/space/uploads:/home/user/.cache/chamapro/uploads \
+        -v "$PWD/build/hf-private:/home/user/.cache/chamapro/models:ro" \
+        -v "$PWD/.hf_cache:/home/user/.cache/huggingface:ro" \
+        chamapro-space:local
+
+The first build takes about 40 minutes here (torch and the rest of the lock: 2.4 GB); after
+that, a source change rebuilds in seconds.
+
+### Measured
+
+Locally, 2026-11-09, on an Intel Core Ultra 7 256V under WSL2, with the container held to 2
+CPUs (`--cpus 2`) as on the free tier; SQLite, local audio, Gemini off (so no Gemini time in
+any reply). Each figure is one run.
+
+| | |
+|---|---|
+| Image | 3.9 GB uncompressed |
+| `/api/health` answers | 34 s after `docker run` (models already on disk) |
+| Everything warmed (Paza, English Whisper, classifier, voices) | 129 s |
+| Memory after warm-up | 4.0 GB (peak 4.2 GB); 4.4 GB peak after English voice replies |
+| Typed reply | 0.02 to 5.8 s: under 0.1 s when the next line is in the speech cache, 1 to 5.8 s when it names the member's own figures and is spoken there and then |
+| Kikuyu voice reply (Paza INT8, OpenVINO CPU) | 11 s for a 4.2 s answer |
+| English voice reply (Whisper turbo, torch CPU) | 25 to 26 s; 32 s for the first |
+
+Wanjiru's conversation completes to an approved payout both typed and by English voice. The
+voice clips were made with the MMS voices, which Paza does not always hear: a 1-second
+synthetic "Ĩĩ" was transcribed as a long run of words and took 38 s, the decoder running to
+its cap. Four Kikuyu clips from the corpus took 15 to 19 s each on the host on 2 threads,
+and one took 19 s in the container; the container's transcripts were identical to the host's. On the Space, the first start also downloads about
+830 MB of private models and 1.6 GB of English Whisper; a Space's CPUs may be slower than
+these.
+
+### Limits
+
+- The free tier sleeps after 48 hours without visitors; the next visit waits for a full start.
+- Sign-up is rate-limited per address. Behind Hugging Face's proxy the address comes from
+  `X-Forwarded-For` (`FORWARDED_ALLOW_IPS=*`), whose first entry a client can set; the invite
+  code still applies.
+- **The demo database's members are derived from licensed FinAccess microdata** ([Online demo](#online-demo)):
+  check the licence before the link is public for longer than a presentation.
 
 ## Licence and third-party components
 

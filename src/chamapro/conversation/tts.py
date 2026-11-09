@@ -49,7 +49,10 @@ class VitsEngine(TTSEngine):
 
     def _load(self) -> None:
         if self._model is None:
+            import torch
             from transformers import AutoTokenizer, VitsModel
+            if config.CPU_THREADS:      # process-wide; the container's quota, not the host's cores
+                torch.set_num_threads(config.CPU_THREADS)
             log.info("loading TTS model %s on %s", self.model_name, self.device)
             self._tokenizer = AutoTokenizer.from_pretrained(self.model_name)
             self._model = VitsModel.from_pretrained(self.model_name).to(self.device).eval()

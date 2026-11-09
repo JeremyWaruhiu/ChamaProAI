@@ -59,13 +59,15 @@ def openvino_devices():
     return ov.Core().available_devices
 
 
-def load_openvino(model_dir, device):
-    """The same pipeline over an OpenVINO export (scripts/export_openvino.py)."""
+def load_openvino(model_dir, device, threads=None):
+    """The same pipeline over an OpenVINO export (scripts/export_openvino.py). threads caps
+    the CPU device's inference threads (default: every core the host has)."""
     from optimum.intel import OVModelForSpeechSeq2Seq
     from transformers import AutoProcessor, pipeline
     model_dir = str(model_dir)  # optimum treats the id as a string
     proc = AutoProcessor.from_pretrained(model_dir)
-    model = OVModelForSpeechSeq2Seq.from_pretrained(model_dir, device=device)
+    ov_config = {"INFERENCE_NUM_THREADS": str(threads)} if threads and device.upper() == "CPU" else None
+    model = OVModelForSpeechSeq2Seq.from_pretrained(model_dir, device=device, ov_config=ov_config)
     return pipeline("automatic-speech-recognition", model=model,
                     tokenizer=proc.tokenizer, feature_extractor=proc.feature_extractor)
 
@@ -84,16 +86,23 @@ def ov_source(model_dir):
 
 
 def load_asr(model_name, engine="openvino", device="GPU", ov_dir=None, log=print,
-             fallback=True):
+             fallback=True, threads=None):
     """Load ASR on the requested engine and device, falling back if need be.
 
     OpenVINO on a missing GPU falls back to the CPU; a missing OpenVINO export
     falls back to torch on model_name. Each fallback is logged, and the result
     names what was used. With fallback=False the first failure raises instead.
+    threads caps the CPU threads inference uses: OpenVINO's CPU device, and torch's
+    process-wide pool on either engine, since the OpenVINO pipeline's decoding loop runs
+    in torch too. Left at the host's core count under a container's smaller CPU quota,
+    that pool is throttled on every token: 7x slower on 2 of 8 cores.
     """
     device = device.upper()
     if engine not in ENGINES:
         raise ValueError(f"unknown ASR engine {engine!r}; use one of {ENGINES}")
+    if threads:
+        import torch
+        torch.set_num_threads(threads)
     if engine == "openvino":
         if not ov_exported(ov_dir):
             if not fallback:
@@ -108,13 +117,13 @@ def load_asr(model_name, engine="openvino", device="GPU", ov_dir=None, log=print
                     log("ASR: OpenVINO reports no GPU; falling back to CPU")
                     device = "CPU"
                 try:
-                    pipe = load_openvino(ov_dir, device)
+                    pipe = load_openvino(ov_dir, device, threads)
                 except Exception as e:
                     if device == "CPU" or not fallback:
                         raise
                     log(f"ASR: GPU failed ({type(e).__name__}: {e}); falling back to CPU")
                     device = "CPU"
-                    pipe = load_openvino(ov_dir, device)
+                    pipe = load_openvino(ov_dir, device, threads)
                 log(f"ASR: engine=openvino device={device} model={ov_dir}")
                 return ASR(pipe, "openvino", device, str(ov_dir), ov_source(ov_dir))
             except Exception as e:

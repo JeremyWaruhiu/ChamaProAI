@@ -28,10 +28,11 @@ def export(tmp_path):
 def engines(monkeypatch):
     """Stub both loaders; .asked records what was loaded, .broken lists
     OpenVINO devices that fail to compile."""
-    st = SimpleNamespace(asked=[], broken=set())
+    st = SimpleNamespace(asked=[], broken=set(), threads=[])
 
-    def ov(model_dir, device):
+    def ov(model_dir, device, threads=None):
         st.asked.append(("openvino", device))
+        st.threads.append(threads)
         if device in st.broken:
             raise RuntimeError(f"{device} compile failed")
         return f"ov-{device}"
@@ -58,6 +59,17 @@ def test_openvino_on_the_gpu(engines, export):
     assert (asr.engine, asr.device, asr.pipe) == ("openvino", "GPU", "ov-GPU")
     assert asr.label == "microsoft/paza-whisper-large-v3-turbo (openvino GPU)"
     assert logs == [f"ASR: engine=openvino device=GPU model={export}"]
+
+
+def test_the_thread_cap_reaches_openvino_and_torch(engines, export, monkeypatch):
+    import torch
+    set_to = []
+    monkeypatch.setattr(torch, "set_num_threads", set_to.append)
+    load("openvino", "CPU", export, threads=2)
+    assert engines.asked == [("openvino", "CPU")] and engines.threads == [2]
+    assert set_to == [2]            # the OpenVINO pipeline decodes in torch as well
+    load("torch", "CPU", export)
+    assert set_to == [2]            # no cap asked for: torch keeps its own default
 
 
 def test_no_gpu_falls_back_to_cpu(engines, export, monkeypatch):

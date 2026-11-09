@@ -62,9 +62,11 @@ def load_asr() -> None:
     """Load the Kikuyu model on the configured engine and device; any
     fallback is logged and shows in /api/health."""
     global _asr
-    log.info("loading Kikuyu ASR: engine=%s device=%s", config.ASR_ENGINE, config.ASR_DEVICE)
+    log.info("loading Kikuyu ASR: engine=%s device=%s threads=%s", config.ASR_ENGINE, config.ASR_DEVICE,
+             config.CPU_THREADS or "default")
     _asr = transcribe.load_asr(config.ASR_MODEL, config.ASR_ENGINE, config.ASR_DEVICE,
-                               config.ASR_OV_MODEL_DIR, log=log.info)
+                               config.ASR_OV_MODEL_DIR, log=log.info,
+                               threads=config.CPU_THREADS)
     log.info("Kikuyu ASR ready: %s", _asr.label)
 
 
@@ -76,7 +78,8 @@ def english_asr() -> transcribe.ASR:
             log.info("loading English ASR: engine=%s device=%s", config.ASR_ENGINE, config.ASR_DEVICE)
             try:
                 _asr_en = transcribe.load_asr(config.ASR_EN_MODEL, config.ASR_ENGINE, config.ASR_DEVICE,
-                                              config.ASR_EN_OV_MODEL_DIR, log=log.info)
+                                              config.ASR_EN_OV_MODEL_DIR, log=log.info,
+                                              threads=config.CPU_THREADS)
             except Exception as e:
                 _asr_en_error = f"{type(e).__name__}: {e}"
                 raise

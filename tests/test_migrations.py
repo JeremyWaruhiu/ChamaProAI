@@ -60,7 +60,7 @@ def legacy(tmp_path):
 def test_fresh_database_reaches_head(tmp_path):
     engine = create_engine(f"sqlite:///{tmp_path / 'new.db'}")
     init_db(engine)
-    assert schema_revision(engine) == head_revision() == "0007"
+    assert schema_revision(engine) == head_revision() == "0008"
     names = set(inspect(engine).get_table_names())
     assert {"members", "loan_applications", "guarantors", "audit_log", "alembic_version"} <= names
     assert not list(tmp_path.glob("*.bak"))                  # nothing to back up
@@ -80,7 +80,7 @@ def test_legacy_rows_survive_exactly(legacy, tmp_path):
         assert [r[:len(cols)] for r in new_rows if r[1] != "system"] == rows, t
     assert after["decisions"][1][len(before["decisions"][1]):] == \
         ["outcome", "approved_amount_kes", "guarantors_required", "officer_notes", "member_message", "policy_version"]
-    assert len(list(tmp_path.glob("chamapro.db.pre-0007-*.bak"))) == 1   # backed up once
+    assert len(list(tmp_path.glob("chamapro.db.pre-0008-*.bak"))) == 1   # backed up once
 
 
 def test_backup_holds_the_pre_migration_database(legacy, tmp_path):
@@ -434,7 +434,7 @@ def test_0006_runs_through_init_db_with_rows_pointing_at_the_rebuilt_tables(tmp_
     filled_0005(path)
     engine = create_engine(f"sqlite:///{path}")
     init_db(engine)
-    assert schema_revision(engine) == "0007"
+    assert schema_revision(engine) == "0008"
     con = sqlite3.connect(path)
     assert con.execute("SELECT count(*) FROM guarantors WHERE loan_account_id = 1").fetchone() == (1,)
     con.close()
@@ -499,3 +499,25 @@ def test_postgres_sql_covers_0006_offline():
     assert "DROP CONSTRAINT ck_account_entries_sign" in sql and "loan_reversal" in sql
     assert "CREATE TRIGGER account_entries_no_update" in sql
     assert "'system'" in sql
+
+
+def test_postgres_sql_for_0008_pins_the_function_search_path_offline():
+    out = io.StringIO()
+    with redirect_stdout(out):
+        command.upgrade(alembic_config("postgresql+psycopg://u:p@localhost/x"), "0007:0008", sql=True)
+    sql = out.getvalue()
+    assert "ALTER FUNCTION public.chamapro_reject_change() SET search_path = ''" in sql
+    assert "UPDATE alembic_version SET version_num='0008' WHERE alembic_version.version_num = '0007'" in sql
+    full = io.StringIO()
+    with redirect_stdout(full):
+        command.upgrade(alembic_config("postgresql+psycopg://u:p@localhost/x"), "head", sql=True)
+    assert "LANGUAGE plpgsql SET search_path = '' AS $$" in full.getvalue()
+
+
+def test_0008_is_a_no_op_on_sqlite(tmp_path):
+    url = f"sqlite:///{tmp_path / 'n.db'}"
+    command.upgrade(alembic_config(url), "0007")
+    command.upgrade(alembic_config(url), "0008")
+    command.downgrade(alembic_config(url), "0007")
+    command.upgrade(alembic_config(url), "head")
+    assert schema_revision(create_engine(url)) == "0008"

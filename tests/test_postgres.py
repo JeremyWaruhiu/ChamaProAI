@@ -884,3 +884,46 @@ def test_demo_postgres_builds_rebuilds_and_the_reset_works_on_it(corpus, tmp_pat
                 assert tags == set(presenter.DEMO_TAGS)
         finally:
             eng.dispose()
+
+
+def proconfig(conn) -> list[str] | None:
+    return conn.execute(text("SELECT p.proconfig FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace "
+                             "WHERE n.nspname = 'public' AND p.proname = 'chamapro_reject_change'")).scalar_one()
+
+
+def test_0008_pins_the_trigger_function_search_path_from_where_supabase_is():
+    """Supabase is at 0007 with the function as 0001 made it (no search_path); 0008 pins it to
+    empty, the guards still refuse, whatever the caller's search_path, and downgrade undoes it."""
+    with scratch_database() as url:
+        cfg = alembic_config(url)
+        command.upgrade(cfg, "0007")
+        eng = create_engine(url)
+        try:
+            with eng.begin() as c:   # as every revision up to 0007 left it on Supabase
+                c.exec_driver_sql("ALTER FUNCTION public.chamapro_reject_change() RESET search_path")
+                assert proconfig(c) is None
+            command.upgrade(cfg, "0008")
+            with eng.connect() as c:
+                assert proconfig(c) == ['search_path=""']
+                assert c.execute(text("SELECT version_num FROM alembic_version")).scalar() == "0008"
+            # The function resolves nothing through the caller: a hostile search_path changes nothing.
+            with eng.connect() as c:
+                c.exec_driver_sql("CREATE SCHEMA shadow")
+                c.exec_driver_sql("SET search_path = shadow, public")
+                c.execute(text("INSERT INTO audit_log (action, entity, details, created_at) "
+                               "VALUES ('t', 't', '{}', now())"))
+                with pytest.raises(IntegrityError, match="audit_log is append-only"):
+                    c.execute(text("UPDATE audit_log SET action = 'x'"))
+                c.rollback()
+            command.downgrade(cfg, "0007")
+            with eng.connect() as c:
+                assert proconfig(c) is None
+        finally:
+            eng.dispose()
+
+
+def test_a_fresh_database_creates_the_function_with_its_search_path_pinned(engine):
+    with engine.connect() as c:
+        assert proconfig(c) == ['search_path=""']
+        assert c.execute(text("SELECT count(*) FROM pg_trigger WHERE tgfoid = "
+                              "'public.chamapro_reject_change()'::regprocedure")).scalar() >= 15

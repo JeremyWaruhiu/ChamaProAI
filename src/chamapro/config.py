@@ -151,6 +151,31 @@ CONVERSATION_REPLIES_PER_HOUR: int = int(os.getenv("CONVERSATION_REPLIES_PER_HOU
 CONVERSATION_GEMINI_LIVE: bool = os.getenv("CONVERSATION_GEMINI_LIVE") == "1"
 CONVERSATION_GEMINI_SECONDS: float = float(os.getenv("CONVERSATION_GEMINI_SECONDS") or 8)
 
+# --- CPU threads ---------------------------------------------------------------
+def _cgroup_cpus() -> int | None:
+    """The CPUs a container's quota allows (cgroup v2 cpu.max, else v1), rounded up; None
+    without a quota. os.cpu_count() reports the host's cores even when the container may
+    use two of them, and a thread pool that size slows every model down severalfold."""
+    try:
+        quota, period = Path("/sys/fs/cgroup/cpu.max").read_text().split()[:2]
+    except (OSError, ValueError):
+        try:
+            quota = Path("/sys/fs/cgroup/cpu/cpu.cfs_quota_us").read_text().strip()
+            period = Path("/sys/fs/cgroup/cpu/cpu.cfs_period_us").read_text().strip()
+        except OSError:
+            return None
+    if quota in ("max", "-1"):
+        return None
+    try:
+        return max(1, -(-int(quota) // int(period)))
+    except (ValueError, ZeroDivisionError):
+        return None
+
+
+# Threads for each model's inference (OpenVINO, torch): CPU_THREADS, else the container's
+# CPU quota, else None, which leaves each library to its own default (every core).
+CPU_THREADS: int | None = int(os.getenv("CPU_THREADS") or 0) or _cgroup_cpus()
+
 # --- Speech recognition warm-up ----------------------------------------------
 # After the Kikuyu ASR loads, it transcribes one clip in the background, and the classifier
 # scores once, so a member's first reply waits for neither. 0 turns both off. The English

@@ -10,9 +10,11 @@ from __future__ import annotations
 
 from alembic import op
 
+# An empty search path (0008): the body names nothing that lives in a schema, and
+# CREATE OR REPLACE would otherwise clear the setting each time another table is guarded.
 PG_FUNCTION = """
 CREATE OR REPLACE FUNCTION chamapro_reject_change() RETURNS trigger
-LANGUAGE plpgsql AS $$
+LANGUAGE plpgsql SET search_path = '' AS $$
 BEGIN
     RAISE EXCEPTION '%', TG_ARGV[0] USING ERRCODE = 'integrity_constraint_violation';
 END

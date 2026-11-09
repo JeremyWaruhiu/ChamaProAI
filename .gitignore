@@ -84,3 +84,4 @@ data/tts_cache/
 
 # Backup demo video and its working files (regenerable, large)
 docs/demo/
+build/
